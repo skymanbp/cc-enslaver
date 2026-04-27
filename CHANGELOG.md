@@ -11,8 +11,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Hard-layer `PreToolUse` blocks**
-  - Reject `Edit` / `Write` against a file the agent has not `Read` in this session.
+- **Bash bypass-pattern guard**
   - Reject `Bash` commands containing `--no-verify`, `git push --force`, `rm -rf /`,
     `chmod -R 777`, or other documented bypass patterns unless an explicit
     justification is supplied.
@@ -20,14 +19,57 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Detect "I edited X" / "I created Y" claims in the agent's last message and
     verify the corresponding file mtime / git status before allowing Stop.
   - Requires a one-shot guard to avoid infinite Stop loops.
-- **Verification trace persistence**
-  - Persist the set of files the agent has actually read across sessions
-    (per-project `.claude/local/anti-laziness/read-trace.json`).
+- **Session state GC**
+  - Periodically prune session JSON files older than N days from
+    `${CLAUDE_PLUGIN_DATA}/sessions/`.
 - **English mirror of `rules/`**
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
-- **Marketplace manifest**
-  - Add `.claude-plugin/marketplace.json` so the repo can be installed directly via
-    Claude Code's marketplace mechanism without a separate marketplace repo.
+
+---
+
+## [0.2.0] — 2026-04-27
+
+The hard layer goes live. Soft prompt-injection (v0.1.0) is now backed by an
+actual gate: the agent cannot Edit a file it has not first Read, and any tool
+call against a file is recorded as "known content" for the rest of the session.
+
+### Added
+
+- **`hooks/scripts/lib/state.py`** — per-session JSON state at
+  `${CLAUDE_PLUGIN_DATA}/sessions/<session_id>.json` (with documented fallbacks
+  to `${CLAUDE_PROJECT_DIR}/.claude/local/anti-laziness/sessions/` and
+  `~/.claude/local/anti-laziness/sessions/`). Path normalisation via
+  `os.path.realpath` + `os.path.normcase` for case-insensitive Windows
+  comparison.
+- **`hooks/scripts/read_guard.py`** — single script with two roles:
+  - `PostToolUse` matcher `Read|Write`: append touched file to session state.
+  - `PreToolUse` matcher `Edit|Write`: emit
+    `{"hookSpecificOutput": {"permissionDecision": "deny", ...}}` when the
+    target already exists on disk but has not been recorded for this session.
+    Allows new-file creation (`os.path.exists` check). Failing-open: any
+    exception logs to stderr but lets the tool call proceed.
+- **`.claude-plugin/marketplace.json`** — the plugin can now be installed
+  locally via `/plugin marketplace add <path-to-repo>` and then
+  `/plugin install anti-laziness@<marketplace-name>`.
+
+### Changed
+
+- **`hooks/hooks.json`** — registers four events now: `SessionStart`,
+  `UserPromptSubmit`, `PostToolUse` (matcher `Read|Write`), `PreToolUse`
+  (matcher `Edit|Write`).
+- **`.claude-plugin/plugin.json`** — version bumped `0.1.0 → 0.2.0`.
+- **`docs/ARCHITECTURE.md`** — Layer 1 description, data-flow diagram, and the
+  connected-files matrix updated to cover `read_guard.py` + `lib/state.py`.
+- **`README.md`** — hook table now lists all four events; install section
+  documents the `/plugin marketplace add` flow.
+- **`CLAUDE.md`** — §6 "当前版本" reflects v0.2.0.
+
+### Removed (from Unreleased roadmap)
+
+- "Hard-layer `PreToolUse` blocks" (read-before-edit half) — implemented here.
+- "Marketplace manifest" — implemented here.
+- "Verification trace persistence" — replaced by per-session state. Cross-session
+  persistence is intentionally out of scope (session boundaries are meaningful).
 
 ---
 
@@ -69,5 +111,6 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skymanbp/agent-rigor/releases/tag/v0.1.0

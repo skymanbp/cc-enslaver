@@ -1,0 +1,42 @@
+{
+  "name": "agent-rigor",
+  "owner": {
+    "name": "skymanbp"
+  },
+  "metadata": {
+    "description": "Single-plugin marketplace exposing the anti-laziness discipline plugin.",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "anti-laziness",
+      "source": "./",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior.",
+      "version": "0.2.0",
+      "author": {
+        "name": "skymanbp"
+      },
+      "homepage": "https://github.com/skymanbp/agent-rigor",
+      "repository": "https://github.com/skymanbp/agent-rigor",
+      "license": "MIT",
+      "keywords": [
+        "anti-laziness",
+        "discipline",
+        "systematic-thinking",
+        "verification",
+        "root-cause",
+        "rules",
+        "hooks",
+        "code-quality",
+        "llm-agnostic"
+      ],
+      "category": "code-quality",
+      "tags": [
+        "claude-code",
+        "plugin",
+        "discipline",
+        "verification"
+      ]
+    }
+  ]
+}

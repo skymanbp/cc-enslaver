@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
 中文用户请直接看 → [中文说明](#中文说明)
@@ -26,12 +26,13 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 `anti-laziness` ships a **layered defense** against all six:
 
 1. **Soft layer (prompt injection)** — at session start and before every user prompt, the plugin injects a concise reminder of the discipline rules into the agent's context.
-2. **Active layer (slash commands)** — `/anti-laziness:checklist` and `/anti-laziness:verify` let the user (or the agent itself) trigger a structured checklist or independent verification pass on demand.
-3. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
-4. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
-5. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
+2. **Hard layer (PreToolUse blocks)** — at the moment the agent calls `Edit` or `Write`, the plugin checks whether the target file has been `Read` in this session. If the file already exists on disk and was never read, the call is **denied** with a precise recovery instruction (rule 04 enforcement). New file creation is allowed.
+3. **Active layer (slash commands)** — `/anti-laziness:checklist` and `/anti-laziness:verify` let the user (or the agent itself) trigger a structured checklist or independent verification pass on demand.
+4. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
+5. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
+6. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
 
-> **Future (not yet in v0.1):** hard-layer `PreToolUse` blocks — e.g., reject an `Edit` call against a file the agent has not `Read` in this session.
+> **Future (roadmap):** Bash bypass-pattern blocking (`--no-verify`, `git push --force`, etc.); Stop-hook claim verification.
 
 ---
 
@@ -62,18 +63,25 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a layer-by-layer walkthro
 
 ### As a Claude Code plugin (recommended)
 
-```bash
-# 1) Clone this repo somewhere
-git clone https://github.com/skymanbp/agent-rigor.git ~/.claude/plugins/anti-laziness
+The repo ships with `.claude-plugin/marketplace.json`, so it can be registered as a single-plugin marketplace and installed via Claude Code's `/plugin` UI.
 
-# 2) In Claude Code, add the plugin via your settings or marketplace mechanism.
-#    The manifest is at .claude-plugin/plugin.json — Claude Code will discover it.
-#    Note: the GitHub repo is `agent-rigor`, but the plugin's internal name is
-#    `anti-laziness` (as declared in plugin.json), so slash commands surface as
-#    `/anti-laziness:<command>`.
+```bash
+# 1) Clone this repo somewhere — the path you choose becomes the marketplace root.
+git clone https://github.com/skymanbp/agent-rigor.git /path/to/agent-rigor
 ```
 
-> Hook scripts require `python` on PATH. The plugin is tested with Python 3.13.
+Then in any Claude Code session (CLI or IDE):
+
+```
+/plugin marketplace add /path/to/agent-rigor
+/plugin install anti-laziness@agent-rigor
+```
+
+The plugin's internal name is `anti-laziness` (declared in `plugin.json`), so slash commands surface as `/anti-laziness:checklist`, `/anti-laziness:verify`, and the auto-invoked `systematic-debug` skill is available as `systematic-debug`. The GitHub repo name `agent-rigor` is the marketplace identifier.
+
+To verify: `/plugin` → "Installed" tab should list `anti-laziness@agent-rigor`.
+
+> **Requirements:** Python on PATH (tested with Python 3.13). The hook scripts use only the standard library — no third-party packages.
 
 ### As a rule pack for any other LLM
 
@@ -91,22 +99,21 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 
 ## How it works
 
-### Hooks injected (Claude Code only)
+### Hooks (Claude Code only)
 
-| Event | What gets injected | Source |
-|---|---|---|
-| `SessionStart` | Full discipline summary | [`prompts/session-start.md`](prompts/session-start.md) |
-| `UserPromptSubmit` | Compact pre-turn reminder | [`prompts/user-prompt.md`](prompts/user-prompt.md) |
+| Event | Matcher | Behavior | Implementation |
+|---|---|---|---|
+| `SessionStart` | — | Inject full discipline summary | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
+| `UserPromptSubmit` | — | Inject compact pre-turn reminder | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
+| `PostToolUse` | `Read\|Write` | Record touched file in session state | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
+| `PreToolUse` | `Edit\|Write` | Deny if target exists but never read this session | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 
-Both hooks call the same Python script with a different `--event` argument:
+Two scripts:
 
-```bash
-python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject_context.py" --event SessionStart
-```
+- **`inject_context.py`** — soft layer. Emits `hookSpecificOutput.additionalContext` from prompt files in [`prompts/`](prompts/). Always allows.
+- **`read_guard.py`** — hard layer. Maintains per-session state at `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json` (Windows-safe path normalization). Failing-open: any exception is logged to stderr but the tool call is allowed.
 
-The script reads the corresponding prompt file and emits Claude Code's expected
-`hookSpecificOutput.additionalContext` JSON. It is the only piece of executable
-code in the plugin — everything else is declarative Markdown/JSON.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output contracts.
 
 ### User-invokable
 
@@ -156,19 +163,31 @@ MIT — see [`LICENSE`](LICENSE).
 ### 防御分层
 
 1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则注入 agent 上下文。
-2. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify` 等 slash 命令。
-3. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
-4. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。
-5. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)，可作为任意 LLM 的 system prompt 片段使用。
+2. **硬拦截层**（v0.2.0 新增）：agent 调用 `Edit`/`Write` 时，若目标文件已存在但本会话尚未 `Read` 过 → 直接拒绝，并给出明确的恢复指引（"先 Read 再重试"）。新文件创建不受影响。
+3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify` 等 slash 命令。
+4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
+5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。
+6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)，可作为任意 LLM 的 system prompt 片段使用。
 
-> **未来版本将加入**：`PreToolUse` 硬性拦截（例如：未读过的文件不允许 Edit）。
+> **路线图**：Bash 命令绕过模式（`--no-verify`/`git push --force` 等）的硬拦截、Stop 钩子的"声称即兑现"校验。
 
 ### 安装
 
 #### 作为 Claude Code 插件
 
-把仓库放进 `~/.claude/plugins/anti-laziness`，Claude Code 会通过 `.claude-plugin/plugin.json` 自动识别。
-钩子脚本需要 `python` 在 PATH 上（开发环境为 Python 3.13）。
+```bash
+git clone https://github.com/skymanbp/agent-rigor.git /path/to/agent-rigor
+```
+
+在 Claude Code 会话内：
+
+```
+/plugin marketplace add /path/to/agent-rigor
+/plugin install anti-laziness@agent-rigor
+```
+
+验证：`/plugin` 命令的 "Installed" 列表中应出现 `anti-laziness@agent-rigor`。
+钩子脚本要求 `python` 在 PATH 上（在 Python 3.13 上测试过；只用标准库）。
 
 #### 作为通用 LLM 规则包
 

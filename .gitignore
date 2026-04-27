@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local state ---
+# Project-scoped runtime data that should NOT be checked in.
+.claude/local/
+.claude/cache/
+.claude/settings.local.json
+
+# --- Build / dist artifacts ---
+build/
+dist/
+*.tgz
+
+# --- Logs and temp files ---
+*.log
+*.tmp
+.tmp/

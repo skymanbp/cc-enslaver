@@ -11,10 +11,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Bash bypass-pattern guard**
-  - Reject `Bash` commands containing `--no-verify`, `git push --force`, `rm -rf /`,
-    `chmod -R 777`, or other documented bypass patterns unless an explicit
-    justification is supplied.
 - **Stateful `Stop` hook**
   - Detect "I edited X" / "I created Y" claims in the agent's last message and
     verify the corresponding file mtime / git status before allowing Stop.
@@ -22,8 +18,60 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Session state GC**
   - Periodically prune session JSON files older than N days from
     `${CLAUDE_PLUGIN_DATA}/sessions/`.
+- **Additional bypass patterns**
+  - Evaluate adding `git reset --hard` (if uncommitted changes), `git rebase
+    --skip`, `pip install --break-system-packages`, etc. — currently held back
+    on false-positive concerns.
 - **English mirror of `rules/`**
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
+- **CI**
+  - GitHub Actions workflow running `python -m unittest discover tests` on push.
+
+---
+
+## [0.3.0] — 2026-04-27
+
+Bash bypass-pattern guard + a persistent test suite. The hard layer now
+extends from "read-before-edit" to "no shortcut bypasses" at the tool boundary,
+and every hook script has black-box subprocess tests that reproduce
+production-realistic stdin payloads.
+
+### Added
+
+- **`hooks/scripts/bash_guard.py`** — `PreToolUse` matcher `Bash`. Detects:
+  - `--no-verify` (skipping commit hooks)
+  - `--no-gpg-sign` (skipping commit signature)
+  - `git push --force` / `-f` *without* `--force-with-lease`
+  - `chmod 777` (and `chmod -R 777`, `chmod 0777`, `chmod -R 0777`)
+  Each match emits a structured deny with a recovery instruction citing rule 03
+  (rules/03-root-cause.md). Failing-open on exception. Word-boundary aware —
+  `--no-verify-extra` and `--force-with-lease` do not false-match.
+- **`tests/`** — black-box unittest suite invoking each hook script as a real
+  subprocess with synthetic JSON stdin (mirroring Claude Code's runtime). Zero
+  third-party deps. Run with `python -m unittest discover tests`. 18 tests:
+  - `test_inject_context.py` — soft layer + UTF-8/CJK survival.
+  - `test_read_guard.py` — record/allow/deny matrix, fail-open, path
+    normalization (forward/backward slash equivalence on Windows).
+  - `test_bash_guard.py` — full bypass-pattern matrix, event gating
+    (PostToolUse and non-Bash payloads ignored), fail-open.
+- **`tests/README.md`** — runner and "how to add a new test case" guide.
+
+### Changed
+
+- `hooks/hooks.json` — `PreToolUse` now has two matcher entries: `Edit|Write`
+  routes to `read_guard.py`, `Bash` routes to `bash_guard.py`.
+- `.claude-plugin/plugin.json` — version bumped `0.2.0 → 0.3.0`.
+- `.claude-plugin/marketplace.json` — version bumped `0.2.0 → 0.3.0`.
+- `CLAUDE.md` §6 — reflects v0.3.0 + the new test suite.
+- `docs/ARCHITECTURE.md` — Layer 1 table now lists 5 events; data-flow
+  diagram updated; connected-files matrix gains entries for `bash_guard.py`
+  and `tests/`.
+- `README.md` — defense-layer list now includes Bash bypass guard; hook table
+  lists 5 events.
+
+### Removed (from Unreleased roadmap)
+
+- "Bash bypass-pattern guard" — implemented here.
 
 ---
 
@@ -111,6 +159,7 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skymanbp/agent-rigor/releases/tag/v0.1.0

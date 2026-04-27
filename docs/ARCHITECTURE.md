@@ -37,9 +37,10 @@ catches the lazy behaviour, often via a different signal.
 **Wired in:** [`../hooks/hooks.json`](../hooks/hooks.json).
 **Implementations:**
 - Soft injection: [`../hooks/scripts/inject_context.py`](../hooks/scripts/inject_context.py)
-- Hard guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
+- Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
+- Bash bypass guard: [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 
-Four events are subscribed to:
+Five hook entries across four events:
 
 | Event | Matcher | Script | Purpose |
 |---|---|---|---|
@@ -47,15 +48,21 @@ Four events are subscribed to:
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
 | `PostToolUse` | `Read\|Write` | `read_guard.py` | Record touched file in session state |
 | `PreToolUse` | `Edit\|Write` | `read_guard.py` | Deny edit if target exists but unread |
+| `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (`--no-verify`, force-push, `chmod 777`, …) |
 
-#### Why two scripts (not one)
+#### Why three scripts (not one)
 
-Soft injection is purely additive (always exit 0, only emit `additionalContext`).
-The hard guard must read/write disk state and may emit a `permissionDecision`.
-Combining them in one script would force every soft-injection invocation to load
-the state library, which is unnecessary cost and broader failure surface.
-Splitting them keeps each script's responsibility, blast-radius, and failure
-mode independent.
+Each script has a different responsibility and a different failure mode:
+- `inject_context.py` is purely additive: always exit 0, only emit
+  `additionalContext`. Never reads or writes disk state.
+- `read_guard.py` owns per-session disk state (PostToolUse Read/Write +
+  PreToolUse Edit/Write). Its failure mode is state-file corruption.
+- `bash_guard.py` is stateless string inspection. Its failure mode is regex
+  bug.
+
+Collapsing them into one script would chain three independent failure modes
+behind a single try/except — a bug in any one would mask the others. Keeping
+them separate also lets each script load only the imports it actually needs.
 
 #### Soft-layer output contract (`inject_context.py`)
 
@@ -118,12 +125,29 @@ the agent — anti-laziness must never become anti-progress.
 `Stop` would loop forever without a stateful one-shot guard. Documented as a
 roadmap item in [`../CHANGELOG.md`](../CHANGELOG.md).
 
-#### What about `Bash` bypass-pattern blocking?
+#### `Bash` bypass-pattern blocking
 
-Patterns like `--no-verify`, `git push --force`, and `chmod -R 777` are obvious
-violations of rule 03. A `PreToolUse` matcher for `Bash` is on the roadmap; not
-yet shipped because the false-positive design (which bypasses are legitimate
-under user instruction) needs more thought.
+`bash_guard.py` (matcher `Bash`) inspects the `tool_input.command` string and
+denies four patterns:
+
+| Pattern (regex) | Why |
+|---|---|
+| `--no-verify` (whitespace-bounded) | Skipping commit/push hooks ships unchecked code. Rule 03. |
+| `--no-gpg-sign` | Skipping commit signature verification. Rule 03. |
+| `git push --force` / `-f`, *not* `--force-with-lease` | Force-push is irreversible and can overwrite teammates' work. Rule 03. The safer `--force-with-lease` variant is allowed. |
+| `chmod (-R)? 0?777` | World-writable permissions never solve the underlying access issue and create security risk. Rule 03. |
+
+Each match emits the same deny shape as `read_guard.py`, with a reason that
+explains the rule violation and how to address the real underlying problem.
+
+Word-boundary care: `--no-verify-extra` (longer flag) does not match;
+`echo --force >> notes.txt` (no `git push`) does not match;
+`git push --force-with-lease` is stripped before the `--force` check, so it
+also does not match.
+
+If the user has explicitly authorised a bypass, `bash_guard` will still deny.
+The agent should surface the deny reason to the user and let the user run the
+command manually — that is the intended discipline (no AI-mediated bypassing).
 
 ---
 
@@ -236,6 +260,17 @@ PreToolUse hook fires (matcher Edit|Write) → read_guard.py
                                                            reason: "rule 04 violation,
                                                                     Read this file first"
 
+Agent calls Bash
+    │
+    ▼
+PreToolUse hook fires (matcher Bash) → bash_guard.py
+    │
+    ├─ command matches --no-verify                       → DENY (rule 03)
+    ├─ command matches --no-gpg-sign                     → DENY (rule 03)
+    ├─ command matches git push --force (no --force-with-lease) → DENY (rule 03)
+    ├─ command matches chmod 0?777                       → DENY (rule 03)
+    └─ no bypass pattern matched                         → ALLOW (silent exit 0)
+
    ─── if user/agent invokes /anti-laziness:verify ───
                        │
                        ▼
@@ -264,12 +299,14 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 |---|---|
 | `rules/<n>-*.md` | `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md` |
 | `prompts/*.md` | `hooks/scripts/inject_context.py` (filename mapping), this doc |
-| `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer) |
-| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract), this doc §2 (deny output contract) |
-| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location) |
+| `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
+| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract), this doc §2 (deny output contract), `tests/test_read_guard.py` |
+| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
+| `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table), `tests/test_bash_guard.py` (every new pattern needs a positive + nearby negative case) |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
-| `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, version-bump must match an actual change |
+| `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change |
 | `.claude-plugin/marketplace.json` | `README.md` (install steps), `.claude-plugin/plugin.json` (version), this doc |
 | `commands/*.md` | `.claude-plugin/plugin.json` (commands path), this doc, `README.md` |
 | `agents/verifier.md` | `commands/verify.md` (invocation), this doc |
 | `skills/systematic-debug/SKILL.md` | `rules/02-systematic-not-reactive.md`, `rules/03-root-cause.md`, this doc |
+| `tests/_helpers.py` | every `tests/test_*.py` file (they all import from here) |

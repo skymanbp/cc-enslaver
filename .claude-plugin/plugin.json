@@ -6,6 +6,8 @@
     "name": "skymanbp"
   },
   "license": "MIT",
+  "homepage": "https://github.com/skymanbp/agent-rigor",
+  "repository": "https://github.com/skymanbp/agent-rigor",
   "keywords": [
     "anti-laziness",
     "discipline",

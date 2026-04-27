@@ -64,10 +64,13 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a layer-by-layer walkthro
 
 ```bash
 # 1) Clone this repo somewhere
-git clone https://github.com/<your-fork>/anti-laziness.git ~/.claude/plugins/anti-laziness
+git clone https://github.com/skymanbp/agent-rigor.git ~/.claude/plugins/anti-laziness
 
 # 2) In Claude Code, add the plugin via your settings or marketplace mechanism.
 #    The manifest is at .claude-plugin/plugin.json — Claude Code will discover it.
+#    Note: the GitHub repo is `agent-rigor`, but the plugin's internal name is
+#    `anti-laziness` (as declared in plugin.json), so slash commands surface as
+#    `/anti-laziness:<command>`.
 ```
 
 > Hook scripts require `python` on PATH. The plugin is tested with Python 3.13.

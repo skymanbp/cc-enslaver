@@ -69,5 +69,5 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/anti-laziness/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/skymanbp/anti-laziness/releases/tag/v0.1.0
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/skymanbp/agent-rigor/releases/tag/v0.1.0

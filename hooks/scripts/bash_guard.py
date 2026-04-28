@@ -1,44 +1,46 @@
 #!/usr/bin/env python3
-"""anti-laziness — bash bypass-pattern guard.
+"""anti-laziness — bash guard.
 
-PreToolUse handler with matcher `Bash`. Inspects the `command` string of
-every Bash tool call and denies known "lazy bypass" patterns:
+PreToolUse handler with matcher `Bash`. Two responsibilities:
 
-  --no-verify          skipping git/commit hooks
-  --no-gpg-sign        skipping commit signature
-  git push --force     irreversible overwrite (without --force-with-lease)
-  chmod 777            world-writable permissions
+  1. Bypass-pattern blocking. Denies known "lazy bypass" patterns:
+       --no-verify          skipping git/commit hooks
+       --no-gpg-sign        skipping commit signature
+       git push --force     irreversible overwrite (no --force-with-lease)
+       chmod 777            world-writable permissions
+     Each match emits a structured deny citing rule 03.
 
-Each detected pattern emits a structured deny with a reason that
-explains *why* it is a violation of rule 03 (rules/03-root-cause.md)
-and how to address the real underlying problem.
+  2. Read-cache escape hatch (v0.4.0). When the agent invokes
+     `register_read.py --file PATH --hash SHA`, this guard runs *in the
+     PreToolUse phase* — which is the only place where `session_id` is
+     available — and processes the registration:
+       - Recompute SHA-256 of the file on disk.
+       - If hash matches the agent claim: add file to session state via
+         `state_lib.add_read`, then ALLOW (the user-facing stub script
+         runs and prints confirmation).
+       - If hash mismatches or the file is missing: DENY with diagnostic.
+     The hash check is what prevents the escape hatch from itself
+     becoming a laziness vector: an agent that has not opened the file
+     cannot produce its current hash.
 
-Failing-open: a bug in this guard cannot block the agent. Any exception
-is logged to stderr and the tool call is allowed.
-
-Why a separate script from read_guard.py:
-  read_guard owns per-session disk state (PostToolUse Read|Write +
-  PreToolUse Edit|Write); bash_guard is purely stateless string
-  inspection. Splitting them keeps the two failure modes (state
-  corruption vs. regex bug) independent and the responsibilities
-  audit-able in isolation.
-
-Output contract (same as read_guard's deny path):
-  {
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "permissionDecision": "deny",
-      "permissionDecisionReason": "<reason>"
-    }
-  }
+Failing-open: any exception is logged to stderr and the tool call is
+allowed. A bug in this guard cannot block the agent.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shlex
 import sys
 import traceback
+from pathlib import Path
+
+# Import the same state library read_guard uses, so registrations land in
+# the same state files. `lib/` is alongside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import state as state_lib  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -154,6 +156,139 @@ def _emit_deny(command: str, pattern_name: str, rule: str, explanation: str) -> 
 
 
 # --------------------------------------------------------------------------- #
+# Read-cache escape hatch: register-as-read.
+# --------------------------------------------------------------------------- #
+
+# Match any python invocation whose argv contains a script ending in
+# `register_read.py`. We match the basename rather than a full path because
+# the path includes ${CLAUDE_PLUGIN_ROOT} which Claude Code expands and may
+# differ across install locations / OSes.
+_REGISTER_SCRIPT_NAME = "register_read.py"
+
+
+def _parse_register_invocation(command: str) -> dict | None:
+    """If `command` is a register_read.py invocation, return parsed args.
+
+    Returns a dict {"file": str, "hash": str} on success, or None if the
+    command is not a register invocation. Tolerates malformed register
+    invocations by returning None (the regular bypass-pattern checks then
+    apply, and the script call itself will fail at argparse time).
+    """
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    # Find the script-path token. Match by basename so we are robust to
+    # whatever absolute path Claude Code expanded ${CLAUDE_PLUGIN_ROOT} to.
+    script_idx = None
+    for i, tok in enumerate(tokens):
+        if tok.endswith(_REGISTER_SCRIPT_NAME):
+            script_idx = i
+            break
+    if script_idx is None:
+        return None
+    # Parse the trailing tokens for --file and --hash.
+    args = tokens[script_idx + 1 :]
+    file_path = None
+    hash_val = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--file" and i + 1 < len(args):
+            file_path = args[i + 1]
+            i += 2
+        elif args[i] == "--hash" and i + 1 < len(args):
+            hash_val = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    if file_path is None or hash_val is None:
+        return None
+    return {"file": file_path, "hash": hash_val}
+
+
+def _compute_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _handle_register_invocation(command: str, session_id: str):
+    """Process a register_read.py invocation.
+
+    Returns:
+        True  -- registration succeeded; caller should ALLOW
+        False -- registration failed; this function already emitted DENY
+        None  -- command is not a register invocation
+    """
+    parsed = _parse_register_invocation(command)
+    if parsed is None:
+        return None
+
+    fpath = Path(parsed["file"])
+    claimed_hash = parsed["hash"].lower().strip()
+
+    if not fpath.is_absolute():
+        _emit_register_deny(
+            command,
+            "register_read needs an absolute --file path "
+            "(got " + repr(parsed["file"]) + ").",
+        )
+        return False
+    if not fpath.is_file():
+        _emit_register_deny(
+            command,
+            "register_read: file does not exist on disk: " + str(fpath),
+        )
+        return False
+    if not (len(claimed_hash) == 64
+            and all(c in "0123456789abcdef" for c in claimed_hash)):
+        _emit_register_deny(
+            command,
+            "register_read: --hash must be 64 lowercase hex chars (SHA-256). "
+            "Got: " + repr(parsed["hash"]),
+        )
+        return False
+
+    actual_hash = _compute_sha256(fpath)
+    if actual_hash != claimed_hash:
+        _emit_register_deny(
+            command,
+            "register_read: hash mismatch.\n"
+            "  --hash:  " + claimed_hash + "\n"
+            "  on-disk: " + actual_hash + "\n"
+            "Either you have not actually read the file, or it changed since "
+            "you computed the hash. Re-Read with fresh content and retry.",
+        )
+        return False
+
+    # All checks pass: register the file in session state.
+    state_lib.add_read(session_id, str(fpath))
+    return True
+
+
+def _emit_register_deny(command: str, reason: str) -> None:
+    """Deny output specific to register-flow failures (different template
+    from the bypass-pattern deny so the agent sees the actual diagnostic)."""
+    msg = (
+        "anti-laziness · register_read rejected\n\n"
+        "Command: " + command + "\n\n"
+        + reason + "\n"
+    )
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": msg,
+        }
+    }
+    encoded = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+
+
+# --------------------------------------------------------------------------- #
 # Entry point.
 # --------------------------------------------------------------------------- #
 def main() -> int:
@@ -170,7 +305,18 @@ def main() -> int:
         if not command:
             return 0
 
-        # Static regex patterns first.
+        # Read-cache escape hatch: register-as-read invocation.
+        # Process this BEFORE bypass-pattern checks so a register command
+        # cannot false-match unrelated regexes.
+        session_id = payload.get("session_id") or "default"
+        reg_handled = _handle_register_invocation(command, session_id)
+        if reg_handled is True:
+            return 0  # ALLOW -- registration succeeded; stub script will run
+        if reg_handled is False:
+            return 0  # DENY emitted; do not fall through to bypass checks
+        # reg_handled is None: not a register invocation; continue.
+
+        # Static regex patterns next.
         for pat in STATIC_PATTERNS:
             if pat["regex"].search(command):
                 _emit_deny(command, pat["name"], pat["rule"], pat["explanation"])

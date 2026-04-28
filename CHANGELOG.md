@@ -26,30 +26,85 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
 - **CI**
   - GitHub Actions workflow running `python -m unittest discover tests` on push.
-- **Read-cache escape hatch** (v0.4.0 candidate)
-  - Real-world failure observed (2026-04-28): Claude Code's harness caches
-    `Read` results. Repeated `Read` of the same file may be served from
-    cache without invoking the `Read` tool — so neither `PreToolUse(Read)`
-    (v0.3.2) nor `PostToolUse(Read)` (v0.3.1 and earlier) ever fires, and
-    the file never enters session state. Subsequent `Edit` is denied even
-    though the agent legitimately read the file.
-  - Current workaround: replace via `python -c "Path(...).write_text(...)"`
-    (Bash isn't gated by `read_guard`; `bash_guard` only blocks documented
-    bypass patterns). Recorded in private project memory for future
-    reference.
-  - Proposed plugin-side fix:
-    - Add `hooks/scripts/register.py` callable as
-      `python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/register.py" --file <path>`
-      to register a file as "read" without going through the `Read` tool.
-    - Extend `read_guard.py` deny reason to mention this escape hatch
-      when a deny fires after evidence the agent did call `Read`
-      (e.g. compare current file mtime vs. last Read timestamp the harness
-      reports — needs investigation).
-  - Open design question: how to prevent the escape hatch from itself
-    becoming a laziness vector (agent registers without actually reading).
-    One option: `register.py` requires the caller to pass back a hash of
-    the file's current content, so registration only succeeds if the
-    caller has actually opened it.
+
+---
+
+## [0.4.0] — 2026-04-28
+
+Read-cache escape hatch — `register_read.py` + `bash_guard.py` extension.
+
+### Problem
+
+After v0.3.2 fixed the out-of-project scope bug, a second failure mode
+surfaced 2026-04-28 in another project (paper-review): `read_guard`
+denied `Edit` on `SKILL.md` despite multiple `Read` calls. State file
+inspection showed the path **was never recorded**. Root cause:
+**Claude Code's harness has a Read result cache. Repeated `Read` of
+the same file may be served from cache without invoking the `Read`
+tool at all** — so neither `PreToolUse(Read)` (v0.3.2) nor
+`PostToolUse(Read)` (earlier) ever fires. The file never enters
+session state, and subsequent `Edit` is denied even though the agent
+legitimately read the file. This is a Claude Code harness behavior,
+not something the plugin can intercept.
+
+### Fix
+
+Provide an explicit "register-as-read" entry that an agent can invoke
+when it knows it has read a file but the hook never fired. To prevent
+this from itself becoming a laziness vector (agent registers without
+actually reading), the entry **requires a SHA-256 of the file's current
+on-disk content** — `bash_guard.py` recomputes the hash from disk and
+only registers if the agent's claim matches.
+
+### Added
+
+- **`hooks/scripts/register_read.py`** — user-facing CLI stub. Takes
+  `--file ABS_PATH --hash SHA256`. Verifies its own hash check (so the
+  command line surface is sane) and exits 0/1/2/3 per documented exit
+  codes. The actual session-state mutation happens in `bash_guard.py`.
+- **`hooks/scripts/bash_guard.py` extension** — when the Bash command
+  matches a `register_read.py` invocation, parse `--file` / `--hash`,
+  recompute SHA-256 from disk, and:
+  - if match: `state_lib.add_read(session_id, file_path)` + ALLOW
+  - if mismatch / file missing / bad path / bad hash format: DENY
+    with a precise diagnostic
+  This is the only place where `session_id` is available, hence the
+  registration must happen here (not in the stub script).
+- **`hooks/scripts/read_guard.py` deny message** — now points the
+  agent at the escape hatch with an inline shell example (SHA-256
+  one-liner + register invocation).
+- **Tests**:
+  - `tests/test_register_read.py` (5 cases): correct hash, mismatch,
+    missing file, relative path, uppercase hash normalization.
+  - `tests/test_bash_guard.py::TestBashGuardRegisterFlow` (6 cases):
+    correct hash allows + records, wrong hash denies + does not record,
+    missing file denies, relative path denies, bad hash format denies,
+    non-register command falls through to bypass-pattern checks.
+  - **Total tests: 22 → 33** (all pass).
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.3.2 → 0.4.0.
+- `CLAUDE.md` §6 — adds the escape hatch to the implemented list.
+- `docs/ARCHITECTURE.md` — Layer 1 §2 gains a new "Read-cache escape
+  hatch" subsection; connected-files matrix gets `register_read.py`.
+- `README.md` — version badge and feature list updated.
+
+### Removed (from Unreleased roadmap)
+
+- "Read-cache escape hatch" — implemented here.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+.................................
+----------------------------------------------------------------------
+Ran 33 tests in 6.410s
+
+OK
+```
 
 ---
 
@@ -297,7 +352,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...v0.3.0

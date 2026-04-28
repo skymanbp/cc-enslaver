@@ -83,6 +83,20 @@ To proceed:
 If you are intentionally creating a NEW file, this guard would not have
 fired -- it triggers only when the target already exists. The fact that
 it fired means there is content here you have not yet examined.
+
+If you have already Read this file in this session but the guard still
+denies (Claude Code occasionally short-circuits Read to a result cache
+without firing the hook -- a known issue), you can register the file
+as read via the v0.4.0 escape hatch. From a Bash tool call:
+
+  # 1. Compute SHA-256 of the file currently on disk:
+  HASH=$(python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' PATH)
+  # 2. Register:
+  python "${{CLAUDE_PLUGIN_ROOT}}/hooks/scripts/register_read.py" --file PATH --hash "$HASH"
+
+The PreToolUse(Bash) hook recomputes the hash from disk and only
+registers if it matches your claim, so the escape hatch cannot itself
+be used to bypass the read requirement.
 """
 
 

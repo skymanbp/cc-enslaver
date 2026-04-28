@@ -142,5 +142,105 @@ class TestBashGuardFailOpen(unittest.TestCase):
         self.assertIn(b"bash_guard exception", proc.stderr)
 
 
+class TestBashGuardRegisterFlow(unittest.TestCase):
+    """v0.4.0 read-cache escape hatch: bash_guard intercepts register_read.py
+    invocations, validates --hash against on-disk content, and either
+    registers the file in session state (ALLOW) or denies with diagnostic."""
+
+    def setUp(self) -> None:
+        import hashlib
+        import shutil
+        import tempfile
+
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-bg-reg-"))
+        self.fpath = self.tmpdir / "fixture.bin"
+        self.content = b"bash_guard register-flow fixture content\n"
+        self.fpath.write_bytes(self.content)
+        self.correct = hashlib.sha256(self.content).hexdigest()
+        self.state_dir = self.tmpdir / "data"
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.state_dir)}
+        self.sid = "bg-reg-test-session"
+        self._shutil = shutil
+
+    def tearDown(self) -> None:
+        self._shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _call(self, command: str):
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            },
+            env_overrides=self.env,
+        )
+
+    def _reg_cmd(self, file_path, hash_val) -> str:
+        return (
+            'python "/path/to/register_read.py" '
+            '--file "%s" --hash %s' % (file_path, hash_val)
+        )
+
+    def test_correct_hash_allows_and_records(self) -> None:
+        rc, out, err = self._call(self._reg_cmd(self.fpath, self.correct))
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIsNone(out, msg="expected silent allow on valid registration")
+        sessions = list((self.state_dir / "sessions").glob("*.json"))
+        self.assertEqual(len(sessions), 1)
+        import json
+
+        state = json.loads(sessions[0].read_text(encoding="utf-8"))
+        self.assertTrue(any("fixture.bin" in p for p in state["read_files"]))
+
+    def test_wrong_hash_denies(self) -> None:
+        rc, out, _ = self._call(self._reg_cmd(self.fpath, "0" * 64))
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "hash mismatch",
+            out["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+        # State must not contain the file (deny means not registered).
+        sessions = list((self.state_dir / "sessions").glob("*.json"))
+        if sessions:
+            import json
+
+            state = json.loads(sessions[0].read_text(encoding="utf-8"))
+            self.assertFalse(any("fixture.bin" in p for p in state["read_files"]))
+
+    def test_missing_file_denies(self) -> None:
+        ghost = self.tmpdir / "ghost.txt"
+        rc, out, _ = self._call(self._reg_cmd(ghost, self.correct))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "does not exist",
+            out["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_relative_path_denies(self) -> None:
+        rc, out, _ = self._call(self._reg_cmd("relative/foo.txt", self.correct))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "absolute", out["hookSpecificOutput"]["permissionDecisionReason"]
+        )
+
+    def test_bad_hash_format_denies(self) -> None:
+        rc, out, _ = self._call(self._reg_cmd(self.fpath, "NOT-HEX"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "64 lowercase hex",
+            out["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_non_register_command_falls_through(self) -> None:
+        # A command that has nothing to do with register_read.py should
+        # fall through to bypass-pattern checks and return allow if clean.
+        rc, out, _ = self._call("echo hello")
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out)
+
+
 if __name__ == "__main__":
     unittest.main()

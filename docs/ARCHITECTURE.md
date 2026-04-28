@@ -38,7 +38,8 @@ catches the lazy behaviour, often via a different signal.
 **Implementations:**
 - Soft injection: [`../hooks/scripts/inject_context.py`](../hooks/scripts/inject_context.py)
 - Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
-- Bash bypass guard: [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
+- Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
+- Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
 
 Four hook entries across three events:
 
@@ -165,6 +166,46 @@ also does not match.
 If the user has explicitly authorised a bypass, `bash_guard` will still deny.
 The agent should surface the deny reason to the user and let the user run the
 command manually — that is the intended discipline (no AI-mediated bypassing).
+
+#### Read-cache escape hatch (v0.4.0)
+
+A second responsibility of `bash_guard.py`: detect invocations of
+`register_read.py` and, only when valid, register the target file in
+session state. Motivation:
+
+- Claude Code's harness has a Read result cache. Repeated `Read` of the
+  same file within a session may be served from cache *without invoking
+  the Read tool*. When that happens, neither `PreToolUse(Read)` nor
+  `PostToolUse(Read)` fires, the file never enters session state, and a
+  later `Edit` is falsely denied.
+- We can't fix the harness from a plugin. We can provide an explicit
+  registration path: `register_read.py --file ABS_PATH --hash SHA256`.
+- The hash is the laziness gate. `bash_guard.py` recomputes SHA-256 of
+  the file on disk and only registers if it matches the agent's claim.
+  An agent that has not actually opened the file can't produce the
+  current on-disk hash, so the hatch can't be abused.
+
+Flow:
+
+```
+agent computes SHA-256 of file --> agent runs `python register_read.py --file ABS --hash SHA`
+                                              │
+                                              ▼
+                  PreToolUse(Bash) fires → bash_guard.py
+                  ├─ recognises register_read.py invocation
+                  ├─ recomputes SHA-256 from disk
+                  ├─ if match: state_lib.add_read(session_id, path); ALLOW
+                  └─ if mismatch / file missing / bad path / bad hash: DENY
+                                              │
+                  ALLOW lets register_read.py run as a no-op CLI that prints
+                  confirmation and exits 0. The state mutation has already
+                  happened in the hook.
+```
+
+The contract is asymmetric on purpose: the user-facing script
+(`register_read.py`) verifies its own hash for command-line UX, but
+the *authoritative* hash check + state mutation lives in the hook,
+because only the hook payload exposes `session_id`.
 
 ---
 
@@ -314,7 +355,8 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract), this doc §2 (deny output contract), `tests/test_read_guard.py` |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
-| `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table), `tests/test_bash_guard.py` (every new pattern needs a positive + nearby negative case) |
+| `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
+| `hooks/scripts/register_read.py` | `hooks/scripts/bash_guard.py` (the actual register handling lives there), this doc §2 "Read-cache escape hatch", `tests/test_register_read.py` |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
 | `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change. **Do not** re-add the `commands` / `agents` / `skills` / `hooks` path fields for standard locations: they cause `claude plugin install` to fail with `Duplicate hooks file detected` or `agents: Invalid input` because Claude Code auto-discovers `./commands/`, `./agents/`, `./skills/`, and `./hooks/hooks.json`. Those manifest fields are only for *non-standard* layouts. |
 | `.claude-plugin/marketplace.json` | `README.md` (install steps), `.claude-plugin/plugin.json` (version), this doc |

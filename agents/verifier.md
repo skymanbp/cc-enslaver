@@ -2,7 +2,10 @@
 name: verifier
 description: 独立的只读验证子代理。给定一组 `file:line` 引用或事实性断言，重新读取源文件比对内容，返回 `intact / drift / missing / mismatch` 判定。**不**修改任何文件。在主代理需要核对自己刚刚陈述的引用是否真实时调用。
 model: haiku
-tools: Read, Grep, Glob
+tools:
+  - Read
+  - Grep
+  - Glob
 ---
 
 # verifier 子代理 — anti-laziness 验证执行器

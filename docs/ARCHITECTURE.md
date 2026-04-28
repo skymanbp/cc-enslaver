@@ -304,7 +304,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table), `tests/test_bash_guard.py` (every new pattern needs a positive + nearby negative case) |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
-| `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change |
+| `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change. **Do not** re-add the `commands` / `agents` / `skills` / `hooks` path fields for standard locations: they cause `claude plugin install` to fail with `Duplicate hooks file detected` or `agents: Invalid input` because Claude Code auto-discovers `./commands/`, `./agents/`, `./skills/`, and `./hooks/hooks.json`. Those manifest fields are only for *non-standard* layouts. |
 | `.claude-plugin/marketplace.json` | `README.md` (install steps), `.claude-plugin/plugin.json` (version), this doc |
 | `commands/*.md` | `.claude-plugin/plugin.json` (commands path), this doc, `README.md` |
 | `agents/verifier.md` | `commands/verify.md` (invocation), this doc |

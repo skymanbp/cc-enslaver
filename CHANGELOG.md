@@ -29,6 +29,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.3.1] — 2026-04-27
+
+Install-time fix. v0.3.0 could not actually be installed via
+`claude plugin install` because of two manifest issues that were not
+caught by `claude plugin validate`:
+
+1. The `plugin.json` listed `commands`, `skills`, `agents`, and `hooks`
+   pointers to standard locations (e.g. `"hooks": "./hooks/hooks.json"`).
+   At install time Claude Code rejects this with either
+   `agents: Invalid input` or `Hook load failed: Duplicate hooks file
+   detected` — the standard locations under `commands/`, `skills/`,
+   `agents/`, and `hooks/hooks.json` are **auto-discovered**, and
+   listing them in the manifest causes a duplicate-load conflict.
+2. The `agents/verifier.md` frontmatter declared `tools: Read, Grep,
+   Glob` (CSV string). The install validator expects a YAML list.
+
+### Changed
+
+- **`.claude-plugin/plugin.json`** — removed `commands`, `skills`,
+  `hooks` path fields. The `agents` field had already been removed in a
+  pre-release attempt. Standard layouts are now fully auto-discovered.
+  Manifest `commands`/`skills`/`agents`/`hooks` are reserved for **non-
+  standard** layouts (overrides only).
+- **`agents/verifier.md`** — `tools` frontmatter converted from CSV
+  string to YAML list:
+  ```yaml
+  tools:
+    - Read
+    - Grep
+    - Glob
+  ```
+- **`.claude-plugin/plugin.json`** + **`marketplace.json`** — version
+  bumped 0.3.0 → 0.3.1.
+
+### Verified
+
+```
+$ claude plugin install anti-laziness@agent-rigor
+✔ Successfully installed plugin: anti-laziness@agent-rigor (scope: user)
+$ claude plugin list
+  ❯ anti-laziness@agent-rigor
+    Version: 0.3.1
+    Scope: user
+    Status: ✔ enabled
+```
+
+---
+
 ## [0.3.0] — 2026-04-27
 
 Bash bypass-pattern guard + a persistent test suite. The hard layer now
@@ -159,7 +207,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skymanbp/agent-rigor/releases/tag/v0.1.0

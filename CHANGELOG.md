@@ -26,6 +26,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
 - **CI**
   - GitHub Actions workflow running `python -m unittest discover tests` on push.
+- **Read-cache escape hatch** (v0.4.0 candidate)
+  - Real-world failure observed (2026-04-28): Claude Code's harness caches
+    `Read` results. Repeated `Read` of the same file may be served from
+    cache without invoking the `Read` tool — so neither `PreToolUse(Read)`
+    (v0.3.2) nor `PostToolUse(Read)` (v0.3.1 and earlier) ever fires, and
+    the file never enters session state. Subsequent `Edit` is denied even
+    though the agent legitimately read the file.
+  - Current workaround: replace via `python -c "Path(...).write_text(...)"`
+    (Bash isn't gated by `read_guard`; `bash_guard` only blocks documented
+    bypass patterns). Recorded in private project memory for future
+    reference.
+  - Proposed plugin-side fix:
+    - Add `hooks/scripts/register.py` callable as
+      `python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/register.py" --file <path>`
+      to register a file as "read" without going through the `Read` tool.
+    - Extend `read_guard.py` deny reason to mention this escape hatch
+      when a deny fires after evidence the agent did call `Read`
+      (e.g. compare current file mtime vs. last Read timestamp the harness
+      reports — needs investigation).
+  - Open design question: how to prevent the escape hatch from itself
+    becoming a laziness vector (agent registers without actually reading).
+    One option: `register.py` requires the caller to pass back a hash of
+    the file's current content, so registration only succeeds if the
+    caller has actually opened it.
 
 ---
 

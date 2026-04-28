@@ -40,23 +40,39 @@ catches the lazy behaviour, often via a different signal.
 - Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
 - Bash bypass guard: [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 
-Five hook entries across four events:
+Four hook entries across three events:
 
 | Event | Matcher | Script | Purpose |
 |---|---|---|---|
 | `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
-| `PostToolUse` | `Read\|Write` | `read_guard.py` | Record touched file in session state |
-| `PreToolUse` | `Edit\|Write` | `read_guard.py` | Deny edit if target exists but unread |
+| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file |
 | `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (`--no-verify`, force-push, `chmod 777`, …) |
+
+#### Why everything in `PreToolUse` (and not split with `PostToolUse`)
+
+v0.3.1 split recording (PostToolUse) and gating (PreToolUse). v0.3.2 unified
+both into PreToolUse because **`PostToolUse` does not fire for tool calls
+whose `tool_input.file_path` lies outside the current project working
+directory, while `PreToolUse` does**. The mismatch caused false-positive
+denies on out-of-project files (e.g., per-project memory files in
+`~/.claude/projects/<project>/memory/`): the agent would Read X, no record,
+then Edit X → DENY. v0.3.2 records on PreToolUse(Read) and gates on
+PreToolUse(Edit/Write); both share a scope by construction.
+
+The trade-off: recording in Pre is speculative (happens before the tool
+result is known). A Read of a non-existent path leaves a phantom record,
+but Edit's `os.path.exists` short-circuit covers it (Edit on a missing
+file is allowed and Claude Code rejects it downstream).
 
 #### Why three scripts (not one)
 
 Each script has a different responsibility and a different failure mode:
 - `inject_context.py` is purely additive: always exit 0, only emit
   `additionalContext`. Never reads or writes disk state.
-- `read_guard.py` owns per-session disk state (PostToolUse Read/Write +
-  PreToolUse Edit/Write). Its failure mode is state-file corruption.
+- `read_guard.py` owns per-session disk state, with both recording and
+  gating in PreToolUse (Read/Write/Edit). Its failure mode is state-file
+  corruption.
 - `bash_guard.py` is stateless string inspection. Its failure mode is regex
   bug.
 
@@ -81,7 +97,8 @@ Never blocks; only injects.
 
 #### Hard-layer output contract (`read_guard.py`)
 
-`PostToolUse` (record): exit 0 silently. State written to disk.
+`PreToolUse` (record): on Read/Write, `state_lib.add_read` is called and the
+script exits 0 silently with state written to disk.
 
 `PreToolUse` (allow): exit 0 silently. (Allow is the default with no output.)
 
@@ -240,25 +257,20 @@ UserPromptSubmit hook fires → inject_context.py --event UserPromptSubmit
     ▼
 Claude Code injects pre-turn reminder
 
-Agent calls Read or Write (any file)
+Agent calls Read, Edit, or Write
     │
     ▼
-PostToolUse hook fires (matcher Read|Write) → read_guard.py
-    │  state_lib.add_read(session_id, file_path)
-    ▼
-File path appended to ${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json
+PreToolUse hook fires (matcher Read|Edit|Write) → read_guard.py
+    │
+    ├─ tool=Read                                   → record path, ALLOW (silent)
+    ├─ tool=Write, target does not exist on disk   → record path, ALLOW (new file)
+    ├─ tool=Write, target exists & is recorded     → record (no-op), ALLOW
+    ├─ tool=Write, target exists but unrecorded    → DENY (rule 04)
+    ├─ tool=Edit,  target does not exist on disk   → ALLOW (Claude Code rejects)
+    ├─ tool=Edit,  target exists & is recorded     → ALLOW (silent)
+    └─ tool=Edit,  target exists but unrecorded    → DENY (rule 04)
 
-Agent calls Edit or Write
-    │
-    ▼
-PreToolUse hook fires (matcher Edit|Write) → read_guard.py
-    │
-    ├─ target file does not exist on disk        → ALLOW (silent exit 0)
-    ├─ target file exists, in session state      → ALLOW (silent exit 0)
-    └─ target file exists, NOT in session state  → DENY
-                                                       └─ permissionDecision: deny
-                                                           reason: "rule 04 violation,
-                                                                    Read this file first"
+State file: ${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json (or fallback paths)
 
 Agent calls Bash
     │

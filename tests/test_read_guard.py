@@ -1,14 +1,25 @@
 """Tests for hooks/scripts/read_guard.py.
 
-Covers all four code paths:
-  - PostToolUse(Read|Write) records the file to per-session state.
-  - PreToolUse(Edit|Write) on tracked target → silent allow.
-  - PreToolUse(Edit|Write) on existing untracked target → deny.
-  - PreToolUse(Edit|Write) on non-existing target → silent allow (new file).
+As of v0.3.2 the guard is a single PreToolUse handler covering Read /
+Write / Edit. Every record-or-deny decision happens in PreToolUse so
+that the recording side has the same scope as the gating side
+(Claude Code does not always fire PostToolUse for files outside the
+project working directory; relying on it broke v0.3.1 in production).
 
-Plus failure modes:
-  - Malformed stdin → fail-open.
-  - Path normalization (forward-slash vs backslash, case folding).
+Covered:
+  - PreToolUse(Read) records the file and allows.
+  - PreToolUse(Write) on non-existent path: records and allows
+    (new file creation).
+  - PreToolUse(Write) on existing tracked target: allows (no deny).
+  - PreToolUse(Write) on existing untracked target: denies.
+  - PreToolUse(Edit) on existing tracked target: allows.
+  - PreToolUse(Edit) on existing untracked target: denies.
+  - PreToolUse(Edit) on non-existent path: allows (Claude Code itself
+    will reject the bad input downstream).
+  - Path normalization: forward/back slash equivalence on Windows.
+  - Fail-open: malformed stdin or empty stdin must not block.
+  - Event gating: non-PreToolUse events (e.g., a stray PostToolUse) are
+    no-ops and do not record.
 """
 
 from __future__ import annotations
@@ -28,9 +39,9 @@ GUARD = str(SCRIPTS_DIR / "read_guard.py")
 
 
 class _GuardTestBase(unittest.TestCase):
-    """Each test class subclass gets its own tmp CLAUDE_PLUGIN_DATA + session id.
+    """Each test class gets its own tmp CLAUDE_PLUGIN_DATA + session id.
 
-    We isolate state per test class so a recording in one test does not
+    State isolation per test class so a recording in one test does not
     bleed into another's allow/deny check.
     """
 
@@ -46,18 +57,6 @@ class _GuardTestBase(unittest.TestCase):
         # The test file itself is a guaranteed-existing target.
         return str(Path(__file__).resolve())
 
-    def _post(self, tool: str, file_path: str) -> tuple[int, dict | None, str]:
-        return run_hook(
-            [GUARD],
-            {
-                "session_id": self.sid,
-                "hook_event_name": "PostToolUse",
-                "tool_name": tool,
-                "tool_input": {"file_path": file_path},
-            },
-            env_overrides=self.env,
-        )
-
     def _pre(self, tool: str, file_path: str) -> tuple[int, dict | None, str]:
         return run_hook(
             [GUARD],
@@ -70,82 +69,133 @@ class _GuardTestBase(unittest.TestCase):
             env_overrides=self.env,
         )
 
+    def _state_files(self) -> list[Path]:
+        return list((self.tmpdir / "sessions").glob("*.json"))
 
-class TestPostToolUseRecord(_GuardTestBase):
-    def test_post_read_records_file(self) -> None:
-        rc, out, err = self._post("Read", self._existing_file())
+    def _state(self) -> dict | None:
+        files = self._state_files()
+        if not files:
+            return None
+        return json.loads(files[0].read_text(encoding="utf-8"))
+
+
+class TestPreReadRecords(_GuardTestBase):
+    def test_read_records_file_and_allows(self) -> None:
+        rc, out, err = self._pre("Read", self._existing_file())
         self.assertEqual(rc, 0, msg=err)
-        self.assertIsNone(out, msg="record path should be silent")
+        self.assertIsNone(out, msg="Read must always allow silently")
 
-        sessions = list((self.tmpdir / "sessions").glob("*.json"))
-        self.assertEqual(len(sessions), 1)
-        state = json.loads(sessions[0].read_text(encoding="utf-8"))
+        state = self._state()
+        self.assertIsNotNone(state)
         self.assertEqual(state["session_id"], self.sid)
         self.assertEqual(len(state["read_files"]), 1)
 
-    def test_post_write_records_file(self) -> None:
-        rc, out, _ = self._post("Write", self._existing_file())
-        self.assertEqual(rc, 0)
-        self.assertIsNone(out)
-        sessions = list((self.tmpdir / "sessions").glob("*.json"))
-        state = json.loads(sessions[0].read_text(encoding="utf-8"))
-        self.assertEqual(len(state["read_files"]), 1)
-
-
-class TestPreToolUseAllowTracked(_GuardTestBase):
-    def test_edit_after_read_is_allowed(self) -> None:
+    def test_read_then_edit_is_allowed(self) -> None:
         target = self._existing_file()
-        # Record first
-        self._post("Read", target)
-        # Then attempt edit
-        rc, out, err = self._pre("Edit", target)
-        self.assertEqual(rc, 0, msg=err)
-        self.assertIsNone(out, msg=f"expected silent allow, got {out!r}")
-
-    def test_edit_after_write_is_allowed(self) -> None:
-        target = self._existing_file()
-        self._post("Write", target)
+        self._pre("Read", target)
         rc, out, _ = self._pre("Edit", target)
         self.assertEqual(rc, 0)
-        self.assertIsNone(out)
+        self.assertIsNone(out, msg="Edit after Read should allow silently")
 
 
-class TestPreToolUseDenyUntracked(_GuardTestBase):
-    def test_edit_on_existing_untracked_is_denied(self) -> None:
-        target = self._existing_file()
-        # No PostToolUse record beforehand
-        rc, out, err = self._pre("Edit", target)
-        self.assertEqual(rc, 0, msg=err)
-        self.assertIsNotNone(out, msg="expected deny output, got none")
-        spec = out["hookSpecificOutput"]
-        self.assertEqual(spec["hookEventName"], "PreToolUse")
-        self.assertEqual(spec["permissionDecision"], "deny")
-        # Reason must mention rule 04 and the target path.
-        reason = spec["permissionDecisionReason"]
-        self.assertIn("rule 04", reason)
-        self.assertIn(target.replace("\\", "/").rsplit("/", 1)[-1], reason)
+class TestPreWrite(_GuardTestBase):
+    def test_write_on_new_file_records_and_allows(self) -> None:
+        target = str(self.tmpdir / "brand-new.txt")
+        self.assertFalse(Path(target).exists())
+        rc, out, _ = self._pre("Write", target)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out, msg="new file creation must not be blocked")
+        # Recorded for subsequent Edit.
+        state = self._state()
+        self.assertEqual(len(state["read_files"]), 1)
 
     def test_write_on_existing_untracked_is_denied(self) -> None:
         target = self._existing_file()
         rc, out, _ = self._pre("Write", target)
         self.assertEqual(rc, 0)
-        self.assertIsNotNone(out)
+        self.assertIsNotNone(out, msg="overwriting unknown file must be denied")
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
-
-class TestPreToolUseAllowNewFile(_GuardTestBase):
-    def test_edit_on_nonexistent_file_is_allowed(self) -> None:
-        # Path under tmpdir that we have not created.
-        target = str(self.tmpdir / "brand-new.txt")
-        self.assertFalse(Path(target).exists())
+    def test_write_on_existing_tracked_is_allowed(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)  # mark as known
         rc, out, _ = self._pre("Write", target)
         self.assertEqual(rc, 0)
-        self.assertIsNone(out, msg="new-file creation must not be blocked")
+        self.assertIsNone(out)
+
+
+class TestPreEdit(_GuardTestBase):
+    def test_edit_after_read_is_allowed(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, err = self._pre("Edit", target)
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIsNone(out, msg=f"expected silent allow, got {out!r}")
+
+    def test_edit_after_write_creates_then_edits(self) -> None:
+        # Agent's typical flow: Write a new file, then Edit it. The Write
+        # records the new path; the subsequent Edit must therefore allow.
+        target = str(self.tmpdir / "newly-written.txt")
+        # Simulate the file actually being created on disk between Write
+        # and Edit (Claude Code does this between hooks).
+        rc, out, _ = self._pre("Write", target)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out, msg="Write of new file must allow")
+        Path(target).write_text("hello", encoding="utf-8")
+        rc, out, _ = self._pre("Edit", target)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out, msg="Edit after Write of same path must allow")
+
+    def test_edit_on_existing_untracked_is_denied(self) -> None:
+        target = self._existing_file()
+        rc, out, err = self._pre("Edit", target)
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIsNotNone(out)
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["hookEventName"], "PreToolUse")
+        self.assertEqual(spec["permissionDecision"], "deny")
+        reason = spec["permissionDecisionReason"]
+        self.assertIn("rule 04", reason)
+        self.assertIn(target.replace("\\", "/").rsplit("/", 1)[-1], reason)
+
+    def test_edit_on_nonexistent_file_is_allowed(self) -> None:
+        # Editing a non-existent file is the agent's bug; Claude Code
+        # will reject it downstream. We don't second-guess.
+        target = str(self.tmpdir / "does-not-exist.py")
+        rc, out, _ = self._pre("Edit", target)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out)
+
+
+class TestEventGating(_GuardTestBase):
+    def test_post_tool_use_is_a_noop(self) -> None:
+        # If a stray PostToolUse arrives (e.g., user manually re-added the
+        # legacy event), the guard must not record or deny on it. The new
+        # contract is: PreToolUse owns everything.
+        rc, out, _ = run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": self._existing_file()},
+            },
+            env_overrides=self.env,
+        )
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out)
+        self.assertIsNone(self._state(), msg="PostToolUse must not write state")
+
+    def test_unhandled_tool_is_ignored(self) -> None:
+        # Bash and arbitrary other tools must not be touched by read_guard.
+        rc, out, _ = self._pre("Bash", "ignored-arg")
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out)
+        self.assertIsNone(self._state())
 
 
 class TestFailOpen(_GuardTestBase):
     def test_malformed_stdin_does_not_block(self) -> None:
-        # Bypass _helpers.run_hook so we can pipe non-JSON.
         import subprocess
 
         proc = subprocess.run(
@@ -173,16 +223,13 @@ class TestFailOpen(_GuardTestBase):
 
 class TestPathNormalization(_GuardTestBase):
     def test_forward_and_backward_slash_match(self) -> None:
-        # Record using forward slashes; query using mixed/backslashes.
         target = self._existing_file()
         target_fwd = target.replace("\\", "/")
         target_bwd = target.replace("/", "\\")
 
-        self._post("Read", target_fwd)
+        # Record using the forward-slash form via PreToolUse(Read).
+        self._pre("Read", target_fwd)
 
-        # On Windows both should be allowed (case-folded + normalized).
-        # On POSIX, backslashes are literal — so this assertion may not
-        # hold there. Skip the back-slash variant if not on Windows.
         rc, out, _ = self._pre("Edit", target_fwd)
         self.assertEqual(rc, 0)
         self.assertIsNone(out, msg="forward-slash variant should be allowed")
@@ -190,7 +237,9 @@ class TestPathNormalization(_GuardTestBase):
         if sys.platform == "win32":
             rc, out, _ = self._pre("Edit", target_bwd)
             self.assertEqual(rc, 0)
-            self.assertIsNone(out, msg="backslash variant should be allowed on Windows")
+            self.assertIsNone(
+                out, msg="backslash variant should be allowed on Windows"
+            )
 
 
 if __name__ == "__main__":

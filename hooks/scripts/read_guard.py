@@ -1,21 +1,35 @@
 #!/usr/bin/env python3
 """anti-laziness — read-before-edit guard.
 
-Single hook script with two roles, dispatched by the `hook_event_name`
-field in the stdin payload (Claude Code routes the events to us via the
-matchers in hooks.json):
+A single PreToolUse handler covering Read / Write / Edit. Recording and
+gating live in the same hook event so they share a scope:
 
-  PostToolUse  with matcher "Read|Write"
-      Record the touched file in this session's state. Those files are
-      now considered "known content" and may be Edited later.
+  Read    → record file_path; allow
+  Write   → if target exists and is unrecorded: DENY (file is unread)
+            else: record file_path; allow (covers both new-file creation
+            and overwrite-of-known-file)
+  Edit    → if target exists and is unrecorded: DENY
+            else: allow
 
-  PreToolUse   with matcher "Edit|Write"
-      Deny the call if the target file already exists on disk AND the
-      session has not yet Read/Written it. Tells the agent to Read first.
+Why everything in PreToolUse (and not split with PostToolUse):
+  Empirically (Claude Code v2.1.x), `PostToolUse` does not fire for tool
+  calls whose `tool_input.file_path` lies outside the current project's
+  working directory, but `PreToolUse` *does* fire for such calls. If we
+  recorded in Post and gated in Pre, an out-of-project Read would never
+  be recorded, then the next out-of-project Edit on the same file would
+  be denied even though the agent *just* read it. v0.3.1 shipped that
+  bug; v0.3.2 fixes it by moving recording to Pre, which has a scope
+  consistent with the gating side.
 
-Failing-open contract: if anything in this script raises, we still allow
-the tool call and only log to stderr. Anti-laziness must never become
-anti-progress; a bug in the guard cannot be permitted to brick the agent.
+  The trade-off: in Pre we record speculatively (before the tool has
+  actually succeeded). If a Read fails, we still recorded the path —
+  but a later Edit against that same (non-existent) path is allowed
+  anyway by the `os.path.exists` short-circuit, so the speculative
+  record is harmless.
+
+Failing-open contract: if anything in this script raises, we still
+allow the tool call and only log to stderr. A bug in the guard cannot
+be permitted to brick the agent.
 
 Hook output spec (verified against
 https://code.claude.com/docs/en/hooks.md as of 2026-04-27):
@@ -45,17 +59,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
 
 # --------------------------------------------------------------------------- #
-# Tools we care about, per role.
+# Tools this guard handles (PreToolUse matcher must include all of them).
 # --------------------------------------------------------------------------- #
-RECORD_TOOLS = {"Read", "Write"}      # PostToolUse: append to read-trace
-GUARD_TOOLS = {"Edit", "Write"}       # PreToolUse: deny if not read
+HANDLED_TOOLS = {"Read", "Write", "Edit"}
 
 # --------------------------------------------------------------------------- #
 # Deny message.
-#
-# Goal: tell the agent precisely how to recover. A punitive deny that
-# leaves the agent guessing would itself violate rule 04 (give the user
-# the full context they need to act).
 # --------------------------------------------------------------------------- #
 DENY_TEMPLATE = """anti-laziness · rule 04 violation (read before edit)
 
@@ -101,36 +110,48 @@ def _emit_deny(tool_name: str, file_path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Event handlers.
+# Single PreToolUse handler.
 # --------------------------------------------------------------------------- #
-def _handle_post_tool_use(payload: dict) -> None:
-    tool = payload.get("tool_name", "")
-    if tool not in RECORD_TOOLS:
-        return  # matcher should have prevented this; be defensive anyway
-    file_path = (payload.get("tool_input") or {}).get("file_path")
-    if not file_path:
-        return
-    session_id = payload.get("session_id") or "default"
-    state_lib.add_read(session_id, file_path)
-
-
 def _handle_pre_tool_use(payload: dict) -> None:
     tool = payload.get("tool_name", "")
-    if tool not in GUARD_TOOLS:
+    if tool not in HANDLED_TOOLS:
         return
     file_path = (payload.get("tool_input") or {}).get("file_path")
     if not file_path:
         return
+    session_id = payload.get("session_id") or "default"
 
-    # Allow creating a new file; guard only fires for existing targets.
-    if not os.path.exists(file_path):
+    if tool == "Read":
+        # Record the read so subsequent Edit/Write on this file is allowed.
+        # Always allow — Read itself will fail naturally if the file does
+        # not exist, and a phantom record of a non-existent path is
+        # harmless (Edit's os.path.exists short-circuit covers it).
+        state_lib.add_read(session_id, file_path)
         return
 
-    session_id = payload.get("session_id") or "default"
-    if state_lib.has_read(session_id, file_path):
-        return  # already seen; allow
+    if tool == "Write":
+        # New file creation: nothing to gate; record so future ops know
+        # the file has been seen by the agent.
+        if not os.path.exists(file_path):
+            state_lib.add_read(session_id, file_path)
+            return
+        # Existing file: agent must have seen it before (Read or Write).
+        if not state_lib.has_read(session_id, file_path):
+            _emit_deny(tool, file_path)
+            return  # not reached; _emit_deny exits
+        # Existing and known: allow + refresh record (no-op if already there).
+        state_lib.add_read(session_id, file_path)
+        return
 
-    _emit_deny(tool, file_path)
+    if tool == "Edit":
+        # Editing a non-existent file is invalid input that Claude Code
+        # itself will reject; we don't second-guess.
+        if not os.path.exists(file_path):
+            return
+        if not state_lib.has_read(session_id, file_path):
+            _emit_deny(tool, file_path)
+        # Otherwise allow silently. We do NOT record on Edit because Edit
+        # is downstream of a prior Read/Write that already recorded.
 
 
 # --------------------------------------------------------------------------- #
@@ -142,12 +163,10 @@ def main() -> int:
         if not raw.strip():
             return 0  # nothing to inspect, fail open
         payload = json.loads(raw)
-        event = payload.get("hook_event_name", "")
-        if event == "PostToolUse":
-            _handle_post_tool_use(payload)
-        elif event == "PreToolUse":
+        if payload.get("hook_event_name") == "PreToolUse":
             _handle_pre_tool_use(payload)
-        # Unknown event: do nothing, exit 0.
+        # Any other event (including the legacy PostToolUse if it ever
+        # arrives): no-op, exit 0. Recording is fully owned by Pre now.
     except Exception:
         # Failing open: log and exit 0 so the agent is never blocked
         # by a bug in our own guard.

@@ -29,6 +29,72 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.3.2] — 2026-04-27
+
+Hotfix for a hook-scope bug discovered during live use of v0.3.1.
+
+### Problem
+
+`read_guard.py` recorded files in `PostToolUse(Read|Write)` and gated
+edits in `PreToolUse(Edit|Write)`. Empirically (Claude Code v2.1.x),
+**`PostToolUse` does not fire for tool calls whose target file is
+outside the current project working directory, but `PreToolUse` does
+fire for those calls**. The two hook events had different scopes.
+
+Concrete failure case observed: agent calls `Read X` where X lives at
+`C:\Users\<user>\.claude\projects\<project>\memory\file.md` (outside
+the project's `cwd`). Read returns content; PostToolUse never fires;
+state file unchanged. Agent then calls `Edit X`. PreToolUse fires,
+checks state, file not present → DENY, even though the agent literally
+just read the file.
+
+### Fix
+
+Move all recording into `PreToolUse`. The Pre handler now covers
+`Read | Edit | Write`:
+
+| Tool  | Behavior |
+|-------|----------|
+| Read  | record `file_path`; allow |
+| Write | if file exists and is unrecorded → DENY; else record + allow |
+| Edit  | if file exists and is unrecorded → DENY; else allow |
+
+Because both record and gate live in the same hook event, they share
+a scope by construction.
+
+### Changed
+
+- **`hooks/scripts/read_guard.py`** — `_handle_post_tool_use` removed.
+  `_handle_pre_tool_use` now branches on `Read` / `Write` / `Edit` per
+  the table above. Recording on Read is speculative (happens before the
+  Read result is known); a Read of a non-existent path leaves a phantom
+  record but is harmless because Edit's `os.path.exists` short-circuit
+  covers it.
+- **`hooks/hooks.json`** — `PostToolUse` block removed entirely.
+  `PreToolUse` first matcher widened from `Edit|Write` to
+  `Read|Edit|Write`.
+- **`tests/test_read_guard.py`** — restructured around the new
+  PreToolUse-only contract. New test classes: `TestPreReadRecords`,
+  `TestPreWrite` (3 cases), `TestPreEdit` (4 cases incl.
+  Write-then-Edit flow), `TestEventGating` (verifies stray PostToolUse
+  is a no-op so future regressions can't sneak recording back in).
+  Total: **22 tests pass** (up from 18 in v0.3.1).
+- **`.claude-plugin/plugin.json`** + **`marketplace.json`** — version
+  bumped 0.3.1 → 0.3.2.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+......................
+----------------------------------------------------------------------
+Ran 22 tests in 3.047s
+
+OK
+```
+
+---
+
 ## [0.3.1] — 2026-04-27
 
 Install-time fix. v0.3.0 could not actually be installed via
@@ -207,7 +273,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...v0.2.0

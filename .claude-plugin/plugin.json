@@ -1,7 +1,7 @@
 {
   "name": "anti-laziness",
   "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "skymanbp"
   },

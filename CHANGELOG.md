@@ -11,10 +11,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Stateful `Stop` hook**
-  - Detect "I edited X" / "I created Y" claims in the agent's last message and
-    verify the corresponding file mtime / git status before allowing Stop.
-  - Requires a one-shot guard to avoid infinite Stop loops.
 - **Session state GC**
   - Periodically prune session JSON files older than N days from
     `${CLAUDE_PLUGIN_DATA}/sessions/`.
@@ -24,6 +20,105 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     on false-positive concerns.
 - **English mirror of `rules/`**
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
+
+---
+
+## [0.6.0] — 2026-04-29
+
+**Stop hook lands.** Rule 06 (`验证收敛`) was a soft rule until now —
+v0.5.0 surfaced it via prompt injection, checklist, and skill, but
+nothing prevented an agent from typing `已解决` and walking away. v0.6.0
+adds a `Stop` hook that catches done-claim-without-evidence at turn
+boundary and forces one corrective turn.
+
+### How it works
+
+Every Stop event, `stop_guard.py` inspects the agent's last message:
+
+- **Done-claim detected** (`已解决` / `修好了` / `改好了` / `fixed` /
+  `done` / etc.) and **no evidence** (no `$ ` shell prompt, no test
+  output, no `重触发`, no `pytest`/`unittest`/`Ran N tests`, no fenced
+  code block of output) → return
+  `{"decision": "block", "reason": <rule-06 reminder>}`. Claude Code
+  forces the agent to take another turn.
+- **No done-claim** OR **claim plus evidence** → silent allow.
+
+### One-shot guard
+
+A Stop hook that always blocks would loop forever. We persist
+`last_blocked_turn` in the per-session state file alongside
+`read_files`. If the current `turn_count` is within 3 turns of the
+last block, we skip the heuristic. The agent gets the corrective
+turn (and a small grace window in case the recovery itself spans
+multiple messages); after the grace expires, fresh blocks resume.
+
+### Why heuristic, not file-claim verification
+
+Originally roadmap-described as "verify mtime / git status of files
+the agent claims to have edited". We deliberately scope down to the
+done-claim heuristic for v0.6.0 because:
+
+- Natural-language extraction of file paths from arbitrary phrasings
+  is fragile and produces high false positives.
+- The done-without-evidence heuristic is robust: a careful agent
+  always cites evidence per rule 05, so this only fires on actual
+  laziness.
+- The one-shot guard caps the false-positive cost at exactly one
+  extra turn per session.
+
+Deep file-claim verification is a v0.7+ candidate — would parse
+"I edited X" patterns and check `git diff` / mtime against
+session-start baseline.
+
+### Added
+
+- **`hooks/scripts/stop_guard.py`** — Stop event handler. Done-claim +
+  evidence patterns documented inline; transcript fallback if
+  `assistant_message` is missing from the payload (parses
+  `transcript_path` JSONL). Failing-open on exception.
+- **`hooks/scripts/lib/state.py`** — `record_stop_block(session_id,
+  turn_count)` and `was_just_blocked(session_id, turn_count)` helpers.
+  `was_just_blocked` returns True when current turn is within
+  `[last + 1, last + 3]` (grace window).
+- **`tests/test_stop_guard.py`** — 16 cases:
+  - Done-claim Chinese (incl. `改好了` idiom regression case)
+  - Done-claim English
+  - Block records `last_blocked_turn`
+  - Done + evidence (command output / test count / `重触发` keyword)
+  - No done-claim allows
+  - One-shot guard (turn N+1, turn N+3, turn N+4)
+  - Event gating (SubagentStop / PreToolUse → no-op)
+  - Empty payload allows
+  - Transcript fallback
+  - Malformed stdin → fail-open
+- **`hooks/hooks.json`** — registers `Stop` event (no `matcher` since
+  Stop fires unconditionally per Claude Code spec).
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.5.1 → 0.6.0.
+- Test count 35 → **51 pass** (+16 stop_guard cases).
+
+### Removed (Unreleased roadmap)
+
+- "Stateful `Stop` hook" — implemented here (heuristic flavour). The
+  deeper "verify file claims via mtime/git" version is now an
+  Unreleased v0.7 candidate.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+...................................................
+----------------------------------------------------------------------
+Ran 51 tests in <X>s
+
+OK
+```
+
+Self-applied rule 06 convergence check before commit; full report in
+the commit message + GitHub release notes.
 
 ---
 
@@ -499,7 +594,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...v0.4.0

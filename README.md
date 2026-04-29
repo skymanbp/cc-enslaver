@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.5.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -32,12 +32,13 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
    - **Edit/Write**: denied if the target file already exists but has not been `Read` in this session (rule 04). New file creation is allowed.
    - **Bash**: denied if the command contains a known bypass pattern — `--no-verify`, `--no-gpg-sign`, `git push --force` (without `--force-with-lease`), or `chmod 777` (rule 03). Each deny includes a precise recovery instruction.
    - **Read-cache escape hatch** (v0.4.0): when Claude Code's harness short-circuits a `Read` to its result cache without invoking the tool, the file never enters session state and a subsequent `Edit` is falsely denied. Agents can call `register_read.py --file ABS --hash SHA256` from Bash; `bash_guard.py` recomputes the hash from disk and only registers on match, so the hatch can't itself be used as a bypass.
-3. **Active layer (slash commands)** — `/anti-laziness:checklist` and `/anti-laziness:verify` let the user (or the agent itself) trigger a structured checklist or independent verification pass on demand.
-4. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
-5. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
-6. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
+3. **Hard layer (Stop hook, v0.6.0)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message. If it contains a done-claim (`已解决` / `修好了` / `fixed` / `done` / `completed` / etc.) **and** lacks evidence (no `$ ` shell prompt, no test output, no `重触发` keyword, no `Ran N tests` line, no fenced code block), the hook returns `{"decision": "block", "reason": <rule-06 reminder>}`. The agent is forced to take one corrective turn supplying actual verification. A one-shot guard (`last_blocked_turn` in session state, with a 3-turn grace window) prevents infinite loops.
+4. **Active layer (slash commands)** — `/anti-laziness:checklist` and `/anti-laziness:verify` let the user (or the agent itself) trigger a structured checklist or independent verification pass on demand.
+5. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
+6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
+7. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
 
-> **Future (roadmap):** Stop-hook claim verification ("I edited X" → check mtime); session state GC; English mirror of `rules/`.
+> **Future (roadmap):** Deep file-claim verification ("I edited X" → `git diff` / mtime check); session state GC; English mirror of `rules/`.
 
 ---
 
@@ -110,18 +111,19 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 |---|---|---|---|
 | `SessionStart` | — | Inject full discipline summary | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `UserPromptSubmit` | — | Inject compact pre-turn reminder | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
-| `PostToolUse` | `Read\|Write` | Record touched file in session state | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
-| `PreToolUse` | `Edit\|Write` | Deny if target exists but never read this session | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
+| `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; deny Edit/Write of unread existing file | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns; also process `register_read.py` invocations (validate hash, register state) | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
+| `Stop` | — | Block once if last assistant message has done-claim without evidence (rule 06) | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
 
-Four scripts:
+Five scripts:
 
 - **`inject_context.py`** — soft layer. Emits `hookSpecificOutput.additionalContext` from prompt files in [`prompts/`](prompts/). Always allows.
 - **`read_guard.py`** — hard layer (file context). Maintains per-session state at `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json` (Windows-safe path normalization). Failing-open.
 - **`bash_guard.py`** — hard layer (command discipline). Bypass-pattern catalog + register_read.py interception. Failing-open.
-- **`register_read.py`** — user-facing CLI for the read-cache escape hatch (v0.4.0). The actual state mutation happens in `bash_guard.py`; this script verifies its own hash check so the command line surface is sane and exit codes are documented.
+- **`register_read.py`** — user-facing CLI for the read-cache escape hatch (v0.4.0). State mutation lives in `bash_guard.py`; this script verifies its own hash check.
+- **`stop_guard.py`** — hard layer (rule 06 enforcement at turn boundary, v0.6.0). Done-claim heuristic + one-shot guard via `last_blocked_turn` in session state. Failing-open.
 
-All three are covered by black-box subprocess tests in [`tests/`](tests/) — run with `python -m unittest discover tests`.
+All scripts are covered by black-box subprocess tests in [`tests/`](tests/) — run with `python -m unittest discover tests`.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output contracts.
 
@@ -173,16 +175,17 @@ MIT — see [`LICENSE`](LICENSE).
 ### 防御分层
 
 1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则注入 agent 上下文。
-2. **硬拦截层**：agent 调用 `Edit` / `Write` / `Bash` 时，插件在工具边界做拦截：
-   - **Edit/Write**（v0.2.0 新增）：若目标文件已存在但本会话尚未 `Read` 过 → deny + "先 Read 再重试"。新文件创建放行。
-   - **Bash**（v0.3.0 新增）：命令包含 `--no-verify` / `--no-gpg-sign` / `git push --force`（不含 `--force-with-lease`） / `chmod 777` 等绕过模式 → deny + 给出符合规则 03 的根因式建议。
-   - **Read 缓存逃生口**（v0.4.0 新增）：当 Claude Code 缓存 Read 结果导致 Read 工具调用未触发 → state 录不上 → Edit 假阳性拒。Agent 可调用 `register_read.py --file ABS --hash SHA256`，bash_guard 在 PreToolUse 重算 hash 验证，匹配才录入。Hash 闸门防止 escape hatch 退化为 laziness vector。
+2. **硬拦截层**：agent 调用 `Edit` / `Write` / `Bash` 或 Stop 时，插件在工具/回合边界做拦截：
+   - **Edit/Write**（v0.2.0）：若目标文件已存在但本会话尚未 `Read` 过 → deny + "先 Read 再重试"。新文件创建放行。
+   - **Bash**（v0.3.0）：命令包含 `--no-verify` / `--no-gpg-sign` / `git push --force`（不含 `--force-with-lease`） / `chmod 777` 等绕过模式 → deny + 给出符合规则 03 的根因式建议。
+   - **Read 缓存逃生口**（v0.4.0）：`register_read.py` + bash_guard 重算 SHA-256 闸门。
+   - **Stop 钩子**（v0.6.0 新增）：每次 Stop 检查 agent 末尾消息 — 含 done-claim（`已解决`/`改好了`/`fixed` 等）但缺收敛证据（无 `$ ` 命令输出、无 test 计数、无 `重触发` 关键词、无 fenced code block）→ `{"decision": "block", "reason": <rule-06 提醒>}` 强制再走一轮。一次性守卫 + 3-turn 宽限窗口避免死循环。
 3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify` 等 slash 命令。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。
 6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)，可作为任意 LLM 的 system prompt 片段使用。
 
-> **路线图**：Stop 钩子的"声称即兑现"校验、旧会话 state 文件的 GC、`rules/` 的英文镜像。
+> **路线图**：Stop 钩子深度文件声明验证（"我修改了 X" → 验 mtime / git diff，v0.7 候选）、旧会话 state 文件的 GC、`rules/` 的英文镜像。
 
 ### 安装
 

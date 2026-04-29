@@ -109,3 +109,44 @@ def has_read(session_id: str, file_path: str) -> bool:
     """True if this session has previously Read or Written this file."""
     state = load(session_id)
     return normalize_path(file_path) in state.get("read_files", [])
+
+
+# --------------------------------------------------------------------------- #
+# Stop-hook one-shot guard (v0.6.0).
+#
+# rule 06 enforcement at Stop time: when the agent claims "done" without
+# evidence, we block the Stop and force one more turn. To avoid an infinite
+# loop, we record that we just blocked, and refuse to block twice in a row.
+# --------------------------------------------------------------------------- #
+def record_stop_block(session_id: str, turn_count: int | None) -> None:
+    """Mark that this session's Stop was blocked at the given turn_count.
+
+    The next Stop check consults `was_just_blocked` to skip re-blocking.
+    """
+    state = load(session_id)
+    state["last_blocked_turn"] = turn_count
+    save(state)
+
+
+def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
+    """True if the previous Stop in this session was already blocked.
+
+    Used by stop_guard to avoid infinite "block → continue → block again"
+    loops. Specifically returns True iff `turn_count` is one more than
+    the recorded `last_blocked_turn` (i.e., the agent has had exactly one
+    chance to recover after the prior block).
+
+    If `turn_count` is None (Claude Code didn't supply it), we conservatively
+    return True whenever any prior block was recorded — preferring false
+    negatives (no block) to false positives (infinite loop).
+    """
+    state = load(session_id)
+    last = state.get("last_blocked_turn")
+    if last is None:
+        return False
+    if turn_count is None:
+        return True
+    # Allow a generous window: if the agent's turn_count is anywhere in
+    # [last + 1, last + 3], treat the most recent block as still "fresh"
+    # and don't re-block. After 3 turns of grace, we're free to block again.
+    return last < turn_count <= last + 3

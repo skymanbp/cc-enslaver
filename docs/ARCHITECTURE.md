@@ -40,15 +40,17 @@ catches the lazy behaviour, often via a different signal.
 - Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
+- Stop guard (v0.6.0, rule 06 enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py)
 
-Four hook entries across three events:
+Five hook entries across four events:
 
 | Event | Matcher | Script | Purpose |
 |---|---|---|---|
 | `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
 | `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file |
-| `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (`--no-verify`, force-push, `chmod 777`, …) |
+| `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns; also register file-as-read on `register_read.py` invocation |
+| `Stop` | — | `stop_guard.py` | Block once if last assistant message has done-claim without evidence (rule 06) |
 
 #### Why everything in `PreToolUse` (and not split with `PostToolUse`)
 
@@ -138,10 +140,46 @@ Any unhandled exception in `read_guard.py` is caught, logged to stderr, and
 the script exits 0 (allow). A bug in the guard cannot be permitted to brick
 the agent — anti-laziness must never become anti-progress.
 
-#### Why `Stop` is not yet wired
+#### `Stop` guard (rule 06 enforcement, v0.6.0)
 
-`Stop` would loop forever without a stateful one-shot guard. Documented as a
-roadmap item in [`../CHANGELOG.md`](../CHANGELOG.md).
+`stop_guard.py` (event `Stop`, no matcher — Stop fires unconditionally per
+Claude Code spec) inspects `payload.assistant_message` (or falls back to
+the last assistant entry in `payload.transcript_path`):
+
+| Condition | Action |
+|---|---|
+| Done-claim regex matches AND no evidence regex matches | `{"decision": "block", "reason": <rule 06 reminder>}` |
+| Done-claim matches AND evidence matches | Allow (silent exit 0) |
+| No done-claim | Allow |
+| One-shot guard (current `turn_count` ∈ `[last_blocked_turn + 1, last_blocked_turn + 3]`) | Allow regardless of heuristic |
+
+**Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
+`完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
+`\bresolved\b` / `all set` / `should work now` / `that should do it`.
+
+**Evidence patterns**: shell-prompt lines (`$ ` / `> `), `Ran N tests`,
+`N passed/failed`, `pytest` / `unittest`, `重触发` / `边界用例` / `反向用例`
+/ `收敛`, `verified` / `re-?ran` / `validated`, fenced code block
+of ≥20 chars output.
+
+**One-shot guard**: `state_lib.record_stop_block(session_id, turn_count)`
+on every block; `state_lib.was_just_blocked(session_id, turn_count)`
+returns True for `turn_count ∈ [last + 1, last + 3]` so the agent has a
+multi-turn grace window to recover. After the grace expires, fresh
+blocks resume.
+
+**Block output is asymmetric**: Stop hook uses **top-level**
+`{"decision": "block", "reason": ...}`, NOT the `hookSpecificOutput`
+envelope used by `PreToolUse`. Verified against
+https://code.claude.com/docs/en/hooks.md.
+
+**Why heuristic, not file-claim verification**: deep "I edited X" →
+`git diff` / mtime verification was the original roadmap idea. v0.6.0
+deliberately ships the lighter heuristic — natural-language file-path
+extraction is fragile (high false positives), while done-claim-without-
+evidence is robust (a careful agent always cites evidence per rule 05,
+so this only fires on actual laziness). The deeper version is now a
+v0.7+ candidate.
 
 #### `Bash` bypass-pattern blocking
 
@@ -356,6 +394,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract), this doc §2 (deny output contract), `tests/test_read_guard.py` |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
+| `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases) |
 | `hooks/scripts/register_read.py` | `hooks/scripts/bash_guard.py` (the actual register handling lives there), this doc §2 "Read-cache escape hatch", `tests/test_register_read.py` |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
 | `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change. **Do not** re-add the `commands` / `agents` / `skills` / `hooks` path fields for standard locations: they cause `claude plugin install` to fail with `Duplicate hooks file detected` or `agents: Invalid input` because Claude Code auto-discovers `./commands/`, `./agents/`, `./skills/`, and `./hooks/hooks.json`. Those manifest fields are only for *non-standard* layouts. |

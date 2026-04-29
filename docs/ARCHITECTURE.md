@@ -295,24 +295,30 @@ the agent through the seven systematic-thinking questions from
 
 ## 6. Layer 5 — LLM-agnostic core
 
-**Source of truth:** [`../rules/`](../rules/).
+**Source of truth:** [`../rules/`](../rules/) (Chinese, canonical) +
+[`../rules/en/`](../rules/en/) (English mirror, v0.6.2).
 
 Each rule is plain Markdown with a small YAML frontmatter (`id`, `title`,
-`severity`). Every other layer in this plugin **derives from** these files —
-the prompt injections in `prompts/` are distillations, the slash commands and
-skill reference rule IDs, the verifier checks compliance with rule 05.
+`severity`). Every other layer in this plugin **derives from** the Chinese
+files — the prompt injections in `prompts/` are distillations, the slash
+commands and skill reference rule IDs, the verifier checks compliance with
+rule 05. The English mirror at `rules/en/` is provided for non-CJK readers
+and for use as a system-prompt fragment with non-Claude agents; if the two
+ever drift, the Chinese version wins.
 
 This separation is what makes the plugin **LLM-agnostic**: any agent runtime
 that does not speak Claude Code's plugin protocol can still consume the rules
 directly:
 
 ```bash
-# OpenAI / generic
+# OpenAI / generic — Chinese:
 cat rules/*.md > /tmp/anti-laziness-system-prompt.txt
-# then prepend to your system prompt
 
-# Cursor / Cline / Aider
-# Symlink rules/ into the project's rule directory or copy the index.
+# OpenAI / generic — English (v0.6.2):
+cat rules/en/*.md > /tmp/anti-laziness-system-prompt.txt
+
+# Cursor / Cline / Aider — symlink rules/ or rules/en/ into the project's
+# rule directory or copy the index.
 ```
 
 ---

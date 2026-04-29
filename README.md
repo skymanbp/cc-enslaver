@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -91,11 +91,15 @@ To verify: `/plugin` → "Installed" tab should list `anti-laziness@agent-rigor`
 
 ### As a rule pack for any other LLM
 
-You don't need Claude Code at all. The actual rules live in [`rules/`](rules/) as plain Markdown.
+You don't need Claude Code at all. The actual rules live in [`rules/`](rules/) as plain Markdown. The Chinese sources at [`rules/`](rules/) are canonical; an English mirror lives at [`rules/en/`](rules/en/) (added in v0.6.2).
 
 ```bash
-# Concatenate every rule into one system-prompt blob:
+# Chinese (canonical):
 cat rules/*.md > /tmp/anti-laziness.txt
+
+# English (mirror; for non-CJK readers or non-Claude agents):
+cat rules/en/*.md > /tmp/anti-laziness.txt
+
 # Then feed that to your agent of choice as system prompt / pre-context.
 ```
 
@@ -209,6 +213,8 @@ git clone https://github.com/skymanbp/agent-rigor.git /path/to/agent-rigor
 
 ```bash
 cat rules/*.md > anti-laziness-rules.txt
+# 或英文版（v0.6.2 新增）：
+cat rules/en/*.md > anti-laziness-rules-en.txt
 ```
 
 把这段文本作为 system prompt 喂给任何 LLM 即可。

@@ -15,8 +15,52 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Evaluate adding `git reset --hard` (if uncommitted changes), `git rebase
     --skip`, `pip install --break-system-packages`, etc. — currently held back
     on false-positive concerns.
-- **English mirror of `rules/`**
-  - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
+
+---
+
+## [0.6.2] — 2026-04-29
+
+English mirror of `rules/`. Adds `rules/en/00-index.md` plus
+`01-verify-dont-guess.md` through `06-verify-convergence.md`. The
+Chinese sources remain canonical; the English mirror is best-effort
+and intended for two use cases:
+
+1. Non-CJK readers who want to read the discipline pack.
+2. Using anti-laziness as an LLM-agnostic system-prompt fragment with
+   non-Claude agents (OpenAI / Gemini / local models). Concatenate
+   `rules/en/*.md` and prepend to your agent's system prompt.
+
+### Added
+
+- `rules/en/00-index.md` — index parallel to `rules/00-index.md`.
+- `rules/en/01-verify-dont-guess.md`
+- `rules/en/02-systematic-not-reactive.md`
+- `rules/en/03-root-cause.md`
+- `rules/en/04-full-context.md`
+- `rules/en/05-cite-sources.md`
+- `rules/en/06-verify-convergence.md`
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.6.1 → 0.6.2 (patch: documentation only, no behavioural change).
+- `CLAUDE.md` §6 — flips English mirror from roadmap to implemented.
+- `README.md` — install section's "as a rule pack for any other LLM"
+  now points at `rules/en/`.
+- `docs/ARCHITECTURE.md` — Layer 5 description mentions both the
+  Chinese sources and the English mirror.
+- `docs/RULES.md` — adds a "Languages" pointer to `rules/en/`.
+
+### Removed (Unreleased roadmap)
+
+- "English mirror of `rules/`" — implemented here.
+
+### Verified
+
+- 60/60 unit tests pass (no executable code added; rules are static
+  Markdown). CI matrix re-verifies on push.
+- All 7 English files have valid YAML frontmatter and parallel
+  structure to their Chinese counterparts.
 
 ---
 
@@ -650,7 +694,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/skymanbp/agent-rigor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...v0.5.1

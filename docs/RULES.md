@@ -6,6 +6,11 @@
 > 修改任意一条规则时，请按 [`../docs/ARCHITECTURE.md`](./ARCHITECTURE.md) §8
 > 表格同步检查所有连带文件。
 
+## 语言
+
+- **中文（canonical）** — [`../rules/01-*.md` ~ `../rules/06-*.md`](../rules/)。所有钩子注入（`prompts/`）、命令、skill 都基于中文。
+- **English mirror（v0.6.2）** — [`../rules/en/`](../rules/en/)。best-effort 翻译，与中文 1-1 对应；如出现 drift，中文版优先。供非 CJK 读者 / 非 Claude agent system prompt 使用。
+
 ---
 
 ## 规则编号约定

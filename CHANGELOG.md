@@ -11,15 +11,71 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Session state GC**
-  - Periodically prune session JSON files older than N days from
-    `${CLAUDE_PLUGIN_DATA}/sessions/`.
 - **Additional bypass patterns**
   - Evaluate adding `git reset --hard` (if uncommitted changes), `git rebase
     --skip`, `pip install --break-system-packages`, etc. — currently held back
     on false-positive concerns.
 - **English mirror of `rules/`**
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
+
+---
+
+## [0.6.1] — 2026-04-29
+
+Session state GC. Manual-only (no auto-trigger) — invokable from a
+Bash tool call or via the new `/anti-laziness:gc` slash command.
+
+### Why
+
+Each session writes one JSON file to `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json`.
+Files are KB-sized but sessions accumulate without bound across
+months of use. v0.6.1 adds the manual cleanup path. Auto-on-
+SessionStart was deferred to keep the hot SessionStart hook lean
+and to avoid a code path running on every cold start.
+
+### Added
+
+- **`hooks/scripts/gc_state.py`** — standalone CLI:
+  - Required: exactly one of `--dry-run` / `--apply` (refuses to
+    proceed if both or neither are given — prevents accidental
+    deletion).
+  - `--older-than DAYS` (default 30) — files newer than the threshold
+    are never touched.
+  - Prints `state_dir`, `scanned`, `threshold`, `eligible` count,
+    per-file age and size, and either `[dry-run] would delete` or
+    `deleted: N / bytes_freed: B` summary.
+  - Only globs `<state_dir>/*.json`; refuses to touch anything outside.
+- **`commands/gc.md`** — `/anti-laziness:gc` slash command. Defaults
+  to `--dry-run`; invokes the script with whatever argument shape
+  the user requested. Documents safe-default semantics.
+- **`tests/test_gc_state.py`** (9 cases):
+  - Arg validation (no flags, both flags, negative threshold)
+  - Dry-run lists without deleting; "nothing to do" path
+  - Apply deletes + prints summary; no-eligible is no-op
+  - Threshold boundary tests (higher threshold keeps more files)
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.6.0 → 0.6.1 (patch: new tooling, no behavioural change to the
+  hook layer).
+- Test count 51 → **60 pass** (+9 gc cases).
+
+### Removed (Unreleased roadmap)
+
+- "Session state GC" — implemented here (manual flavour). Auto-GC
+  on SessionStart is now a v0.7+ candidate.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+............................................................
+Ran 60 tests in <X>s
+OK
+```
+
+Self-applied rule 06 convergence check; full report in commit / release notes.
 
 ---
 
@@ -594,7 +650,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...v0.5.0

@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -33,7 +33,7 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
    - **Bash**: denied if the command contains a known bypass pattern — `--no-verify`, `--no-gpg-sign`, `git push --force` (without `--force-with-lease`), or `chmod 777` (rule 03). Each deny includes a precise recovery instruction.
    - **Read-cache escape hatch** (v0.4.0): when Claude Code's harness short-circuits a `Read` to its result cache without invoking the tool, the file never enters session state and a subsequent `Edit` is falsely denied. Agents can call `register_read.py --file ABS --hash SHA256` from Bash; `bash_guard.py` recomputes the hash from disk and only registers on match, so the hatch can't itself be used as a bypass.
 3. **Hard layer (Stop hook, v0.6.0)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message. If it contains a done-claim (`已解决` / `修好了` / `fixed` / `done` / `completed` / etc.) **and** lacks evidence (no `$ ` shell prompt, no test output, no `重触发` keyword, no `Ran N tests` line, no fenced code block), the hook returns `{"decision": "block", "reason": <rule-06 reminder>}`. The agent is forced to take one corrective turn supplying actual verification. A one-shot guard (`last_blocked_turn` in session state, with a 3-turn grace window) prevents infinite loops.
-4. **Active layer (slash commands)** — `/anti-laziness:checklist` and `/anti-laziness:verify` let the user (or the agent itself) trigger a structured checklist or independent verification pass on demand.
+4. **Active layer (slash commands)** — `/anti-laziness:checklist`, `/anti-laziness:verify`, and `/anti-laziness:gc` (v0.6.1) let the user (or the agent) trigger a structured checklist, independent verification pass, or session-state cleanup on demand.
 5. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
 6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
 7. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
@@ -56,7 +56,7 @@ anti-laziness/
 ├── hooks/
 │   ├── hooks.json               # Hook registration
 │   └── scripts/inject_context.py
-├── commands/                    # /anti-laziness:checklist, /anti-laziness:verify
+├── commands/                    # /anti-laziness:checklist, /anti-laziness:verify, /anti-laziness:gc
 ├── agents/verifier.md           # Independent citation verifier subagent
 └── skills/systematic-debug/     # Auto-invoked debug discipline skill
 ```
@@ -180,7 +180,7 @@ MIT — see [`LICENSE`](LICENSE).
    - **Bash**（v0.3.0）：命令包含 `--no-verify` / `--no-gpg-sign` / `git push --force`（不含 `--force-with-lease`） / `chmod 777` 等绕过模式 → deny + 给出符合规则 03 的根因式建议。
    - **Read 缓存逃生口**（v0.4.0）：`register_read.py` + bash_guard 重算 SHA-256 闸门。
    - **Stop 钩子**（v0.6.0 新增）：每次 Stop 检查 agent 末尾消息 — 含 done-claim（`已解决`/`改好了`/`fixed` 等）但缺收敛证据（无 `$ ` 命令输出、无 test 计数、无 `重触发` 关键词、无 fenced code block）→ `{"decision": "block", "reason": <rule-06 提醒>}` 强制再走一轮。一次性守卫 + 3-turn 宽限窗口避免死循环。
-3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify` 等 slash 命令。
+3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify`、`/anti-laziness:gc`（v0.6.1，状态文件清理）等 slash 命令。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。
 6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)，可作为任意 LLM 的 system prompt 片段使用。

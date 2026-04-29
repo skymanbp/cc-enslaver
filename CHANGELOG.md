@@ -24,8 +24,72 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     on false-positive concerns.
 - **English mirror of `rules/`**
   - Currently rules are Chinese-primary. Add `rules/en/` alongside for non-CJK users.
-- **CI**
-  - GitHub Actions workflow running `python -m unittest discover tests` on push.
+
+---
+
+## [0.5.1] — 2026-04-28
+
+CI infrastructure. No plugin behavioural change — adds GitHub Actions
+to run the existing test suite on every push and PR. The 35 unit tests
+that v0.5.0 ships were previously only verified on the maintainer's
+machine; from this release onward, every commit to `main` and every
+pull request is gated by a green run on Linux + Windows.
+
+### Added
+
+- **`.github/workflows/test.yml`** — `tests` workflow:
+  - Triggers: `push` to `main`, `pull_request` to `main`,
+    `workflow_dispatch` (manual re-run from the Actions tab).
+  - Matrix: `ubuntu-latest` + `windows-latest`, Python `3.13`. The
+    Windows runner exists because `state.py` and the path-normalization
+    paths in `read_guard.py` specifically handle Windows quirks; testing
+    on POSIX alone would miss regressions there.
+  - Steps: checkout → setup-python@v5 → `python -m unittest discover
+    tests -v`.
+  - `concurrency` cancels stale runs when new commits land on the same
+    ref, so a rapid chain of pushes doesn't burn matrix minutes.
+  - `permissions: contents: read` keeps the runner principle-of-least.
+- **README.md** — `tests` status badge added to the badge row.
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.5.0 → 0.5.1 (patch: no behavioural change to plugin users).
+- `CLAUDE.md` §6 — `v0.5.0 → v0.5.1` and the line about CI flips from
+  unimplemented to implemented.
+
+### Removed (from Unreleased roadmap)
+
+- "CI" — implemented here.
+
+### Verified (rule 06 self-applied)
+
+- **C1 重触发原症状**: "no CI" was the failure mode → workflow file now
+  exists at `.github/workflows/test.yml` and parses as valid YAML.
+- **C2 边界 + 反向**: YAML triggers cover push/PR/manual; matrix covers
+  Linux + Windows; python `3.13` matches the reference environment;
+  cancellation policy covers rapid-push edge case. First actual CI run
+  on push will be the live integration test.
+- **C3 连带不破坏**: `python -m unittest discover tests` locally
+  produces `Ran 35 tests in 4.312s — OK` with no regressions.
+- **C4 自答**:
+  1. *真解决?* — Yes for the project-internal failure mode (silent
+     test regressions). Caveat: CI green only proves the suite passes;
+     it doesn't prove tests cover the right behaviour.
+  2. *更好方案?* — Could matrix wider Python (3.11/3.12), could add
+     pre-commit hooks locally too, could enable required-status-check
+     branch protection. All deferred — minimum effective change is one
+     workflow file, single Python version, observe one run, expand if
+     needed.
+  3. *改动经过验证?* — YAML syntax validated locally via `yaml.safe_load`;
+     test suite confirmed green locally. Live workflow run on push is
+     the final verification gate (visible from the Actions tab and the
+     README badge).
+  4. *验证合理?* — The check chain is "YAML parses → workflow runs →
+     unittest passes on two OSes". This matches the failure-mode causal
+     chain (broken test → silent regression in main).
+- **C5 量化**: test count unchanged at 35 (CI doesn't add tests, just
+  enforces them); matrix expansion = 1 OS → 2 OSes.
 
 ---
 
@@ -435,7 +499,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...v0.3.2

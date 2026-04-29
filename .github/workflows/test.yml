@@ -1,0 +1,50 @@
+name: tests
+
+# Why this workflow exists:
+# v0.5.0 shipped 35 unittests covering all four hook scripts. Without CI,
+# any regression after a merge stays silent until someone runs the suite
+# locally. This workflow runs `python -m unittest discover tests` on every
+# push to main and every PR, on both Linux and Windows (the plugin
+# specifically handles Windows path quirks, so cross-platform coverage
+# matters).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual trigger from the Actions tab — useful for re-running after a
+  # transient failure or for ad-hoc verification of an unmerged branch.
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer commit lands on the same ref.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show Python version
+        run: python --version
+
+      - name: Run unit tests
+        run: python -m unittest discover tests -v

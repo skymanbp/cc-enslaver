@@ -140,18 +140,22 @@ Any unhandled exception in `read_guard.py` is caught, logged to stderr, and
 the script exits 0 (allow). A bug in the guard cannot be permitted to brick
 the agent — anti-laziness must never become anti-progress.
 
-#### `Stop` guard (rule 06 enforcement, v0.6.0)
+#### `Stop` guard (rule 06 enforcement, v0.6.0 + v0.7.0 deep)
 
 `stop_guard.py` (event `Stop`, no matcher — Stop fires unconditionally per
 Claude Code spec) inspects `payload.assistant_message` (or falls back to
-the last assistant entry in `payload.transcript_path`):
+the last assistant entry in `payload.transcript_path`).
 
-| Condition | Action |
-|---|---|
-| Done-claim regex matches AND no evidence regex matches | `{"decision": "block", "reason": <rule 06 reminder>}` |
-| Done-claim matches AND evidence matches | Allow (silent exit 0) |
-| No done-claim | Allow |
-| One-shot guard (current `turn_count` ∈ `[last_blocked_turn + 1, last_blocked_turn + 3]`) | Allow regardless of heuristic |
+**Decision tree (v0.7.0):**
+
+| Step | Condition | Action |
+|------|-----------|--------|
+| 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`) | Allow |
+| 1 | No done-claim regex matched | Allow |
+| 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (`HEDGED_DONE_REASON`) |
+| 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
+| 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
+| 5 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
 `完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
@@ -161,6 +165,28 @@ the last assistant entry in `payload.transcript_path`):
 `N passed/failed`, `pytest` / `unittest`, `重触发` / `边界用例` / `反向用例`
 / `收敛`, `verified` / `re-?ran` / `validated`, fenced code block
 of ≥20 chars output.
+
+**v0.7.0 hedge patterns** (must be within 50 chars of a done-claim, in
+either order, to fire): `我[记觉]得` / `我相信` / `可能就` / `应该是` /
+`大概(是)?` / `I think` / `I believe` / `I guess` / `maybe` / `probably`
+/ `kinda` / `sort of`. Generic non-first-person hedges like `通常` or
+`should` are intentionally **excluded** — they appear too often in
+legitimate technical writing far from the completion claim.
+
+**v0.7.0 convergence markers** (single match suffices to pass the
+self-quiz gate): `rule 06` / `自答` / `收敛` / `convergence` /
+`self-quiz`, plus the rule-06-specific check names `重触发` / `边界用例`
+/ `反向用例`.
+
+**v0.7.0 self-quiz patterns** (≥ 2 of 4 must match, in either Chinese
+or English):
+
+| # | Question | Patterns |
+|---|----------|----------|
+| 1 | Really solved? | `真.*?解决` / `really.*?(?:solv\|fix)` |
+| 2 | Better solution? | `更好.*?(?:方案\|方法\|做法)` / `better.*?(?:solut\|approach\|way)` |
+| 3 | Unverified parts? | `(?:哪些\|哪里).*?(?:没验\|未验)` / `unverif` |
+| 4 | Meaningful verification? | `验证.*?(?:合理\|是否充分)` / `verification.*?(?:meaning\|reasonab)` |
 
 **One-shot guard**: `state_lib.record_stop_block(session_id, turn_count)`
 on every block; `state_lib.was_just_blocked(session_id, turn_count)`

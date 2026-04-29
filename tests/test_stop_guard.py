@@ -78,8 +78,12 @@ class TestDoneClaimWithoutEvidence(_StopBase):
         self.assertEqual(state.get("last_blocked_turn"), 7)
 
 
-class TestDoneClaimWithEvidence(_StopBase):
-    def test_done_with_command_output_allows(self) -> None:
+class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
+    """v0.7.0 — evidence alone is no longer sufficient. Must also surface
+    a rule-06 marker OR >= 2 of the 4 self-questions."""
+
+    def test_done_with_evidence_and_convergence_marker_allows(self) -> None:
+        # 重触发 is both an evidence pattern AND a convergence marker.
         msg = (
             "已修复并验证：\n\n"
             "$ pytest tests/\n"
@@ -91,15 +95,89 @@ class TestDoneClaimWithEvidence(_StopBase):
         self.assertEqual(rc, 0)
         self.assertIsNone(out, msg=f"expected silent allow, got {out!r}")
 
-    def test_done_with_test_count_allows(self) -> None:
-        msg = "fixed. 22 passed, 0 failed."
-        rc, out, _ = self._stop(msg)
-        self.assertIsNone(out)
-
     def test_done_with_re_triggered_keyword_allows(self) -> None:
+        # 重触发 alone is a convergence marker.
         msg = "完成了。重触发原症状后异常消失。"
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
+
+    def test_evidence_only_without_quiz_or_marker_is_blocked_v07(self) -> None:
+        # v0.6.0 would have allowed this; v0.7.0 blocks because no rule-06
+        # marker and no self-quiz questions are present.
+        msg = "fixed. 22 passed, 0 failed."
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(out, msg="v0.7 must block evidence-only completion")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("self-quiz", out["reason"])
+
+    def test_done_with_two_self_questions_allows(self) -> None:
+        # Agent answered Q1 (真解决) + Q2 (更好方案) → quiz threshold met.
+        msg = (
+            "fixed.\n\n"
+            "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
+            "**真的解决了吗?** Yes — the failing input now returns 200.\n"
+            "**有没有更好的方案?** Considered using a thread lock instead, "
+            "but the existing async lock is already part of the architecture."
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(out, msg="2 of 4 self-questions should pass quiz gate")
+
+    def test_done_with_explicit_rule06_mention_allows(self) -> None:
+        # Explicit "rule 06" + evidence is enough (single marker hit).
+        msg = (
+            "Done.\n$ pytest passed (60/60)\n"
+            "Ran rule 06 self-check; all 5 steps verified."
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out)
+
+
+class TestHedgedCompletion(_StopBase):
+    """v0.7.0 — hedge near done-claim → block (rule 01 cross-enforcement)."""
+
+    def test_chinese_hedge_then_done_is_blocked(self) -> None:
+        msg = "我觉得 bug 修好了。"
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(out, msg="hedge-then-done must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 01", out["reason"])
+
+    def test_english_i_think_fixed_is_blocked(self) -> None:
+        msg = "I think it's fixed now."
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("hedge", out["reason"].lower())
+
+    def test_probably_done_is_blocked(self) -> None:
+        msg = "probably done. $ pytest passed (35/35). 重触发: ok"
+        # Even with evidence + marker, hedging undermines the claim.
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(out["decision"], "block")
+
+    def test_done_then_hedge_is_blocked(self) -> None:
+        # Reverse order: completion first, hedge after, still within window.
+        msg = "已解决，应该是这样。$ pytest passed."
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(out["decision"], "block")
+
+    def test_hedge_far_from_done_is_allowed(self) -> None:
+        # Hedge in unrelated paragraph, far from the done-claim, with proper
+        # evidence + quiz markers nearby. Should not trip the proximity check.
+        msg = (
+            "I think this race condition usually doesn't reproduce — "
+            "hard to test in isolation.\n\n"
+            "But anyway, $ pytest passed (35/35), 重触发原症状 confirms "
+            "the lock fixes the race, **真解决** confirmed via the new "
+            "concurrent test, and the existing tests still pass. "
+            "fixed."
+        )
+        rc, out, _ = self._stop(msg)
+        # The hedge "I think" is more than 50 chars away from "fixed".
+        # Should pass.
+        self.assertIsNone(out, msg=f"distant hedge should not block, got {out!r}")
 
 
 class TestNoDoneClaim(_StopBase):

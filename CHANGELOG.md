@@ -18,6 +18,100 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.7.0] — 2026-04-29
+
+**Stop hook deep rule-06 enforcement.** v0.6.0's done-claim heuristic
+("done + any evidence → allow") was gameable — an agent could fake `$ ls`
+output and pass. v0.7.0 layers two stricter checks on top:
+
+- **Hedged-completion detection** (rule 01 cross-enforcement): if a
+  done-claim appears within ~50 chars of a first-person uncertainty
+  marker (`我觉得` / `我相信` / `应该是` / `I think` / `probably` /
+  `maybe`), block. Confident verification cannot coexist with hedged
+  language.
+- **Missing self-quiz detection** (rule 06 deep): even with evidence,
+  if the message lacks both an explicit convergence marker (`rule 06`
+  / `自答` / `收敛` / `重触发` / `边界用例` / `convergence`) AND fewer
+  than 2 of the 4 self-questions are detected (真解决 / 更好方案 /
+  哪些没验 / 验证合理), block.
+
+Decision tree:
+
+```
+1. one-shot guard window? → ALLOW (existing v0.6.0)
+2. no done-claim?         → ALLOW (existing v0.6.0)
+3. hedge near done?       → BLOCK (NEW: rule 01 reason)
+4. no evidence?           → BLOCK (existing v0.6.0 reason)
+5. no quiz/marker?        → BLOCK (NEW: rule 06 deep reason)
+6. otherwise              → ALLOW
+```
+
+Each block has a distinct reason text so the agent sees exactly which
+discipline gate failed.
+
+### Why "≥ 2 of 4 questions OR any single marker" (not stricter)
+
+If we required all 4 questions verbatim, false-positive rate would
+explode — agents using their own phrasing would be blocked despite
+genuine convergence work. Accepting a single rule-06 marker (`收敛` /
+`rule 06` / `重触发`) lets careful agents pass with their natural
+language; demanding ≥ 2 questions when no marker is present keeps the
+bar above "throw any one keyword". One-shot guard caps false-positive
+cost at 1 turn regardless.
+
+### Added
+
+- `hooks/scripts/stop_guard.py`:
+  - `HEDGE_NEAR_DONE_PATTERNS` — bidirectional regex (hedge-then-done
+    OR done-then-hedge, within 50 chars).
+  - `CONVERGENCE_MARKERS` — `rule 06`, `自答`, `收敛`, `convergence`,
+    `self-quiz`, plus rule-06 specific check names (`重触发`,
+    `边界用例`, `反向用例`).
+  - `SELF_QUIZ_PATTERNS` — 4 regexes for the 4 self-questions
+    (Chinese + English).
+  - `_has_hedge_near_done()`, `_has_self_quiz_or_marker()` helpers.
+  - 3 distinct block-reason templates (`NO_EVIDENCE_REASON`,
+    `HEDGED_DONE_REASON`, `MISSING_QUIZ_REASON`).
+  - Layered decision logic in `main()`.
+- `tests/test_stop_guard.py` — 7 new cases:
+  - `TestDoneClaimWithEvidenceAndQuiz` (5 cases): explicit-marker
+    pass, `重触发`-keyword pass, evidence-only-blocks-under-v07,
+    2-self-questions pass, explicit-`rule 06`-mention pass.
+  - `TestHedgedCompletion` (5 cases): Chinese 我觉得+done blocked,
+    English `I think fixed` blocked, `probably done`+evidence blocked,
+    done-then-hedge blocked, far-away hedge allowed.
+- Test count 60 → **67 pass**.
+
+### Changed
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.6.2 → 0.7.0.
+- The previous test `test_done_with_test_count_allows` ("fixed. 22
+  passed, 0 failed.") was renamed to
+  `test_evidence_only_without_quiz_or_marker_is_blocked_v07` and
+  flipped to expect a block. This is the codified v0.7 tightening:
+  evidence alone is no longer sufficient.
+
+### Removed (Unreleased roadmap)
+
+- Implicit "deep rule-06 enforcement" / "Stop-hook claim verification"
+  for the *self-quiz* aspect. The deeper "verify edited file via
+  git/mtime" version remains an Unreleased v0.8+ candidate.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+...................................................................
+Ran 67 tests in <X>s
+OK
+```
+
+Self-applied rule 06 — including the new v0.7 deep layer — before
+shipping. CI matrix re-verifies on push.
+
+---
+
 ## [0.6.2] — 2026-04-29
 
 English mirror of `rules/`. Adds `rules/en/00-index.md` plus
@@ -694,7 +788,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/skymanbp/agent-rigor/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/skymanbp/agent-rigor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...v0.6.0

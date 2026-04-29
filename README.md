@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -32,7 +32,12 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
    - **Edit/Write**: denied if the target file already exists but has not been `Read` in this session (rule 04). New file creation is allowed.
    - **Bash**: denied if the command contains a known bypass pattern — `--no-verify`, `--no-gpg-sign`, `git push --force` (without `--force-with-lease`), or `chmod 777` (rule 03). Each deny includes a precise recovery instruction.
    - **Read-cache escape hatch** (v0.4.0): when Claude Code's harness short-circuits a `Read` to its result cache without invoking the tool, the file never enters session state and a subsequent `Edit` is falsely denied. Agents can call `register_read.py --file ABS --hash SHA256` from Bash; `bash_guard.py` recomputes the hash from disk and only registers on match, so the hatch can't itself be used as a bypass.
-3. **Hard layer (Stop hook, v0.6.0)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message. If it contains a done-claim (`已解决` / `修好了` / `fixed` / `done` / `completed` / etc.) **and** lacks evidence (no `$ ` shell prompt, no test output, no `重触发` keyword, no `Ran N tests` line, no fenced code block), the hook returns `{"decision": "block", "reason": <rule-06 reminder>}`. The agent is forced to take one corrective turn supplying actual verification. A one-shot guard (`last_blocked_turn` in session state, with a 3-turn grace window) prevents infinite loops.
+3. **Hard layer (Stop hook, v0.6.0 + v0.7.0 deep)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message and applies three layered checks:
+   - **(a) v0.6.0** — done-claim with **no evidence** (no `$ ` shell prompt, no test counts, no `重触发`/`pytest`/`unittest` keyword, no fenced code block) → block.
+   - **(b) v0.7.0** — done-claim with **hedge near it** (`我觉得` / `I think` / `应该是` / `probably` / `maybe` within ~50 chars) → block (rule 01 cross-enforcement). Confident verification cannot coexist with hedged language.
+   - **(c) v0.7.0** — done-claim with evidence but **no rule-06 marker** (`rule 06` / `自答` / `收敛` / `重触发` / `边界用例`) and **fewer than 2 of 4 self-quiz questions** detected (真解决? 更好方案? 哪些没验? 验证合理?) → block. Tests passing alone is not convergence.
+
+   A one-shot guard (`last_blocked_turn` in session state, with a 3-turn grace window) prevents infinite loops. Each layer has its own block reason text so the agent sees exactly which discipline gate failed.
 4. **Active layer (slash commands)** — `/anti-laziness:checklist`, `/anti-laziness:verify`, and `/anti-laziness:gc` (v0.6.1) let the user (or the agent) trigger a structured checklist, independent verification pass, or session-state cleanup on demand.
 5. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
 6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
@@ -117,7 +122,7 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 | `UserPromptSubmit` | — | Inject compact pre-turn reminder | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; deny Edit/Write of unread existing file | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns; also process `register_read.py` invocations (validate hash, register state) | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
-| `Stop` | — | Block once if last assistant message has done-claim without evidence (rule 06) | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
+| `Stop` | — | Layered: block on done-claim with no evidence / hedged completion / missing rule-06 self-quiz (v0.7.0) | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
 
 Five scripts:
 
@@ -183,7 +188,7 @@ MIT — see [`LICENSE`](LICENSE).
    - **Edit/Write**（v0.2.0）：若目标文件已存在但本会话尚未 `Read` 过 → deny + "先 Read 再重试"。新文件创建放行。
    - **Bash**（v0.3.0）：命令包含 `--no-verify` / `--no-gpg-sign` / `git push --force`（不含 `--force-with-lease`） / `chmod 777` 等绕过模式 → deny + 给出符合规则 03 的根因式建议。
    - **Read 缓存逃生口**（v0.4.0）：`register_read.py` + bash_guard 重算 SHA-256 闸门。
-   - **Stop 钩子**（v0.6.0 新增）：每次 Stop 检查 agent 末尾消息 — 含 done-claim（`已解决`/`改好了`/`fixed` 等）但缺收敛证据（无 `$ ` 命令输出、无 test 计数、无 `重触发` 关键词、无 fenced code block）→ `{"decision": "block", "reason": <rule-06 提醒>}` 强制再走一轮。一次性守卫 + 3-turn 宽限窗口避免死循环。
+   - **Stop 钩子**（v0.6.0 + v0.7.0 加深）：每次 Stop 三层决策：(a) done-claim + 无 evidence → 拒（v0.6.0）；(b) done-claim + 50 字内 hedge（`我觉得`/`I think`/`probably` 等）→ 拒（v0.7.0 rule 01 投影）；(c) done-claim + evidence 但缺 `rule 06` / `收敛` / `自答` / `重触发` 等收敛标记**且** 4 题（真解决/更好方案/哪些没验/验证合理）匹配 < 2 → 拒（v0.7.0 deep）。一次性守卫 + 3-turn 宽限窗口避免死循环。
 3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify`、`/anti-laziness:gc`（v0.6.1，状态文件清理）等 slash 命令。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。

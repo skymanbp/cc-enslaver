@@ -42,9 +42,39 @@ class TestInjectContextSessionStart(unittest.TestCase):
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        # Should mention all 5 numbered rules and the rules/ directory.
-        for label in ("01", "02", "03", "04", "05", "rules/"):
+        # Should mention all 6 numbered rules and the rules/ directory.
+        for label in ("01", "02", "03", "04", "05", "06", "rules/"):
             self.assertIn(label, ctx, msg=f"context missing {label!r}")
+
+    def test_content_references_rule_06_convergence(self) -> None:
+        # Rule 06 is the post-fix verify-and-converge rule (v0.5.0). The
+        # session-start prompt must surface its 4-question self-quiz so
+        # the agent sees them on every cold start.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        # The 4 self-questions phrased in Chinese (matching session-start.md):
+        for needle in (
+            "验证收敛",
+            "重触发原症状",
+            "是不是真的解决了问题",
+            "有没有更好的解决方法",
+            "改动是否经过验证",
+            "验证是否合理",
+        ):
+            self.assertIn(needle, ctx, msg=f"session-start prompt missing {needle!r}")
+
+    def test_user_prompt_includes_convergence_check(self) -> None:
+        # The per-turn reminder should also nudge the agent toward
+        # convergence checks before declaring done.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "UserPromptSubmit"],
+            stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("收敛", ctx, msg="user-prompt missing convergence reminder")
 
     def test_content_is_utf8_intact(self) -> None:
         # Smoke test for the Windows cp936 stdout regression: the prompt

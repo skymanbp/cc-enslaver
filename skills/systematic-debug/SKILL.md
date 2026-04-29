@@ -60,11 +60,26 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 - 对每个连带项也同步修改。
 - 修改时禁止规则 03 列出的反模式。
 
-### Step 7 · 全局验证（七问之 7）
+### Step 7 · 收敛验证（rule 06 强制）
 
-- 重新运行用户最初描述失败的场景，确认问题消失。
-- 运行相关测试套件，确认没有引入新问题。
-- 在最终回复里附上验证证据（命令输出、`file:line` 引用）。
+> 这一步是 [`rules/06-verify-convergence.md`](rules/06-verify-convergence.md) 的执行入口。
+> 完成下面所有子步骤前**禁止**声称完成；如有任意一步揭示问题未解决，**回到 Step 3 重新假设根源**。
+
+**7.1 · 重触发原症状**：用用户在 Step 1 描述的同一条命令 / 输入重跑。粘贴新输出，明确"原报错消失"。
+
+**7.2 · 边界 + 反向用例**：至少跑 1 个边界（空输入 / 错误路径 / 并发 / 跨平台 / Unicode）+ 1 个反向用例（应该 fail 的仍 fail）。
+
+**7.3 · 连带不破坏**：跑相关测试套件 + lint + 类型检查；附输出。
+
+**7.4 · 自答 4 题（必须显式回答）**：
+1. **是不是真的解决了？** 证据是什么？如何排除"巧合 / 缓存 / 环境差异"？
+2. **有没有更好的方案？** 与替代方案在简洁性 / 性能 / 可维护性 / 架构契合度上对比？
+3. **改动是否经过验证？** 哪些没验？为什么不需要？
+4. **验证是否合理？** 我跑的测试对应原问题的哪个机理？是否覆盖了 Step 5 中的根因因果链？
+
+**7.5 · 量化（仅性能/竞态/兼容性修复）**：给数字 / 给重跑次数 / 给测试矩阵。
+
+⚠️ 任意子步骤的答案是 "不知道 / 应该可以 / 差不多" → **未收敛，回 Step 3**。
 
 ## 禁止行为
 
@@ -82,8 +97,8 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 1. **根源说明**（一段话讲清楚机理）
 2. **修改清单**（含 `file:line`）
 3. **连带项处理**（"我同时改了 X / 检查了 Y / 未改 Z 因为…"）
-4. **验证证据**（实际运行的命令 + 输出）
+4. **收敛验证证据**（rule 06 的 Step 7 全部 5 个子步骤的产物：重触发输出、边界用例结果、连带测试结果、4 题自答、量化对比）
 
 如果中途发现问题超出预期复杂度（例如根源在另一个模块），**先回到用户**说明情况，不要单方面扩大修改范围。
 
-> 关联规则：[`rules/02-systematic-not-reactive.md`](rules/02-systematic-not-reactive.md)、[`rules/03-root-cause.md`](rules/03-root-cause.md)、[`rules/04-full-context.md`](rules/04-full-context.md)。
+> 关联规则：[`rules/02-systematic-not-reactive.md`](rules/02-systematic-not-reactive.md)、[`rules/03-root-cause.md`](rules/03-root-cause.md)、[`rules/04-full-context.md`](rules/04-full-context.md)、[`rules/06-verify-convergence.md`](rules/06-verify-convergence.md)。

@@ -29,6 +29,89 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.5.0] — 2026-04-28
+
+New core rule 06 — **验证收敛 / verify-convergence**. Promotes the
+"after-fix verification" discipline from an implicit habit into a
+first-class rule with mandatory checks at every layer.
+
+### Motivation
+
+The first 5 rules covered specific lazy patterns: guessing (01),
+reactive thinking (02), root-cause bypass (03), keyword-only edits (04),
+unverifiable citations (05). They did not cover **premature
+declaration of done** — the meta-failure where an agent claims "fixed"
+without verifying the fix actually root-cured the problem and didn't
+introduce regressions. Real incidents in this project (the
+`fixture.bin` smoke test that revealed v0.3.1's PostToolUse scope bug;
+the cache short-circuit only surfacing in production) all share that
+shape: a fix shipped, then a test run later showed the original
+failure still latent. Rule 06 makes that explicit.
+
+### Added
+
+- **`rules/06-verify-convergence.md`** — defines the convergence
+  contract:
+  1. **重触发原症状** — re-run the exact failing command/input
+  2. **边界 + 反向用例** — at least 1 edge case + 1 negative case
+  3. **连带不破坏** — full test/lint/typecheck pass
+  4. **强制自答 4 题** —
+     - 是不是真的解决了？（具体证据）
+     - 有没有更好的解决方法？（与替代方案对比）
+     - 改动是否经过验证？（哪些没验？为什么不需要？）
+     - 验证是否合理？（是否覆盖了 rule 03 的根因因果链？）
+  5. **量化优于定性** — for performance/race/compat: numbers, repeat
+     counts, test matrices.
+  Convergence terminates *only* when 1–5 are all backed by traceable
+  evidence; otherwise → loop back to rule 02.
+- Cross-references documented: 06 vs 02 (pre- vs post-action global
+  check), 06 vs 03 (what to fix vs whether the fix actually rooted),
+  06 vs 01 (input-side vs output-side anti-guessing), 06 vs 05
+  (evidence form).
+- **`prompts/session-start.md`** — adds the rule 06 summary block
+  and converts the workflow constraint from "report with file:line" to
+  "execute rule 06 verifications 1-5 + report with file:line +
+  evidence".
+- **`prompts/user-prompt.md`** — adds a 6th per-turn self-check item:
+  "如果即将声称'完成'：是否重触发原症状？是否跑了边界+反向？是否自答了 4 题？"
+- **`commands/checklist.md`** — gains a brand-new section **C** with
+  C1-C5 (and C4.1-C4.4 for the 4-question self-quiz). Default invocation
+  now prints A/B/C; argument-hint extended with `converge`.
+- **`skills/systematic-debug/SKILL.md`** — Step 7 rewritten as the
+  rule-06 entry point with all 5 sub-steps; output contract now demands
+  "convergence verification evidence" not just "verification evidence".
+- **`CLAUDE.md`** — new section §2.8 "改完必须收敛验证"; rules tree
+  now lists 06; §6 "当前版本" reflects v0.5.0.
+
+### Changed
+
+- `rules/00-index.md` and `docs/RULES.md` — rule count 5 → 6;
+  numbering range `01–05` → `01–06`; relationship diagram extended;
+  "addition flow" updated for `07-xxx.md`.
+- `.claude-plugin/plugin.json` + `marketplace.json` — version bumped
+  0.4.0 → 0.5.0.
+- `tests/test_inject_context.py` — adds an assertion that
+  session-start prompt mentions rule 06 and convergence vocabulary.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+.................................
+----------------------------------------------------------------------
+Ran 33 tests in <X>s
+
+OK
+```
+
+(Test count unchanged: rules are documentation, not executable code.
+The convergence rule's enforcement happens via prompt injection +
+human/agent discipline, not via a hook script. Future hardening
+options — a Stop-hook claim verifier — are documented in Unreleased
+roadmap.)
+
+---
+
 ## [0.4.0] — 2026-04-28
 
 Read-cache escape hatch — `register_read.py` + `bash_guard.py` extension.
@@ -352,7 +435,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...v0.3.1

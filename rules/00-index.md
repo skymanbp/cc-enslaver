@@ -20,6 +20,7 @@ severity: info
 | 03  | `03-root-cause.md`                    | 修根因，不修症状       | must     |
 | 04  | `04-full-context.md`                  | 完整阅读，拒绝关键词依赖 | must     |
 | 05  | `05-cite-sources.md`                  | 引用必须可追溯         | must     |
+| 06  | `06-verify-convergence.md`            | 验证收敛               | must     |
 
 ## 编号规则
 

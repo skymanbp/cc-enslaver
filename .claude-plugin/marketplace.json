@@ -1,26 +1,26 @@
 {
-  "name": "agent-rigor",
+  "name": "cc-enslaver",
   "owner": {
     "name": "skymanbp"
   },
   "metadata": {
-    "description": "Single-plugin marketplace exposing the anti-laziness discipline plugin.",
-    "version": "0.7.0"
+    "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
+    "version": "0.9.0"
   },
   "plugins": [
     {
-      "name": "anti-laziness",
+      "name": "cc-enslaver",
       "source": "./",
       "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior.",
-      "version": "0.7.0",
+      "version": "0.9.0",
       "author": {
         "name": "skymanbp"
       },
-      "homepage": "https://github.com/skymanbp/agent-rigor",
-      "repository": "https://github.com/skymanbp/agent-rigor",
+      "homepage": "https://github.com/skymanbp/cc-enslaver",
+      "repository": "https://github.com/skymanbp/cc-enslaver",
       "license": "MIT",
       "keywords": [
-        "anti-laziness",
+        "cc-enslaver",
         "discipline",
         "systematic-thinking",
         "verification",

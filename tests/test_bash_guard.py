@@ -152,7 +152,7 @@ class TestBashGuardRegisterFlow(unittest.TestCase):
         import shutil
         import tempfile
 
-        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-bg-reg-"))
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-bg-reg-"))
         self.fpath = self.tmpdir / "fixture.bin"
         self.content = b"bash_guard register-flow fixture content\n"
         self.fpath.write_bytes(self.content)

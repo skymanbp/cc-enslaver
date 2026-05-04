@@ -17,7 +17,7 @@
 
 - 编号格式：`<两位数>-<kebab-case-名>.md`
 - 编号一旦发布**不再回收**（即使规则被废弃，也不复用编号）。
-- 当前编号区间：`01–06`。
+- 当前编号区间：`01–07`。
 
 ---
 
@@ -31,6 +31,7 @@
 | 04 | 完整阅读，拒绝关键词依赖 | **must** | [`../rules/04-full-context.md`](../rules/04-full-context.md) | 编辑文件前、跨文件影响分析 |
 | 05 | 引用必须可追溯 | **must** | [`../rules/05-cite-sources.md`](../rules/05-cite-sources.md) | 任何对外陈述（PR 描述、回复用户、报告） |
 | 06 | 验证收敛 | **must** | [`../rules/06-verify-convergence.md`](../rules/06-verify-convergence.md) | 任何修复 / 更新 / 补丁完成后的强制收敛验证 |
+| 07 | 任务忠实 | **must** | [`../rules/07-task-fidelity.md`](../rules/07-task-fidelity.md) | 任何任务声称完成前的请求覆盖、无降级、无遗漏二次确认 |
 
 ---
 
@@ -67,13 +68,19 @@
                          ▼
        ┌──────────────────────────────────────┐
        │   06 验证收敛                          │
+       └─────────────────┬────────────────────┘
+                         │
+                         ▼
+       ┌──────────────────────────────────────┐
+       │   07 任务忠实                          │
        └──────────────────────────────────────┘
 ```
 
 - **01 / 04 / 05** 是**输入端**约束：决定 agent 如何获取与陈述事实。
 - **02** 是**思考过程**约束：决定 agent 如何把事实组织成方案。
 - **03** 是**输出端 (改什么)** 约束：决定 agent 修改代码时是否触达根因。
-- **06** 是**输出端 (改完之后)** 约束：决定 agent 是否真的把根因解决到收敛、是否经得起验证。
+- **06** 是**输出端 (改完之后 · 技术面)** 约束：决定 agent 是否真的把根因解决到收敛、是否经得起验证。
+- **07** 是**输出端 (改完之后 · 契约面)** 约束：决定 agent 是否把用户**要求的全部**按**原标准**交付（无遗漏、无降级、无范围溢出）。06 与 07 互补：06 解决"症状-根因"轴，07 解决"请求-交付"轴。
 
 ---
 
@@ -81,9 +88,9 @@
 
 | 组件 | 引用方式 |
 |------|---------|
-| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 6 条规则的浓缩版 |
-| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 6 条规则的一行式提醒 |
-| [`../commands/checklist.md`](../commands/checklist.md) | 把 6 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证） |
+| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 7 条规则的浓缩版 |
+| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 7 条规则的一行式提醒 |
+| [`../commands/checklist.md`](../commands/checklist.md) | 把 7 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实） |
 | [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证 |
 | [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 |
 
@@ -91,11 +98,11 @@
 
 ## 添加新规则的流程
 
-1. 在 [`../rules/`](../rules/) 下创建 `07-xxx.md`，保留前 6 条编号不变。
+1. 在 [`../rules/`](../rules/) 下创建 `08-xxx.md`，保留前 7 条编号不变。
 2. 文件必须包含 YAML frontmatter（参考现有任意规则的开头）：
    ```yaml
    ---
-   id: "07"
+   id: "08"
    title: "<规则标题>"
    severity: must
    ---

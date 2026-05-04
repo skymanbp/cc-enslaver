@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""anti-laziness — user-facing entry for the Read-cache escape hatch.
+"""cc-enslaver — user-facing entry for the Read-cache escape hatch.
 
 When Claude Code's harness short-circuits a `Read` tool call to its
 result cache, neither `PreToolUse(Read)` nor `PostToolUse(Read)` fires,
@@ -51,7 +51,7 @@ def _compute_sha256(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Register a file as 'read' in anti-laziness session state.",
+        description="Register a file as 'read' in cc-enslaver session state.",
     )
     parser.add_argument(
         "--file",

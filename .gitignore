@@ -26,6 +26,7 @@ desktop.ini
 .claude/local/
 .claude/cache/
 .claude/settings.local.json
+.claude/*.lock
 
 # --- Build / dist artifacts ---
 build/

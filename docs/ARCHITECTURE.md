@@ -40,7 +40,7 @@ catches the lazy behaviour, often via a different signal.
 - Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
-- Stop guard (v0.6.0, rule 06 enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py)
+- Stop guard (v0.6.0 → v0.7.0 → v0.8.0, rule 06 + rule 07 enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py)
 
 Five hook entries across four events:
 
@@ -50,7 +50,7 @@ Five hook entries across four events:
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
 | `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file |
 | `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns; also register file-as-read on `register_read.py` invocation |
-| `Stop` | — | `stop_guard.py` | Block once if last assistant message has done-claim without evidence (rule 06) |
+| `Stop` | — | `stop_guard.py` | Four-layer block: no-evidence / hedged-completion / missing rule-06 quiz / missing rule-07 fidelity quiz |
 
 #### Why everything in `PreToolUse` (and not split with `PostToolUse`)
 
@@ -112,7 +112,7 @@ script exits 0 silently with state written to disk.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "anti-laziness · rule 04 violation ..."
+    "permissionDecisionReason": "cc-enslaver · rule 04 violation ..."
   }
 }
 ```
@@ -126,9 +126,9 @@ location resolves in this order:
 
 1. `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json` — preferred, set by Claude Code
    for plugin hooks.
-2. `${CLAUDE_PROJECT_DIR}/.claude/local/anti-laziness/sessions/<sid>.json` —
+2. `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/<sid>.json` —
    per-project fallback.
-3. `~/.claude/local/anti-laziness/sessions/<sid>.json` — final fallback.
+3. `~/.claude/local/cc-enslaver/sessions/<sid>.json` — final fallback.
 
 State files are git-ignored (`.gitignore` line 26). Paths within state are
 canonicalised via `os.path.realpath` + `os.path.normcase` so case-insensitive
@@ -138,15 +138,15 @@ filesystems (Windows) compare correctly.
 
 Any unhandled exception in `read_guard.py` is caught, logged to stderr, and
 the script exits 0 (allow). A bug in the guard cannot be permitted to brick
-the agent — anti-laziness must never become anti-progress.
+the agent — discipline enforcement must never become an obstacle to actual work.
 
-#### `Stop` guard (rule 06 enforcement, v0.6.0 + v0.7.0 deep)
+#### `Stop` guard (rule 06 + rule 07 enforcement, v0.6.0 → v0.7.0 → v0.8.0)
 
 `stop_guard.py` (event `Stop`, no matcher — Stop fires unconditionally per
 Claude Code spec) inspects `payload.assistant_message` (or falls back to
 the last assistant entry in `payload.transcript_path`).
 
-**Decision tree (v0.7.0):**
+**Decision tree (v0.8.0):**
 
 | Step | Condition | Action |
 |------|-----------|--------|
@@ -155,7 +155,8 @@ the last assistant entry in `payload.transcript_path`).
 | 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (`HEDGED_DONE_REASON`) |
 | 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
 | 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
-| 5 | All gates passed | Allow |
+| 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
+| 6 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
 `完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
@@ -188,6 +189,29 @@ or English):
 | 3 | Unverified parts? | `(?:哪些\|哪里).*?(?:没验\|未验)` / `unverif` |
 | 4 | Meaningful verification? | `验证.*?(?:合理\|是否充分)` / `verification.*?(?:meaning\|reasonab)` |
 
+**v0.8.0 fidelity markers** (rule 07; single match suffices to pass
+the fidelity gate): `rule 07` / `任务忠实` / `请求覆盖` / `原始请求` /
+`无遗漏` / `无降级` / `未降级` / `未遗漏` / `无超范围` / `未超范围` /
+`task fidelity` / `request coverage` / `request fidelity` /
+`no degradation` / `no omission` / `no scope creep` / `covered all` /
+`all requested`, plus the `[✅⚠️❌] … (完成|done|完工)` checklist-row
+pattern (the agent enumerated original-request items with check
+marks).
+
+**v0.8.0 fidelity self-quiz patterns** (rule 07; ≥ 2 of 3 must match,
+in either Chinese or English):
+
+| # | Question | Patterns |
+|---|----------|----------|
+| 1 | Coverage — did I do every sub-item? | `(?:用户\|原始).*?(?:请求\|要求).*?(?:拆\|列\|包含\|分成\|项\|子项)` / `decompos.*?request` / `sub-?item` / `coverage.*?(?:check\|complete)` |
+| 2 | Standard — did each modifier word land as hard action? | `(?:强制\|必须\|完整\|严格\|全面\|所有).*?(?:落实\|硬动作\|硬证据\|拦截\|断言\|实现\|生效)` / `(?:mandator\|strict\|comprehensive\|all\|every\|hard).*?(?:enforced\|verifi\|hook\|assert\|land)` |
+| 3 | Fidelity — concept-swap / scope creep / buried TODO? | `偷换\|降级\|超范围\|额外的?(?:改\|修)\|遗漏\|裁剪` / `concept.?swap\|degrad\|scope.?creep\|omission\|trim\|drive-?by` |
+
+Layer (d) fires only when (a)(b)(c) all pass, so the agent has
+already shown it both has evidence and engaged with the rule-06
+self-quiz; the fidelity layer adds the orthogonal "did you deliver
+everything the user asked for?" check before allowing the Stop.
+
 **One-shot guard**: `state_lib.record_stop_block(session_id, turn_count)`
 on every block; `state_lib.was_just_blocked(session_id, turn_count)`
 returns True for `turn_count ∈ [last + 1, last + 3]` so the agent has a
@@ -204,8 +228,9 @@ https://code.claude.com/docs/en/hooks.md.
 deliberately ships the lighter heuristic — natural-language file-path
 extraction is fragile (high false positives), while done-claim-without-
 evidence is robust (a careful agent always cites evidence per rule 05,
-so this only fires on actual laziness). The deeper version is now a
-v0.7+ candidate.
+so this only fires on actual laziness). v0.7.0 deepened the rule-06
+side (hedge + self-quiz); v0.8.0 added the rule-07 fidelity layer.
+File-claim verification is now a v0.9+ candidate.
 
 #### `Bash` bypass-pattern blocking
 
@@ -281,8 +306,8 @@ Two user-invokable surfaces:
 
 | Command | Source | Use case |
 |---|---|---|
-| `/anti-laziness:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the pre-action / pre-finish discipline checklist. |
-| `/anti-laziness:verify`    | [`../commands/verify.md`](../commands/verify.md)    | Trigger a re-verification pass on the agent's recent claims. |
+| `/cc-enslaver:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the pre-action / pre-finish discipline checklist. |
+| `/cc-enslaver:verify`    | [`../commands/verify.md`](../commands/verify.md)    | Trigger a re-verification pass on the agent's recent claims. |
 
 Slash commands in Claude Code are flat Markdown files in `commands/`. Their YAML
 frontmatter declares the command's behaviour; the body is the prompt the agent
@@ -338,10 +363,10 @@ directly:
 
 ```bash
 # OpenAI / generic — Chinese:
-cat rules/*.md > /tmp/anti-laziness-system-prompt.txt
+cat rules/*.md > /tmp/cc-enslaver-system-prompt.txt
 
 # OpenAI / generic — English (v0.6.2):
-cat rules/en/*.md > /tmp/anti-laziness-system-prompt.txt
+cat rules/en/*.md > /tmp/cc-enslaver-system-prompt.txt
 
 # Cursor / Cline / Aider — symlink rules/ or rules/en/ into the project's
 # rule directory or copy the index.
@@ -394,7 +419,7 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
     ├─ command matches chmod 0?777                       → DENY (rule 03)
     └─ no bypass pattern matched                         → ALLOW (silent exit 0)
 
-   ─── if user/agent invokes /anti-laziness:verify ───
+   ─── if user/agent invokes /cc-enslaver:verify ───
                        │
                        ▼
             verifier subagent runs
@@ -427,7 +452,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
 | `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases) |
-| `hooks/scripts/gc_state.py` | `commands/gc.md` (`/anti-laziness:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |
+| `hooks/scripts/gc_state.py` | `commands/gc.md` (`/cc-enslaver:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |
 | `hooks/scripts/register_read.py` | `hooks/scripts/bash_guard.py` (the actual register handling lives there), this doc §2 "Read-cache escape hatch", `tests/test_register_read.py` |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
 | `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change. **Do not** re-add the `commands` / `agents` / `skills` / `hooks` path fields for standard locations: they cause `claude plugin install` to fail with `Duplicate hooks file detected` or `agents: Invalid input` because Claude Code auto-discovers `./commands/`, `./agents/`, `./skills/`, and `./hooks/hooks.json`. Those manifest fields are only for *non-standard* layouts. |

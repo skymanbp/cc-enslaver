@@ -46,7 +46,7 @@ class _GuardTestBase(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-test-"))
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-test-"))
         self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir)}
         self.sid = f"test-{uuid.uuid4().hex[:8]}"
 

@@ -4,7 +4,7 @@ title: "Rule index"
 severity: info
 ---
 
-# anti-laziness rule index (English mirror)
+# cc-enslaver rule index (English mirror)
 
 > This is the **English mirror** of the rules under [`../`](../). The
 > Chinese sources are canonical; this mirror tracks them best-effort
@@ -15,7 +15,7 @@ severity: info
 > as a self-contained discipline pack:
 >
 > ```bash
-> cat rules/en/*.md > /tmp/anti-laziness.txt
+> cat rules/en/*.md > /tmp/cc-enslaver.txt
 > ```
 >
 > then prepend that file to your agent's system prompt.
@@ -30,13 +30,14 @@ severity: info
 | 04  | `04-full-context.md`                  | Read fully — keyword search is location, not understanding | must |
 | 05  | `05-cite-sources.md`                  | Citations must be traceable                     | must     |
 | 06  | `06-verify-convergence.md`            | Verify-and-converge (post-fix)                  | must     |
+| 07  | `07-task-fidelity.md`                 | Task fidelity                                   | must     |
 
 ## Numbering convention
 
 - Format `<two-digit>-<kebab-case>.md`.
 - Numbers are **never reused** once published (even if a rule is
   retired, its number stays — frontmatter gets `status: deprecated`).
-- Current range: `01–06`.
+- Current range: `01–07`.
 
 ## Relationships
 
@@ -46,6 +47,10 @@ severity: info
   into a plan.
 - **03** — *output-side (what to change)* constraint: whether the
   edit actually touches the root cause.
-- **06** — *output-side (after the change)* constraint: whether the
-  fix has been driven to convergence with traceable evidence before
-  the agent claims done.
+- **06** — *output-side (after the change, technical)* constraint:
+  whether the fix has been driven to convergence with traceable
+  evidence before the agent claims done.
+- **07** — *output-side (after the change, contractual)* constraint:
+  whether **everything the user asked for** has actually been
+  delivered at the standard requested — no omission, no degrade,
+  no scope creep.

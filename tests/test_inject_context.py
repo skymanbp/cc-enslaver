@@ -42,8 +42,8 @@ class TestInjectContextSessionStart(unittest.TestCase):
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        # Should mention all 6 numbered rules and the rules/ directory.
-        for label in ("01", "02", "03", "04", "05", "06", "rules/"):
+        # Should mention all 7 numbered rules and the rules/ directory.
+        for label in ("01", "02", "03", "04", "05", "06", "07", "rules/"):
             self.assertIn(label, ctx, msg=f"context missing {label!r}")
 
     def test_content_references_rule_06_convergence(self) -> None:
@@ -75,6 +75,33 @@ class TestInjectContextSessionStart(unittest.TestCase):
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("收敛", ctx, msg="user-prompt missing convergence reminder")
+
+    def test_content_references_rule_07_fidelity(self) -> None:
+        # Rule 07 is the post-fix request-coverage / no-degrade rule
+        # (v0.8.0). The session-start prompt must surface its three
+        # self-questions and the "modifier word" warning.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "任务忠实",
+            "覆盖性",
+            "标准性",
+            "忠实性",
+            "原始请求",
+        ):
+            self.assertIn(needle, ctx, msg=f"session-start prompt missing {needle!r}")
+
+    def test_user_prompt_includes_fidelity_check(self) -> None:
+        # Per-turn reminder must also include rule-07 fidelity nudge.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "UserPromptSubmit"],
+            stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("忠实", ctx, msg="user-prompt missing fidelity reminder")
 
     def test_content_is_utf8_intact(self) -> None:
         # Smoke test for the Windows cp936 stdout regression: the prompt

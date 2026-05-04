@@ -1,10 +1,10 @@
-# anti-laziness
+# cc-enslaver
 
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](CHANGELOG.md)
-[![Tests](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/agent-rigor/actions/workflows/test.yml)
+[![Plugin Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
 中文用户请直接看 → [中文说明](#中文说明)
@@ -25,32 +25,33 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`anti-laziness` ships a **layered defense** against all six:
+`cc-enslaver` ships a **layered defense** against all six:
 
 1. **Soft layer (prompt injection)** — at session start and before every user prompt, the plugin injects a concise reminder of the discipline rules into the agent's context.
 2. **Hard layer (PreToolUse blocks)** — at the moment the agent calls `Edit`, `Write`, or `Bash`, the plugin gates the call:
    - **Edit/Write**: denied if the target file already exists but has not been `Read` in this session (rule 04). New file creation is allowed.
    - **Bash**: denied if the command contains a known bypass pattern — `--no-verify`, `--no-gpg-sign`, `git push --force` (without `--force-with-lease`), or `chmod 777` (rule 03). Each deny includes a precise recovery instruction.
    - **Read-cache escape hatch** (v0.4.0): when Claude Code's harness short-circuits a `Read` to its result cache without invoking the tool, the file never enters session state and a subsequent `Edit` is falsely denied. Agents can call `register_read.py --file ABS --hash SHA256` from Bash; `bash_guard.py` recomputes the hash from disk and only registers on match, so the hatch can't itself be used as a bypass.
-3. **Hard layer (Stop hook, v0.6.0 + v0.7.0 deep)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message and applies three layered checks:
+3. **Hard layer (Stop hook, v0.6.0 → v0.7.0 → v0.8.0)** — at every `Stop` event, `stop_guard.py` inspects the agent's last assistant message and applies four layered checks:
    - **(a) v0.6.0** — done-claim with **no evidence** (no `$ ` shell prompt, no test counts, no `重触发`/`pytest`/`unittest` keyword, no fenced code block) → block.
    - **(b) v0.7.0** — done-claim with **hedge near it** (`我觉得` / `I think` / `应该是` / `probably` / `maybe` within ~50 chars) → block (rule 01 cross-enforcement). Confident verification cannot coexist with hedged language.
    - **(c) v0.7.0** — done-claim with evidence but **no rule-06 marker** (`rule 06` / `自答` / `收敛` / `重触发` / `边界用例`) and **fewer than 2 of 4 self-quiz questions** detected (真解决? 更好方案? 哪些没验? 验证合理?) → block. Tests passing alone is not convergence.
+   - **(d) v0.8.0** — passes (a)(b)(c) but **no rule-07 fidelity marker** (`rule 07` / `任务忠实` / `请求覆盖` / `原始请求` / `无降级` / `无遗漏` / `task fidelity` / `request coverage` / `no degradation` / `no omission` / `no scope creep` / `covered all` / `all requested` / ✅ 完成 checklist row) and **fewer than 2 of 3 fidelity questions** detected (覆盖性 / 标准性 / 忠实性) → block. Even a fully-converged rule-06 fix can silently omit sub-tasks, downgrade "mandatory" to "soft", or bury TODOs — rule 07 catches those.
 
    A one-shot guard (`last_blocked_turn` in session state, with a 3-turn grace window) prevents infinite loops. Each layer has its own block reason text so the agent sees exactly which discipline gate failed.
-4. **Active layer (slash commands)** — `/anti-laziness:checklist`, `/anti-laziness:verify`, and `/anti-laziness:gc` (v0.6.1) let the user (or the agent) trigger a structured checklist, independent verification pass, or session-state cleanup on demand.
+4. **Active layer (slash commands)** — `/cc-enslaver:checklist`, `/cc-enslaver:verify`, and `/cc-enslaver:gc` (v0.6.1) let the user (or the agent) trigger a structured checklist, independent verification pass, or session-state cleanup on demand.
 5. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
 6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed.
 7. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/), so the same discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
 
-> **Future (roadmap):** Deep file-claim verification ("I edited X" → `git diff` / mtime check); session state GC; English mirror of `rules/`.
+> **Future (roadmap):** Deep file-claim verification ("I edited X" → `git diff` / mtime check); auto-GC on SessionStart; English `prompts/`.
 
 ---
 
 ## Repository structure
 
 ```
-anti-laziness/
+cc-enslaver/
 ├── .claude-plugin/plugin.json   # Plugin manifest (Claude Code adapter)
 ├── CLAUDE.md                    # Project-level instructions (loaded by Claude Code)
 ├── docs/
@@ -61,7 +62,7 @@ anti-laziness/
 ├── hooks/
 │   ├── hooks.json               # Hook registration
 │   └── scripts/inject_context.py
-├── commands/                    # /anti-laziness:checklist, /anti-laziness:verify, /anti-laziness:gc
+├── commands/                    # /cc-enslaver:checklist, /cc-enslaver:verify, /cc-enslaver:gc
 ├── agents/verifier.md           # Independent citation verifier subagent
 └── skills/systematic-debug/     # Auto-invoked debug discipline skill
 ```
@@ -78,19 +79,19 @@ The repo ships with `.claude-plugin/marketplace.json`, so it can be registered a
 
 ```bash
 # 1) Clone this repo somewhere — the path you choose becomes the marketplace root.
-git clone https://github.com/skymanbp/agent-rigor.git /path/to/agent-rigor
+git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
 ```
 
 Then in any Claude Code session (CLI or IDE):
 
 ```
-/plugin marketplace add /path/to/agent-rigor
-/plugin install anti-laziness@agent-rigor
+/plugin marketplace add /path/to/cc-enslaver
+/plugin install cc-enslaver@cc-enslaver
 ```
 
-The plugin's internal name is `anti-laziness` (declared in `plugin.json`), so slash commands surface as `/anti-laziness:checklist`, `/anti-laziness:verify`, and the auto-invoked `systematic-debug` skill is available as `systematic-debug`. The GitHub repo name `agent-rigor` is the marketplace identifier.
+The plugin's internal name is `cc-enslaver` (declared in `plugin.json`), so slash commands surface as `/cc-enslaver:checklist`, `/cc-enslaver:verify`, and the auto-invoked `systematic-debug` skill is available as `systematic-debug`. The GitHub repo name `cc-enslaver` is the marketplace identifier.
 
-To verify: `/plugin` → "Installed" tab should list `anti-laziness@agent-rigor`.
+To verify: `/plugin` → "Installed" tab should list `cc-enslaver@cc-enslaver`.
 
 > **Requirements:** Python on PATH (tested with Python 3.13). The hook scripts use only the standard library — no third-party packages.
 
@@ -100,10 +101,10 @@ You don't need Claude Code at all. The actual rules live in [`rules/`](rules/) a
 
 ```bash
 # Chinese (canonical):
-cat rules/*.md > /tmp/anti-laziness.txt
+cat rules/*.md > /tmp/cc-enslaver.txt
 
 # English (mirror; for non-CJK readers or non-Claude agents):
-cat rules/en/*.md > /tmp/anti-laziness.txt
+cat rules/en/*.md > /tmp/cc-enslaver.txt
 
 # Then feed that to your agent of choice as system prompt / pre-context.
 ```
@@ -122,7 +123,7 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 | `UserPromptSubmit` | — | Inject compact pre-turn reminder | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; deny Edit/Write of unread existing file | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns; also process `register_read.py` invocations (validate hash, register state) | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
-| `Stop` | — | Layered: block on done-claim with no evidence / hedged completion / missing rule-06 self-quiz (v0.7.0) | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
+| `Stop` | — | Layered (v0.8.0): block on done-claim with no evidence / hedged completion / missing rule-06 self-quiz / missing rule-07 fidelity quiz | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
 
 Five scripts:
 
@@ -130,7 +131,7 @@ Five scripts:
 - **`read_guard.py`** — hard layer (file context). Maintains per-session state at `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json` (Windows-safe path normalization). Failing-open.
 - **`bash_guard.py`** — hard layer (command discipline). Bypass-pattern catalog + register_read.py interception. Failing-open.
 - **`register_read.py`** — user-facing CLI for the read-cache escape hatch (v0.4.0). State mutation lives in `bash_guard.py`; this script verifies its own hash check.
-- **`stop_guard.py`** — hard layer (rule 06 enforcement at turn boundary, v0.6.0). Done-claim heuristic + one-shot guard via `last_blocked_turn` in session state. Failing-open.
+- **`stop_guard.py`** — hard layer (rule 06 + rule 07 enforcement at turn boundary, v0.6.0 → v0.7.0 → v0.8.0). Four-layer decision tree (no-evidence / hedge / missing-rule-06-quiz / missing-rule-07-fidelity) + one-shot guard via `last_blocked_turn` in session state. Failing-open.
 
 All scripts are covered by black-box subprocess tests in [`tests/`](tests/) — run with `python -m unittest discover tests`.
 
@@ -140,8 +141,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output 
 
 | Surface | Purpose |
 |---|---|
-| `/anti-laziness:checklist` | Print the pre-action / pre-finish checklist on demand. |
-| `/anti-laziness:verify`    | Ask the agent to re-verify recent claims with `file:line` citations. |
+| `/cc-enslaver:checklist` | Print the pre-action / pre-finish checklist on demand. |
+| `/cc-enslaver:verify`    | Ask the agent to re-verify recent claims with `file:line` citations. |
 | `verifier` subagent        | Independently re-reads cited locations and reports drift. |
 | `systematic-debug` skill   | Auto-triggered on bug-fix language; forces root-cause walk before any fix. |
 
@@ -168,7 +169,7 @@ MIT — see [`LICENSE`](LICENSE).
 
 ## 中文说明
 
-`anti-laziness` 是一个 **Claude Code 插件 + 任意 LLM 通用规则包**。它存在的唯一目的是：**杜绝 AI 编程助手的偷懒行为**。
+`cc-enslaver` 是一个 **Claude Code 插件 + 任意 LLM 通用规则包**。它存在的唯一目的是：**杜绝 AI 编程助手的偷懒行为**。
 
 ### "偷懒"具体指什么？
 
@@ -188,38 +189,38 @@ MIT — see [`LICENSE`](LICENSE).
    - **Edit/Write**（v0.2.0）：若目标文件已存在但本会话尚未 `Read` 过 → deny + "先 Read 再重试"。新文件创建放行。
    - **Bash**（v0.3.0）：命令包含 `--no-verify` / `--no-gpg-sign` / `git push --force`（不含 `--force-with-lease`） / `chmod 777` 等绕过模式 → deny + 给出符合规则 03 的根因式建议。
    - **Read 缓存逃生口**（v0.4.0）：`register_read.py` + bash_guard 重算 SHA-256 闸门。
-   - **Stop 钩子**（v0.6.0 + v0.7.0 加深）：每次 Stop 三层决策：(a) done-claim + 无 evidence → 拒（v0.6.0）；(b) done-claim + 50 字内 hedge（`我觉得`/`I think`/`probably` 等）→ 拒（v0.7.0 rule 01 投影）；(c) done-claim + evidence 但缺 `rule 06` / `收敛` / `自答` / `重触发` 等收敛标记**且** 4 题（真解决/更好方案/哪些没验/验证合理）匹配 < 2 → 拒（v0.7.0 deep）。一次性守卫 + 3-turn 宽限窗口避免死循环。
-3. **主动调用层**：`/anti-laziness:checklist`、`/anti-laziness:verify`、`/anti-laziness:gc`（v0.6.1，状态文件清理）等 slash 命令。
+   - **Stop 钩子**（v0.6.0 → v0.7.0 → v0.8.0）：每次 Stop 四层决策：(a) done-claim + 无 evidence → 拒（v0.6.0）；(b) done-claim + 50 字内 hedge（`我觉得`/`I think`/`probably` 等）→ 拒（v0.7.0 rule 01 投影）；(c) done-claim + evidence 但缺 `rule 06` / `收敛` / `自答` / `重触发` 等收敛标记**且** 4 题（真解决/更好方案/哪些没验/验证合理）匹配 < 2 → 拒（v0.7.0 deep）；(d) 通过 (a)(b)(c) 但缺 `rule 07` / `任务忠实` / `请求覆盖` / `无降级` / `task fidelity` 等忠实标记**且** 3 题（覆盖性/标准性/忠实性）匹配 < 2 → 拒（v0.8.0 rule 07）。一次性守卫 + 3-turn 宽限窗口避免死循环。
+3. **主动调用层**：`/cc-enslaver:checklist`、`/cc-enslaver:verify`、`/cc-enslaver:gc`（v0.6.1，状态文件清理）等 slash 命令。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程。
 6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)，可作为任意 LLM 的 system prompt 片段使用。
 
-> **路线图**：Stop 钩子深度文件声明验证（"我修改了 X" → 验 mtime / git diff，v0.7 候选）、旧会话 state 文件的 GC、`rules/` 的英文镜像。
+> **路线图**：Stop 钩子深度文件声明验证（"我修改了 X" → 验 mtime / git diff，v0.9 候选）、SessionStart 上的自动 GC、`prompts/` 的英文镜像。
 
 ### 安装
 
 #### 作为 Claude Code 插件
 
 ```bash
-git clone https://github.com/skymanbp/agent-rigor.git /path/to/agent-rigor
+git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
 ```
 
 在 Claude Code 会话内：
 
 ```
-/plugin marketplace add /path/to/agent-rigor
-/plugin install anti-laziness@agent-rigor
+/plugin marketplace add /path/to/cc-enslaver
+/plugin install cc-enslaver@cc-enslaver
 ```
 
-验证：`/plugin` 命令的 "Installed" 列表中应出现 `anti-laziness@agent-rigor`。
+验证：`/plugin` 命令的 "Installed" 列表中应出现 `cc-enslaver@cc-enslaver`。
 钩子脚本要求 `python` 在 PATH 上（在 Python 3.13 上测试过；只用标准库）。
 
 #### 作为通用 LLM 规则包
 
 ```bash
-cat rules/*.md > anti-laziness-rules.txt
+cat rules/*.md > cc-enslaver-rules.txt
 # 或英文版（v0.6.2 新增）：
-cat rules/en/*.md > anti-laziness-rules-en.txt
+cat rules/en/*.md > cc-enslaver-rules-en.txt
 ```
 
 把这段文本作为 system prompt 喂给任何 LLM 即可。

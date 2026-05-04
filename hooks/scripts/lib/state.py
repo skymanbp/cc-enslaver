@@ -1,4 +1,4 @@
-"""Per-session state for anti-laziness read-before-edit guard.
+"""Per-session state for cc-enslaver read-before-edit guard.
 
 Each Claude Code session gets one JSON file recording every file the
 agent has Read or Written. The PreToolUse guard consults this file to
@@ -15,8 +15,8 @@ land on disk.
 
 Storage location resolution order:
     1. ${CLAUDE_PLUGIN_DATA}/sessions/   -- recommended for plugin hooks
-    2. ${CLAUDE_PROJECT_DIR}/.claude/local/anti-laziness/sessions/
-    3. ~/.claude/local/anti-laziness/sessions/
+    2. ${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/
+    3. ~/.claude/local/cc-enslaver/sessions/
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import json
 import os
 from pathlib import Path
 
-_PLUGIN_NAME = "anti-laziness"
+_PLUGIN_NAME = "cc-enslaver"
 
 
 def state_dir() -> Path:

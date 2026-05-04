@@ -1,9 +1,9 @@
 ---
-description: 列出（或删除）超过 N 天未被触碰的 anti-laziness 会话状态文件。默认 dry-run（仅打印），加 --apply 才真正删除。
+description: 列出（或删除）超过 N 天未被触碰的 cc-enslaver 会话状态文件。默认 dry-run（仅打印），加 --apply 才真正删除。
 argument-hint: "[--apply] [--older-than DAYS]   (默认 dry-run + 30 天)"
 ---
 
-# /anti-laziness:gc
+# /cc-enslaver:gc
 
 > 长期使用插件后，`${CLAUDE_PLUGIN_DATA}/sessions/` 下会累积每会话一个 JSON
 > 状态文件。每个文件几 KB，但数量积起来值得清理。本命令调用

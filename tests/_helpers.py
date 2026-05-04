@@ -1,4 +1,4 @@
-"""Shared helpers for anti-laziness hook tests.
+"""Shared helpers for cc-enslaver hook tests.
 
 Each test file invokes its hook script as a real subprocess with a
 synthetic JSON stdin payload, mirroring exactly what Claude Code does

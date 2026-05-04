@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **anti-laziness** are documented here.
+All notable changes to **cc-enslaver** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -15,6 +15,257 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Evaluate adding `git reset --hard` (if uncommitted changes), `git rebase
     --skip`, `pip install --break-system-packages`, etc. — currently held back
     on false-positive concerns.
+- **Stop hook deep file-claim verification** — parse "I edited X" patterns
+  in the agent's last message and check `git diff` / mtime against the
+  session-start baseline. v0.7.0 layered (b)+(c) on rule 06; v0.8.0 layered
+  (d) on rule 07; the file-claim version is still a v0.10+ candidate.
+
+---
+
+## [0.9.0] — 2026-05-04
+
+**Project rename: `anti-laziness` → `cc-enslaver` (and marketplace
+`agent-rigor` → `cc-enslaver`).** All five name layers (plugin name,
+marketplace name, GitHub repo, slash-command prefix, on-disk state
+directory basename) are now unified under a single identifier. No
+behavioural change to any rule, hook, or test — only string
+substitution + version bump.
+
+### Why
+
+Pre-0.9.0 the repo had two parallel names by accident of history:
+the plugin internal `name` field said `anti-laziness`, while the
+marketplace + GitHub repo used `agent-rigor`. New users saw
+`/plugin install anti-laziness@agent-rigor` and asked which is "the"
+name. v0.9.0 collapses everything to **`cc-enslaver`** so the
+marketplace/install/slash-command/import-path all match.
+
+### Breaking changes (rename consequences)
+
+- **Slash commands** prefixes change:
+  `/anti-laziness:checklist` → `/cc-enslaver:checklist`,
+  `/anti-laziness:verify`    → `/cc-enslaver:verify`,
+  `/anti-laziness:gc`        → `/cc-enslaver:gc`.
+- **Install command** is now `/plugin install cc-enslaver@cc-enslaver`
+  (still works against the same local marketplace path).
+- **State directory basename** changes from `anti-laziness` to
+  `cc-enslaver` in the fallback paths
+  (`~/.claude/local/cc-enslaver/sessions/` and
+  `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/`).
+  The `${CLAUDE_PLUGIN_DATA}` path supplied by Claude Code is keyed
+  on the plugin's `name`, so it also moves automatically. **Old
+  per-session state files (`last_blocked_turn`, `read_files`) will
+  not migrate** — they are effectively orphaned. Acceptable because
+  state is short-lived (one Claude Code session) and the orphans are
+  harmless KB-sized JSON. Run `/cc-enslaver:gc --apply` against the
+  *old* state dir if you want to reclaim space.
+- **GitHub repository name** changes from `skymanbp/agent-rigor` to
+  `skymanbp/cc-enslaver`. GitHub installs an automatic redirect from
+  the old name, so existing clones / CI badges keep working. The
+  CHANGELOG `compare` links and `plugin.json` `homepage` /
+  `repository` fields now point at the new URL directly.
+- **Already-installed copies** of the plugin will continue to work
+  on the old name until the user re-installs from the renamed
+  marketplace. `/plugin marketplace remove agent-rigor` then
+  `/plugin marketplace add /path/to/cc-enslaver`, then
+  `/plugin install cc-enslaver@cc-enslaver`.
+
+### Out of scope (rename did NOT touch)
+
+- **Local clone directory** `D:\Projects\anti-laziness\` — the user
+  should `Rename-Item` (or fresh `git clone` after pushing the new
+  name) on their own machine. The plugin code does not depend on
+  this directory's basename; only `${CLAUDE_PLUGIN_ROOT}` matters,
+  which Claude Code resolves at install time.
+- **Rule pack content** (`rules/01..07-*.md`) — the seven discipline
+  rules are unchanged. The plugin's new name is the *enforcer*; the
+  *rules* it enforces still describe lazy patterns and discipline.
+
+### Changed (mechanical text replacements)
+
+- `anti-laziness` → `cc-enslaver` (117 occurrences across 22 files):
+  plugin.json, marketplace.json, CLAUDE.md, CHANGELOG.md, README.md,
+  agents/verifier.md, commands/{checklist,gc,verify}.md,
+  docs/ARCHITECTURE.md, prompts/{session-start,user-prompt}.md,
+  rules/{,en/}00-index.md, hooks/scripts/{bash_guard,gc_state,
+  inject_context,read_guard,register_read,stop_guard}.py,
+  hooks/scripts/lib/state.py, tests/_helpers.py.
+- `agent-rigor` → `cc-enslaver` (homepage/repository URL +
+  marketplace `name` field + CHANGELOG compare links + README
+  install instructions): plugin.json, marketplace.json, CHANGELOG.md,
+  README.md.
+- `alaz-` → `ccens-` (test tempdir prefix in 5 test files):
+  tests/test_{gc_state,bash_guard,register_read,read_guard,
+  stop_guard}.py.
+- README.md version badge `0.7.0` → `0.9.0` (caught the stale badge
+  while at it; v0.8.0 had bumped plugin.json but missed the badge).
+
+### Added
+
+- This CHANGELOG entry. No new code.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+............................................................................
+Ran 76 tests in <X>s
+OK
+```
+
+All 76 tests pass against the renamed identifiers. Smoke test:
+`stop_guard.py` rule-06/07 block reasons now read
+`cc-enslaver · rule 0X enforcement (...)` and the injected context
+mentions `cc-enslaver` in place of `anti-laziness`.
+
+Self-applied rule 06 + rule 07 — including verifying every modifier
+the user used ("全部统一" / "保证更新" / "正常工作") landed as actual
+zero-residual replacements + green test suite, not as soft promises.
+
+---
+
+## [0.8.0] — 2026-05-04
+
+> **Note:** v0.8.0 was rolled into the v0.9.0 commit (the project rename
+> happened immediately after rule 07 was finished, before either had been
+> tagged). There is therefore **no separate `v0.8.0` git tag or GitHub
+> release**; the rule-07 work below is included in `v0.9.0`. This entry
+> is preserved for changelog continuity.
+
+**New core rule 07 — task fidelity (request coverage / no-degrade).** The
+first seven rules covered specific lazy patterns. Rule 06 (v0.5.0) closed
+the *technical* convergence axis ("did the part I edited actually fix the
+root cause?"). Rule 07 closes a different axis the previous six could not
+catch: **silent omission, silent degrade, concept-swap, scope creep, and
+buried TODOs**.
+
+### Why rule 06 wasn't enough
+
+Real failure mode: user says "add rule 07 — strictly enforced; second-pass
+confirmation that nothing was omitted or degraded". An agent could:
+
+- write the rule doc + update the index (rule 06 says "I converged on the
+  doc"), and
+- *silently skip* the prompt injection, the checklist, the stop_guard hook,
+  the tests, and the version bump,
+- then declare "done" with `$ pytest passed` as evidence.
+
+Rule 06's self-quiz (真解决 / 更好方案 / 哪些没验 / 验证合理) does not
+naturally surface "did I do *every sub-task the user asked for at the
+standard requested*?". Tests cannot answer it either — tests cover code
+that exists, not code you forgot to write. Rule 07 makes this axis
+first-class.
+
+### What rule 07 demands
+
+After the rule-06 convergence pass, the agent must additionally answer:
+
+1. **Coverage** — Decompose the user's *original* message. How many
+   sub-items? Which did you do? Which did you not do, and why?
+2. **Standard** — Which modifier words did the user use ("强制 / 必须 /
+   完整 / 严格 / 所有 / 立即 / 全面", "mandatory / strict /
+   comprehensive / all / every / immediate")? Did each one land as a
+   verifiable hard action (hook / assertion / test) or did some end up
+   as soft documentation only?
+3. **Fidelity** — Did you concept-swap (subset / approximation /
+   something-related-but-not-A)? Did you do refactors / abstractions
+   the user didn't ask for? Did you bury any TODO / FIXME /
+   commented-out test while saying "done"?
+
+Termination: all three must have traceable answers + every modifier word
+has hard-evidence anchor + half-finished pieces are surfaced.
+
+### Stop-hook Layer (d)
+
+`stop_guard.py` gains a fourth layer that fires *after* (a)(b)(c) pass:
+
+```
+1. one-shot guard window?      → ALLOW (existing)
+2. no done-claim?              → ALLOW (existing)
+3. hedge near done?            → BLOCK (rule 01, v0.7.0)
+4. no evidence?                → BLOCK (rule 06 base, v0.6.0)
+5. no rule-06 quiz/marker?     → BLOCK (rule 06 deep, v0.7.0)
+6. no rule-07 marker/quiz?     → BLOCK (rule 07, NEW)
+7. otherwise                   → ALLOW
+```
+
+Pass condition for (d) mirrors (c): any single fidelity marker (`rule 07`,
+`任务忠实`, `请求覆盖`, `原始请求`, `无降级`, `无遗漏`, `task fidelity`,
+`request coverage`, `no degradation`, `no omission`, `no scope creep`,
+`covered all`, `all requested`, or any `✅ 完成 / ✅ done` checklist row)
+**OR** at least 2 of 3 fidelity self-questions matched.
+
+### Added
+
+- **`rules/07-task-fidelity.md`** — Chinese canonical rule:
+  1. Check 1 — decompose the original request.
+  2. Check 2 — mark every sub-item ✅ / ⚠️ / ❌ with evidence.
+  3. Check 3 — every modifier word has a hard-evidence anchor.
+  4. Check 4 — no scope creep.
+  5. Check 5 — surface every half-finish.
+  6. Three-question self-quiz (coverage / standard / fidelity).
+- **`rules/en/07-task-fidelity.md`** — English mirror.
+- **`hooks/scripts/stop_guard.py`**:
+  - `FIDELITY_MARKERS` (18 patterns: `rule 07`, `任务忠实`, `请求覆盖`,
+    `原始请求`, `无降级`, `无遗漏`, `无超范围`, `task fidelity`,
+    `request coverage`, `no degrad`, `no omission`, `no scope creep`,
+    `covered all`, `all requested`, plus the `✅/⚠️/❌ + 完成/done`
+    checklist-row regex).
+  - `FIDELITY_QUIZ_PATTERNS` (3 regexes for coverage / standard /
+    fidelity questions, Chinese + English).
+  - `_has_fidelity_marker_or_quiz()` helper.
+  - `MISSING_FIDELITY_REASON` block-reason template.
+  - Layer (d) wired into `main()` after the layer (c) gate.
+- **`tests/test_stop_guard.py::TestFidelityLayer`** — 7 cases:
+  - Layer (d) blocks when (a)(b)(c) pass but no fidelity signal.
+  - Single `rule 07` marker passes.
+  - `任务忠实` Chinese marker passes.
+  - `no degradation` English marker passes.
+  - 2 of 3 fidelity quiz questions pass.
+  - Even a thorough rule-06 self-quiz alone is blocked at Layer (d).
+  - `✅ 完成` checklist-emoji form passes.
+- **`tests/test_inject_context.py`** — 2 new cases:
+  - `test_content_references_rule_07_fidelity` — session-start prompt
+    surfaces 任务忠实 / 覆盖性 / 标准性 / 忠实性 / 原始请求.
+  - `test_user_prompt_includes_fidelity_check` — per-turn reminder
+    contains 忠实.
+- Test count 67 → **76 pass**.
+
+### Changed
+
+- **`prompts/session-start.md`** — adds the rule 07 summary block;
+  workflow constraint extends from "rule 06 verifications + file:line"
+  to "rule 06 + rule 07 fidelity quiz". Self-check triggers append the
+  4 rule-07 triggers (no original-message check, modifier-word degrade,
+  buried TODO, scope creep).
+- **`prompts/user-prompt.md`** — adds a 7th per-turn self-check item
+  for fidelity (coverage / standard / fidelity).
+- **`commands/checklist.md`** — gains a brand-new section **D** with
+  D1–D6 (D6.1–D6.3 for the 3-question fidelity quiz). Default
+  invocation now prints A/B/C/D; argument-hint extended with `fidelity`.
+- **`docs/RULES.md`** — rule count 6 → 7; numbering range `01–06` →
+  `01–07`; relationship diagram extended; "addition flow" updated for
+  `08-xxx.md`.
+- **`rules/00-index.md` / `rules/en/00-index.md`** — new row + English
+  relationship paragraph for rule 07.
+- **`CLAUDE.md`** — new section §2.9 "声称完成前必须做忠实自答"; rules
+  tree now lists 07; §6 "当前版本" reflects v0.8.0.
+- **`agents/verifier.md`** — meta-rules section adds rule 07 as one of
+  the constraints the verifier itself must respect.
+- **`.claude-plugin/plugin.json` + `marketplace.json`** — version
+  bumped 0.7.0 → 0.8.0.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+............................................................................
+Ran 76 tests in <X>s
+OK
+```
+
+Self-applied rule 06 + rule 07 — including the new layer (d) — before
+shipping.
 
 ---
 
@@ -120,7 +371,7 @@ Chinese sources remain canonical; the English mirror is best-effort
 and intended for two use cases:
 
 1. Non-CJK readers who want to read the discipline pack.
-2. Using anti-laziness as an LLM-agnostic system-prompt fragment with
+2. Using cc-enslaver as an LLM-agnostic system-prompt fragment with
    non-Claude agents (OpenAI / Gemini / local models). Concatenate
    `rules/en/*.md` and prepend to your agent's system prompt.
 
@@ -161,7 +412,7 @@ and intended for two use cases:
 ## [0.6.1] — 2026-04-29
 
 Session state GC. Manual-only (no auto-trigger) — invokable from a
-Bash tool call or via the new `/anti-laziness:gc` slash command.
+Bash tool call or via the new `/cc-enslaver:gc` slash command.
 
 ### Why
 
@@ -183,7 +434,7 @@ and to avoid a code path running on every cold start.
     per-file age and size, and either `[dry-run] would delete` or
     `deleted: N / bytes_freed: B` summary.
   - Only globs `<state_dir>/*.json`; refuses to touch anything outside.
-- **`commands/gc.md`** — `/anti-laziness:gc` slash command. Defaults
+- **`commands/gc.md`** — `/cc-enslaver:gc` slash command. Defaults
   to `--dry-run`; invokes the script with whatever argument shape
   the user requested. Documents safe-default semantics.
 - **`tests/test_gc_state.py`** (9 cases):
@@ -647,10 +898,10 @@ caught by `claude plugin validate`:
 ### Verified
 
 ```
-$ claude plugin install anti-laziness@agent-rigor
-✔ Successfully installed plugin: anti-laziness@agent-rigor (scope: user)
+$ claude plugin install cc-enslaver@cc-enslaver
+✔ Successfully installed plugin: cc-enslaver@cc-enslaver (scope: user)
 $ claude plugin list
-  ❯ anti-laziness@agent-rigor
+  ❯ cc-enslaver@cc-enslaver
     Version: 0.3.1
     Scope: user
     Status: ✔ enabled
@@ -714,8 +965,8 @@ call against a file is recorded as "known content" for the rest of the session.
 
 - **`hooks/scripts/lib/state.py`** — per-session JSON state at
   `${CLAUDE_PLUGIN_DATA}/sessions/<session_id>.json` (with documented fallbacks
-  to `${CLAUDE_PROJECT_DIR}/.claude/local/anti-laziness/sessions/` and
-  `~/.claude/local/anti-laziness/sessions/`). Path normalisation via
+  to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/` and
+  `~/.claude/local/cc-enslaver/sessions/`). Path normalisation via
   `os.path.realpath` + `os.path.normcase` for case-insensitive Windows
   comparison.
 - **`hooks/scripts/read_guard.py`** — single script with two roles:
@@ -727,7 +978,7 @@ call against a file is recorded as "known content" for the rest of the session.
     exception logs to stderr but lets the tool call proceed.
 - **`.claude-plugin/marketplace.json`** — the plugin can now be installed
   locally via `/plugin marketplace add <path-to-repo>` and then
-  `/plugin install anti-laziness@<marketplace-name>`.
+  `/plugin install cc-enslaver@<marketplace-name>`.
 
 ### Changed
 
@@ -774,8 +1025,8 @@ soft layer is wired live.
 - **Hook layer** (`hooks/`) — `hooks.json` registers two events
   (`SessionStart`, `UserPromptSubmit`); `scripts/inject_context.py` emits the
   appropriate `additionalContext` JSON for each event.
-- **Slash commands** (`commands/`) — `/anti-laziness:checklist` prints the
-  systematic-thinking checklist; `/anti-laziness:verify` prompts a
+- **Slash commands** (`commands/`) — `/cc-enslaver:checklist` prints the
+  systematic-thinking checklist; `/cc-enslaver:verify` prompts a
   re-verification pass.
 - **Verifier subagent** (`agents/verifier.md`) — independent `file:line` citation
   re-reader, returns drift/missing/intact verdict.
@@ -788,16 +1039,18 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/agent-rigor/compare/v0.7.0...HEAD
-[0.7.0]: https://github.com/skymanbp/agent-rigor/compare/v0.6.2...v0.7.0
-[0.6.2]: https://github.com/skymanbp/agent-rigor/compare/v0.6.1...v0.6.2
-[0.6.1]: https://github.com/skymanbp/agent-rigor/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/skymanbp/agent-rigor/compare/v0.5.1...v0.6.0
-[0.5.1]: https://github.com/skymanbp/agent-rigor/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/skymanbp/agent-rigor/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/skymanbp/agent-rigor/compare/v0.3.2...v0.4.0
-[0.3.2]: https://github.com/skymanbp/agent-rigor/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/skymanbp/agent-rigor/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/skymanbp/agent-rigor/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/skymanbp/agent-rigor/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/skymanbp/agent-rigor/releases/tag/v0.1.0
+[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
+[0.8.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
+[0.7.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/skymanbp/cc-enslaver/releases/tag/v0.1.0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""anti-laziness — session-state garbage collection (v0.6.1).
+"""cc-enslaver — session-state garbage collection (v0.6.1).
 
 Each Claude Code session creates one JSON state file in
 `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json`. Sessions are not
@@ -17,7 +17,7 @@ restarted many times since).
 # Why not auto-run
 
 In v0.6.1, GC is *manual only* (`python gc_state.py` from a Bash
-tool call, or via the `/anti-laziness:gc` slash command). Auto-on-
+tool call, or via the `/cc-enslaver:gc` slash command). Auto-on-
 SessionStart was considered but deferred:
   - Adds latency to every session start.
   - Adds a code path that runs on the critical hook timeline.
@@ -37,7 +37,7 @@ Always prints a summary:
 # Safety
 
   * `--dry-run` (default off) shows what would be deleted without
-    touching anything. The slash command `/anti-laziness:gc` invokes
+    touching anything. The slash command `/cc-enslaver:gc` invokes
     `--dry-run` by default; the user must explicitly request
     `--apply` to actually delete.
   * `--older-than DAYS` defaults to 30 (configurable). Files newer
@@ -60,7 +60,7 @@ from lib import state as state_lib  # noqa: E402
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prune anti-laziness session state files older than a threshold.",
+        description="Prune cc-enslaver session state files older than a threshold.",
     )
     parser.add_argument(
         "--older-than",

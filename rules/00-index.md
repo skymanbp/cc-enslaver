@@ -4,7 +4,7 @@ title: "规则索引"
 severity: info
 ---
 
-# anti-laziness 规则索引
+# cc-enslaver 规则索引
 
 > 本文件是 [`rules/`](.) 目录下所有规则的**程序可读索引**。
 > 钩子脚本与子代理依靠它发现可加载的规则。
@@ -21,6 +21,7 @@ severity: info
 | 04  | `04-full-context.md`                  | 完整阅读，拒绝关键词依赖 | must     |
 | 05  | `05-cite-sources.md`                  | 引用必须可追溯         | must     |
 | 06  | `06-verify-convergence.md`            | 验证收敛               | must     |
+| 07  | `07-task-fidelity.md`                 | 任务忠实               | must     |
 
 ## 编号规则
 

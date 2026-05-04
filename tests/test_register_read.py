@@ -34,7 +34,7 @@ def _sha256(data: bytes) -> str:
 
 class TestRegisterReadStub(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-reg-"))
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-reg-"))
         self.fpath = self.tmpdir / "fixture.bin"
         self.content = b"register_read stub test fixture\nline2\n"
         self.fpath.write_bytes(self.content)

@@ -28,7 +28,7 @@ GC = str(SCRIPTS_DIR / "gc_state.py")
 
 class _GcBase(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-gc-"))
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-gc-"))
         self.sessions_dir = self.tmpdir / "sessions"
         self.sessions_dir.mkdir(parents=True)
         # Force the gc script to use this tmp dir as its state root via

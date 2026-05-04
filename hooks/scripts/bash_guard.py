@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""anti-laziness — bash guard.
+"""cc-enslaver — bash guard.
 
 PreToolUse handler with matcher `Bash`. Two responsibilities:
 
@@ -127,7 +127,7 @@ def _detect_force_push(cmd: str) -> dict | None:
 # Deny output helper (same shape as read_guard's deny; duplicated rather
 # than imported to keep this script's failure modes independent).
 # --------------------------------------------------------------------------- #
-DENY_TEMPLATE = """anti-laziness · rule {rule} violation (bypass pattern)
+DENY_TEMPLATE = """cc-enslaver · rule {rule} violation (bypass pattern)
 
 Pattern matched: {name}
 Command: {command}
@@ -272,7 +272,7 @@ def _emit_register_deny(command: str, reason: str) -> None:
     """Deny output specific to register-flow failures (different template
     from the bypass-pattern deny so the agent sees the actual diagnostic)."""
     msg = (
-        "anti-laziness · register_read rejected\n\n"
+        "cc-enslaver · register_read rejected\n\n"
         "Command: " + command + "\n\n"
         + reason + "\n"
     )
@@ -330,7 +330,7 @@ def main() -> int:
 
         # No bypass detected; allow by exiting silently.
     except Exception:
-        sys.stderr.write("[anti-laziness] bash_guard exception:\n")
+        sys.stderr.write("[cc-enslaver] bash_guard exception:\n")
         sys.stderr.write(traceback.format_exc())
     return 0
 

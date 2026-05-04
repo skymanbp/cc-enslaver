@@ -30,7 +30,7 @@ GUARD = str(SCRIPTS_DIR / "stop_guard.py")
 
 class _StopBase(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = Path(tempfile.mkdtemp(prefix="alaz-stop-"))
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-stop-"))
         self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir)}
         self.sid = f"test-{uuid.uuid4().hex[:8]}"
 
@@ -84,12 +84,14 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
 
     def test_done_with_evidence_and_convergence_marker_allows(self) -> None:
         # 重触发 is both an evidence pattern AND a convergence marker.
+        # v0.8.0: also needs rule-07 fidelity marker.
         msg = (
             "已修复并验证：\n\n"
             "$ pytest tests/\n"
             "Ran 35 tests in 4.5s\n"
             "OK\n\n"
-            "重触发原症状: 已通过。"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求只有'修复 X'，已完成，无降级、无超范围。"
         )
         rc, out, _ = self._stop(msg)
         self.assertEqual(rc, 0)
@@ -97,7 +99,8 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
 
     def test_done_with_re_triggered_keyword_allows(self) -> None:
         # 重触发 alone is a convergence marker.
-        msg = "完成了。重触发原症状后异常消失。"
+        # v0.8.0: also needs rule-07 fidelity marker.
+        msg = "完成了。重触发原症状后异常消失。无遗漏。"
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
 
@@ -113,12 +116,14 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
 
     def test_done_with_two_self_questions_allows(self) -> None:
         # Agent answered Q1 (真解决) + Q2 (更好方案) → quiz threshold met.
+        # v0.8.0: also needs rule-07 fidelity coverage.
         msg = (
             "fixed.\n\n"
             "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
             "**真的解决了吗?** Yes — the failing input now returns 200.\n"
             "**有没有更好的方案?** Considered using a thread lock instead, "
-            "but the existing async lock is already part of the architecture."
+            "but the existing async lock is already part of the architecture.\n"
+            "Task fidelity: covered all requested items, no degradation."
         )
         rc, out, _ = self._stop(msg)
         self.assertEqual(rc, 0)
@@ -126,9 +131,11 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
 
     def test_done_with_explicit_rule06_mention_allows(self) -> None:
         # Explicit "rule 06" + evidence is enough (single marker hit).
+        # v0.8.0: also needs rule-07 fidelity marker.
         msg = (
             "Done.\n$ pytest passed (60/60)\n"
-            "Ran rule 06 self-check; all 5 steps verified."
+            "Ran rule 06 self-check; all 5 steps verified.\n"
+            "Rule 07 task fidelity: covered all requested items, no degradation."
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
@@ -166,18 +173,110 @@ class TestHedgedCompletion(_StopBase):
     def test_hedge_far_from_done_is_allowed(self) -> None:
         # Hedge in unrelated paragraph, far from the done-claim, with proper
         # evidence + quiz markers nearby. Should not trip the proximity check.
+        # v0.8.0: also needs rule-07 fidelity marker.
         msg = (
             "I think this race condition usually doesn't reproduce — "
             "hard to test in isolation.\n\n"
             "But anyway, $ pytest passed (35/35), 重触发原症状 confirms "
             "the lock fixes the race, **真解决** confirmed via the new "
             "concurrent test, and the existing tests still pass. "
-            "fixed."
+            "Task fidelity: covered all requested items. fixed."
         )
         rc, out, _ = self._stop(msg)
         # The hedge "I think" is more than 50 chars away from "fixed".
         # Should pass.
         self.assertIsNone(out, msg=f"distant hedge should not block, got {out!r}")
+
+
+class TestFidelityLayer(_StopBase):
+    """v0.8.0 — rule 07 task-fidelity Stop-hook layer (Layer d).
+
+    Layer (d) fires only after (a)(b)(c) all pass. It checks that the
+    agent surfaced a rule-07 fidelity marker OR answered >=2 of the 3
+    fidelity self-questions (coverage / standard / fidelity).
+    """
+
+    def test_passes_a_b_c_but_no_fidelity_marker_or_quiz_blocks(self) -> None:
+        # Done + evidence + rule-06 marker (`重触发`) BUT no fidelity
+        # marker and no fidelity quiz answers → must block with rule-07
+        # reason.
+        msg = (
+            "已修复。\n\n"
+            "$ pytest tests/\nRan 35 tests in 4.5s\nOK\n\n"
+            "重触发原症状: 已通过。"
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(out, msg="Layer (d) must block when fidelity absent")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 07", out["reason"])
+
+    def test_explicit_rule07_marker_passes(self) -> None:
+        # Single 'rule 07' mention is enough.
+        msg = (
+            "Fixed.\n$ pytest passed.\n重触发: ok.\n"
+            "rule 07: covered all sub-items, no scope creep."
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out, msg=f"single rule-07 marker must pass, got {out!r}")
+
+    def test_chinese_task_fidelity_marker_passes(self) -> None:
+        msg = (
+            "已解决。\n$ pytest passed (35/35).\n重触发原症状: ok.\n"
+            "任务忠实自答: 用户原始请求只有'修 X'一项，已完成。"
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out)
+
+    def test_no_degradation_english_passes(self) -> None:
+        msg = (
+            "Done.\n$ pytest passed.\nRan rule 06 self-check.\n"
+            "Reviewed against the original request: no degradation, "
+            "no omission, no scope creep."
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out)
+
+    def test_two_fidelity_questions_pass(self) -> None:
+        # Coverage Q + standard Q answered → 2 of 3 quiz threshold met.
+        msg = (
+            "Fixed.\n\n"
+            "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
+            "重触发: ok。\n\n"
+            "**覆盖性**: 用户原始请求拆成两项 (修 X / 加测试)，均完成。\n"
+            "**标准性**: 用户用了'强制'一词，已落实为钩子拦截 (file:line)，"
+            "不是文档建议。"
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out, msg="2 of 3 fidelity questions should pass Layer (d)")
+
+    def test_no_fidelity_signal_at_all_with_full_06_blocks(self) -> None:
+        # Even a thoroughly answered rule-06 self-quiz is not enough;
+        # rule-07 axis is independent and must surface.
+        msg = (
+            "fixed.\n\n"
+            "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
+            "**真的解决了吗?** Yes — the failing input now returns 200.\n"
+            "**有没有更好的方案?** Considered async lock, picked sync.\n"
+            "**哪些没验?** None — full path covered.\n"
+            "**验证合理?** Yes, exercises the original failure mechanism."
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNotNone(out, msg="rule-06 self-quiz alone must not pass Layer (d)")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 07", out["reason"])
+
+    def test_checklist_emoji_form_passes(self) -> None:
+        # The agent enumerated original-request items with ✅ check
+        # marks — that's the per-item form rule 07 endorses.
+        msg = (
+            "完成了。\n$ pytest passed.\n重触发: ok.\n\n"
+            "原始请求逐项核对:\n"
+            "- ✅ 完成: 修复 X (auth.py:42)\n"
+            "- ✅ 完成: 加测试 (test_auth.py)"
+        )
+        rc, out, _ = self._stop(msg)
+        self.assertIsNone(out, msg=f"emoji checklist should pass, got {out!r}")
 
 
 class TestNoDoneClaim(_StopBase):

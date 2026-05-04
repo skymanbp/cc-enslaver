@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""anti-laziness — read-before-edit guard.
+"""cc-enslaver — read-before-edit guard.
 
 A single PreToolUse handler covering Read / Write / Edit. Recording and
 gating live in the same hook event so they share a scope:
@@ -66,7 +66,7 @@ HANDLED_TOOLS = {"Read", "Write", "Edit"}
 # --------------------------------------------------------------------------- #
 # Deny message.
 # --------------------------------------------------------------------------- #
-DENY_TEMPLATE = """anti-laziness · rule 04 violation (read before edit)
+DENY_TEMPLATE = """cc-enslaver · rule 04 violation (read before edit)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -184,7 +184,7 @@ def main() -> int:
     except Exception:
         # Failing open: log and exit 0 so the agent is never blocked
         # by a bug in our own guard.
-        sys.stderr.write("[anti-laziness] read_guard exception:\n")
+        sys.stderr.write("[cc-enslaver] read_guard exception:\n")
         sys.stderr.write(traceback.format_exc())
     return 0
 

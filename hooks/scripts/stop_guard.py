@@ -1,27 +1,38 @@
 #!/usr/bin/env python3
-"""anti-laziness — Stop hook enforcing rule 06 (verify-convergence).
+"""cc-enslaver — Stop hook enforcing rules 06 + 07.
 
 At every Stop event, this hook inspects the agent's last assistant
-message and refuses to let the agent finish the turn when any of three
+message and refuses to let the agent finish the turn when any of four
 laziness signals appear in proximity to a "done" claim:
 
   (a) [v0.6.0] No convergence evidence at all (no `$ ` shell prompt,
       no command output, no "重触发", no test counts, no fenced code
       block). Pure "已解决" / "fixed" walking away.
 
-  (b) [v0.7.0 NEW] Hedged completion (rule 01 cross-enforcement):
+  (b) [v0.7.0] Hedged completion (rule 01 cross-enforcement):
       done-claim appears within ~50 chars of a first-person uncertainty
       marker ("我觉得", "我相信", "I think", "I believe", "probably",
       "maybe", "应该是", "大概"). Confident verification cannot coexist
       with hedged language; one of the two has to give.
 
-  (c) [v0.7.0 NEW] Missing rule-06 self-quiz: the agent supplied
+  (c) [v0.7.0] Missing rule-06 self-quiz: the agent supplied
       evidence but did not surface either an explicit convergence
       marker (`rule 06`, `自答`, `收敛`, `重触发`, `边界用例`) OR at
       least 2 of the 4 self-questions (真解决? 更好方案? 哪些没验?
       验证合理?).
 
-When any of (a)-(c) hold, the hook returns
+  (d) [v0.8.0 NEW] Missing rule-07 task-fidelity confirmation: even
+      after passing rule-06 convergence, the agent must show it has
+      reconciled what it shipped against the user's *original* request
+      — coverage (no omission), standard (no degrade from "mandatory"
+      to "soft suggestion"), and fidelity (no concept-swap, no scope
+      creep, no buried TODOs). Pass condition is identical in shape to
+      (c): any explicit fidelity marker (`rule 07`, `任务忠实`,
+      `请求覆盖`, `原始请求`, `无降级`, `无遗漏`, `task fidelity`,
+      `request coverage`, `no degrad`, `no omission`) OR at least 2 of
+      3 self-questions (覆盖 / 标准 / 忠实) matched.
+
+When any of (a)-(d) hold, the hook returns
 `{"decision": "block", "reason": <appropriate reminder>}`. The agent
 gets one corrective turn.
 
@@ -34,19 +45,22 @@ of the last block, we skip the heuristic and allow the Stop. The
 agent gets one (well, up to three) chances to recover before we
 fire again.
 
-# Why three layered checks instead of one
+# Why four layered checks instead of one
 
-The bar tightens monotonically: (a) → (b) → (c) only fire if the
-preceding gate passed. (a) catches the laziest case (no work shown).
-(b) catches sloppy completion (hedged language). (c) catches faked
-evidence (any `$ ls` output passes (a) but the agent must engage with
-the rule-06 framework to pass (c)). Each gate has its own block
-template so the agent sees exactly which discipline failed.
+The bar tightens monotonically: (a) → (b) → (c) → (d) only fire if
+the preceding gate passed. (a) catches the laziest case (no work
+shown). (b) catches sloppy completion (hedged language). (c) catches
+faked rule-06 evidence (any `$ ls` output passes (a) but the agent
+must engage with the rule-06 self-quiz to pass (c)). (d) catches the
+different axis covered by rule 07 — even an agent who genuinely
+converged on the part it edited may have silently dropped sub-tasks,
+downgraded "mandatory" to "soft", or buried TODOs. Each gate has its
+own block template so the agent sees exactly which discipline failed.
 
-Permissiveness within (c): we accept 2 of 4 self-questions OR any
-single explicit marker, so an agent who truly performed the
-convergence check using their own phrasing isn't penalised. The
-one-shot guard keeps false-positive cost at exactly 1 turn.
+Permissiveness within (c) and (d): we accept 2 of N self-questions
+OR any single explicit marker, so an agent who truly performed the
+check using their own phrasing isn't penalised. The one-shot guard
+keeps false-positive cost at exactly 1 turn.
 
 # Output contract (Stop event, verified against
 # https://code.claude.com/docs/en/hooks.md):
@@ -200,6 +214,68 @@ SELF_QUIZ_PATTERNS = [
 ]
 
 
+# --------------------------------------------------------------------------- #
+# v0.8.0 — rule-07 fidelity-marker / fidelity self-quiz detection.
+#
+# Rule 07 covers a different axis from rule 06. Rule 06 asks "did the
+# part you edited converge?". Rule 07 asks "did you do everything the
+# user asked for, at the standard they asked for, without scope creep
+# or buried TODOs?". Two ways to satisfy this gate:
+#   (1) Any single FIDELITY_MARKER appears (the agent named the
+#       framework or one of its three checks), OR
+#   (2) At least 2 of the 3 FIDELITY_QUIZ_PATTERNS match (the agent
+#       answered at least 2/3 of: coverage, standard, fidelity).
+# --------------------------------------------------------------------------- #
+FIDELITY_MARKERS = [
+    re.compile(r"\brule\s*0?7\b", re.IGNORECASE),
+    re.compile(r"任务忠实"),
+    re.compile(r"请求覆盖"),
+    re.compile(r"原始请求"),
+    re.compile(r"无遗漏"),
+    re.compile(r"无降级"),
+    re.compile(r"未降级"),
+    re.compile(r"未遗漏"),
+    re.compile(r"无超范围"),
+    re.compile(r"未超范围"),
+    re.compile(r"\btask\s+fidelity\b", re.IGNORECASE),
+    re.compile(r"\brequest\s+coverage\b", re.IGNORECASE),
+    re.compile(r"\brequest\s+fidelity\b", re.IGNORECASE),
+    re.compile(r"no\s+degrad", re.IGNORECASE),
+    re.compile(r"no\s+omission", re.IGNORECASE),
+    re.compile(r"no\s+scope\s+creep", re.IGNORECASE),
+    re.compile(r"covered\s+all", re.IGNORECASE),
+    re.compile(r"all\s+requested", re.IGNORECASE),
+    # Per-item enumeration cue — the user-original-request decomposition
+    # form usually surfaces as ✅/⚠️/❌ checklists, which strongly imply
+    # the agent went through the rule-07 wrap-up.
+    re.compile(r"[✅⚠️❌].{0,40}?(?:完成|done|完工)", re.IGNORECASE),
+]
+
+FIDELITY_QUIZ_PATTERNS = [
+    # Q1 — coverage: did I do every sub-item the user asked for?
+    re.compile(
+        r"(?:用户|原始).{0,8}?(?:请求|要求).{0,16}?(?:拆|列|包含|分成|项|子项)"
+        r"|decompos[a-z]{0,4}.{0,12}?request"
+        r"|sub-?item"
+        r"|coverage.{0,8}?(?:check|complete)",
+        re.IGNORECASE,
+    ),
+    # Q2 — standard: did each modifier word land as a hard action?
+    re.compile(
+        r"(?:强制|必须|完整|严格|全面|所有).{0,30}?(?:落实|硬动作|硬证据|拦截|断言|实现|生效)"
+        r"|(?:mandator|strict|comprehensive|all|every|hard).{0,30}?"
+        r"(?:enforced|verifi|hook|assert|land)",
+        re.IGNORECASE,
+    ),
+    # Q3 — fidelity: any concept-swap, scope creep, or buried TODO?
+    re.compile(
+        r"偷换|降级|超范围|额外的?(?:改|修)|遗漏|裁剪"
+        r"|concept.?swap|degrad|scope.?creep|omission|trim|drive-?by",
+        re.IGNORECASE,
+    ),
+]
+
+
 def _has_done_claim(text: str) -> str | None:
     """Return the matched done-claim phrase, or None."""
     for p in DONE_PATTERNS:
@@ -244,6 +320,21 @@ def _has_self_quiz_or_marker(text: str) -> bool:
     return matched >= 2
 
 
+def _has_fidelity_marker_or_quiz(text: str) -> bool:
+    """v0.8.0 — True if the agent demonstrated rule-07 awareness via:
+        (1) any explicit fidelity marker, or
+        (2) at least 2 of the 3 fidelity self-questions.
+
+    Same shape as `_has_self_quiz_or_marker` but on a different axis:
+    rule 06 is "did the fix converge?", rule 07 is "did you deliver
+    everything the user asked for at the standard requested?".
+    """
+    if any(p.search(text) for p in FIDELITY_MARKERS):
+        return True
+    matched = sum(1 for p in FIDELITY_QUIZ_PATTERNS if p.search(text))
+    return matched >= 2
+
+
 # --------------------------------------------------------------------------- #
 # Block reason templates.
 #
@@ -253,7 +344,7 @@ def _has_self_quiz_or_marker(text: str) -> bool:
 #   HEDGED_DONE:    rule 01 cross-enforcement at Stop (v0.7.0).
 #   MISSING_QUIZ:   rule 06 deep layer — 4-question self-quiz (v0.7.0).
 # --------------------------------------------------------------------------- #
-NO_EVIDENCE_REASON = """anti-laziness · rule 06 enforcement (Stop hook)
+NO_EVIDENCE_REASON = """cc-enslaver · rule 06 enforcement (Stop hook)
 
 You appear to be claiming completion ({matched_phrase!r}) but your
 message contains no convergence evidence — no shell command output,
@@ -281,7 +372,7 @@ sequence. The next Stop will be allowed even if evidence is still
 weak. Use the next turn well.)
 """
 
-HEDGED_DONE_REASON = """anti-laziness · rule 01 + 06 enforcement (Stop hook)
+HEDGED_DONE_REASON = """cc-enslaver · rule 01 + 06 enforcement (Stop hook)
 
 Your message contains a completion claim ({done_phrase!r}) in
 proximity to a hedge ({hedge_phrase!r}). Per rule 01
@@ -301,7 +392,7 @@ are not acceptable forms — either you verified it or you didn't.
 sequence. The next Stop will be allowed even if hedging persists.)
 """
 
-MISSING_QUIZ_REASON = """anti-laziness · rule 06 deep enforcement (Stop hook v0.7)
+MISSING_QUIZ_REASON = """cc-enslaver · rule 06 deep enforcement (Stop hook v0.7)
 
 Your message claims completion ({matched_phrase!r}) and shows some
 evidence, but it does not surface either:
@@ -326,6 +417,57 @@ write it down now.
 (One-shot guard: this is the only time you'll be blocked for this
 sequence. The next Stop will allow even with weak quiz coverage. Use
 this turn well.)
+"""
+
+MISSING_FIDELITY_REASON = """cc-enslaver · rule 07 enforcement (Stop hook v0.8)
+
+Your message claims completion ({matched_phrase!r}) and you have
+already shown rule-06 convergence on the part you edited. But rule
+07 covers a *different* axis — and your message did not surface it.
+
+Rule 06 asks: "did the fix actually converge on what I edited?"
+Rule 07 asks: "did I deliver everything the user asked for, at the
+standard they requested, without scope creep or buried TODOs?"
+
+A test suite cannot answer rule 07. Tests cover the code that exists;
+they do not know about the sub-task you forgot to write, the
+"mandatory" requirement you silently downgraded to a "soft suggestion"
+in the docs, or the TODO you buried in line 200.
+
+Surface either:
+
+  (a) an explicit rule-07 marker (`rule 07`, `任务忠实`, `请求覆盖`,
+      `原始请求`, `无降级`, `无遗漏`, `无超范围`, `task fidelity`,
+      `request coverage`, `no degradation`, `no omission`,
+      `no scope creep`, `covered all`, `all requested`), or
+
+  (b) at least 2 of the 3 fidelity self-questions:
+
+        1. **覆盖性 (coverage)** — Decompose the user's *original*
+           message. How many sub-items? Which did you do? Which
+           did you not do, and why?
+
+        2. **标准性 (standard)** — Which modifier words did the user
+           use ("强制 / 必须 / 完整 / 严格 / 所有 / 立即 / 全面",
+           "mandatory / strict / comprehensive / all / every /
+           immediate")? Did each one land as a verifiable hard action
+           (hook / assertion / test) or did some end up as soft
+           documentation only?
+
+        3. **忠实性 (fidelity)** — Concept swap? (Did you ship a
+           subset / approximation / something related to A but not
+           A?) Scope creep? (Did you do refactors / abstractions
+           the user did not ask for?) Buried TODOs / FIXMEs / "for
+           now" / commented-out tests left while you said "done"?
+
+Go back to the user's *original* message — not your in-flight
+restatement of it — and reconcile what you shipped against what was
+asked. If anything was omitted, downgraded, swapped, or buried,
+surface it explicitly so the user can decide whether to ship.
+
+(One-shot guard: this is the only time you'll be blocked for this
+sequence. The next Stop will allow even with weak fidelity coverage.
+Use this turn well.)
 """
 
 
@@ -445,10 +587,19 @@ def main() -> int:
             _emit_block(MISSING_QUIZ_REASON.format(matched_phrase=matched))
             return 0
 
-        # All three gates passed — allow.
+        # v0.8.0 fidelity layer (d): rule-06 convergence shown, but the
+        # message does not surface a rule-07 fidelity marker or quiz.
+        # Different axis from (c): coverage / standard / no-degrade
+        # versus root-cause / re-trigger / boundary.
+        if not _has_fidelity_marker_or_quiz(message):
+            state_lib.record_stop_block(session_id, turn_count)
+            _emit_block(MISSING_FIDELITY_REASON.format(matched_phrase=matched))
+            return 0
+
+        # All four gates passed — allow.
     except Exception:
         # Failing open: log to stderr but never block by accident.
-        sys.stderr.write("[anti-laziness] stop_guard exception:\n")
+        sys.stderr.write("[cc-enslaver] stop_guard exception:\n")
         sys.stderr.write(traceback.format_exc())
     return 0
 

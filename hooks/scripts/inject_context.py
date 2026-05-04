@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-anti-laziness — context injection hook.
+cc-enslaver — context injection hook.
 
 Single entry-point for every Claude Code hook this plugin subscribes to.
 Reads the matching prompt file from `../../prompts/` and emits the JSON
@@ -56,7 +56,7 @@ PROMPTS_DIR = PLUGIN_ROOT / "prompts"
 def load_prompt(filename: str) -> str:
     """Read prompt content from prompts/<filename>. Fail loudly on missing file.
 
-    Failing loudly (rather than returning '') is itself an anti-laziness
+    Failing loudly (rather than returning '') is itself an cc-enslaver
     measure: a silent empty injection would mask broken configuration.
     """
     path = PROMPTS_DIR / filename
@@ -65,7 +65,7 @@ def load_prompt(filename: str) -> str:
         # We still exit 0 with an empty additionalContext so the hook
         # does not block the user; but the diagnostic goes to stderr.
         sys.stderr.write(
-            f"[anti-laziness] missing prompt file: {path}\n"
+            f"[cc-enslaver] missing prompt file: {path}\n"
             f"  expected one of: {sorted(EVENT_TO_PROMPT.values())}\n"
         )
         return ""
@@ -94,7 +94,7 @@ def emit(event_name: str, additional_context: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="anti-laziness context injection hook",
+        description="cc-enslaver context injection hook",
     )
     parser.add_argument(
         "--event",

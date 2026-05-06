@@ -513,17 +513,39 @@ def _last_assistant_message_from_transcript(transcript_path: str) -> str:
             continue
         # Common transcript schemas use 'role' or 'type'; tolerate either.
         role = entry.get("role") or entry.get("type") or ""
-        if role == "assistant":
+        if role != "assistant":
+            continue
+        # Claude Code 2.x JSONL schema nests content under
+        # entry["message"]["content"]; older / generic schemas place
+        # it at the top level entry["content"]. Read the nested one
+        # first, fall back to top level. v0.9.1 fixed two related
+        # silent-failure bugs:
+        #   (1) Reading only top-level entry["content"] missed every
+        #       Claude Code 2.x transcript (nested schema), making the
+        #       whole Stop hook a no-op for releases v0.6.0..v0.9.0.
+        #   (2) Overwriting last_assistant on EVERY assistant entry
+        #       (including pure tool_use entries with no text blocks)
+        #       wiped out the actual text reply when the final
+        #       assistant entry of the turn was a tool call. We now
+        #       only update when the entry yields non-empty text, so
+        #       the most recent text-bearing reply wins.
+        content = entry.get("message", {}).get("content")
+        if content is None:
             content = entry.get("content")
-            if isinstance(content, list):
-                # content array of {type, text} blocks
-                parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(block.get("text", ""))
-                last_assistant = "\n".join(parts)
-            elif isinstance(content, str):
-                last_assistant = content
+        extracted = ""
+        if isinstance(content, list):
+            # content array of mixed {type, text} / {type, tool_use} / etc.
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    t = block.get("text", "")
+                    if t:
+                        parts.append(t)
+            extracted = "\n".join(parts)
+        elif isinstance(content, str):
+            extracted = content
+        if extracted:
+            last_assistant = extracted
     return last_assistant
 
 

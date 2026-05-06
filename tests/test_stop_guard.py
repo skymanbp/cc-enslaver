@@ -357,8 +357,48 @@ class TestEmptyPayload(_StopBase):
 
 
 class TestTranscriptFallback(_StopBase):
-    def test_falls_back_to_transcript_when_message_absent(self) -> None:
-        # Build a synthetic transcript JSONL with the agent claiming done.
+    """Claude Code's actual Stop hook payload usually omits
+    `assistant_message` and only ships `transcript_path`. The fallback
+    parser is therefore the *primary* code path on Claude Code 2.x, not
+    a backup. v0.9.1 fixed a bug where the parser read the wrong field
+    path (top-level `entry.content`) instead of the nested
+    `entry.message.content` that Claude Code 2.x actually writes —
+    which made the whole Stop hook a silent no-op for v0.6.0–v0.9.0.
+
+    These tests cover both the real Claude Code 2.x schema (nested) and
+    a generic legacy schema (top-level), so a future format flip in
+    either direction can't silently regress the parser again.
+    """
+
+    def test_falls_back_to_transcript_claude_code_2x_schema(self) -> None:
+        # Real Claude Code 2.x JSONL: `type` + nested `message.content`.
+        tpath = self.tmpdir / "transcript.jsonl"
+        entries = [
+            {"type": "user", "message": {"content": "Fix the bug"}},
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "已解决，无需进一步处理。"},
+                    ],
+                },
+            },
+        ]
+        tpath.write_text(
+            "\n".join(json.dumps(e) for e in entries),
+            encoding="utf-8",
+        )
+        rc, out, _ = self._stop(message="", transcript_path=str(tpath))
+        self.assertIsNotNone(
+            out,
+            msg="real Claude Code 2.x transcript schema must be parsed",
+        )
+        self.assertEqual(out["decision"], "block")
+
+    def test_falls_back_to_transcript_legacy_top_level_schema(self) -> None:
+        # Backwards-compat: generic / older schema with top-level content.
+        # The parser tries nested first then falls back to top-level so
+        # both formats keep working.
         tpath = self.tmpdir / "transcript.jsonl"
         entries = [
             {"role": "user", "content": "Fix the bug"},
@@ -374,7 +414,68 @@ class TestTranscriptFallback(_StopBase):
             encoding="utf-8",
         )
         rc, out, _ = self._stop(message="", transcript_path=str(tpath))
-        self.assertIsNotNone(out, msg="should block via transcript fallback")
+        self.assertIsNotNone(out, msg="legacy top-level schema must still parse")
+        self.assertEqual(out["decision"], "block")
+
+    def test_falls_back_to_transcript_string_content(self) -> None:
+        # Some schemas use a plain string instead of a content array.
+        # The parser handles both list-of-blocks and bare-string content.
+        tpath = self.tmpdir / "transcript.jsonl"
+        entries = [
+            {"type": "assistant", "message": {"content": "已修复"}},
+        ]
+        tpath.write_text(
+            "\n".join(json.dumps(e) for e in entries),
+            encoding="utf-8",
+        )
+        rc, out, _ = self._stop(message="", transcript_path=str(tpath))
+        self.assertIsNotNone(out, msg="string-content schema must parse")
+        self.assertEqual(out["decision"], "block")
+
+    def test_text_reply_wins_over_later_tool_use_entry(self) -> None:
+        # In Claude Code 2.x a single agent turn may emit multiple
+        # assistant entries: text reply, then one or more tool_use
+        # entries (or vice versa). The Stop hook fires after the whole
+        # turn completes. The parser must pull the *last text-bearing*
+        # entry, not blindly the last assistant entry — otherwise a
+        # trailing tool_use with no text blocks wipes out the actual
+        # done-claim reply (regression bug fixed in v0.9.1).
+        tpath = self.tmpdir / "transcript.jsonl"
+        entries = [
+            {"type": "user", "message": {"content": "fix bug"}},
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "已修复，准备 ship。"},
+                    ],
+                },
+            },
+            # Trailing tool_use entry with no text blocks — this used to
+            # overwrite the prior text reply with "" and silently allow.
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_x",
+                            "name": "Bash",
+                            "input": {"command": "echo verifying"},
+                        },
+                    ],
+                },
+            },
+        ]
+        tpath.write_text(
+            "\n".join(json.dumps(e) for e in entries),
+            encoding="utf-8",
+        )
+        rc, out, _ = self._stop(message="", transcript_path=str(tpath))
+        self.assertIsNotNone(
+            out,
+            msg="text reply must survive a trailing tool_use entry",
+        )
         self.assertEqual(out["decision"], "block")
 
 

@@ -22,6 +22,99 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.9.1] — 2026-05-06
+
+**Critical bugfix: the Stop hook was a silent no-op for v0.6.0 through
+v0.9.0.** All four Stop-hook discipline layers (no-evidence, hedge,
+rule-06 self-quiz, rule-07 fidelity) were never actually firing on
+Claude Code 2.x. The prompt-injection layers (SessionStart /
+UserPromptSubmit) worked the whole time, so the failure was invisible
+unless you specifically inspected `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json`
+for a `last_blocked_turn` field that never appeared.
+
+### Root cause
+
+`stop_guard.py:_last_assistant_message_from_transcript` had two
+silent-failure bugs that compounded:
+
+1. **Wrong JSONL field path.** The parser read `entry.get("content")`
+   (top-level), but Claude Code 2.x writes assistant entries as
+   `{"type": "assistant", "message": {"content": [...]}}` — content is
+   *nested under `message`*. The top-level `content` was always `None`,
+   so `last_assistant` was always `""`, and `if not message: return 0`
+   short-circuited every Stop event.
+2. **Trailing-tool_use overwrite.** Even if bug 1 had been absent, the
+   parser overwrote `last_assistant` on *every* assistant entry,
+   including the trailing tool_use entries that contain no text blocks.
+   A turn that ended with a tool_use after the text reply (the common
+   case in Claude Code 2.x) would still wipe the prior text out to `""`.
+
+The original test (`TestTranscriptFallback`) used a synthetic schema
+that matched the broken parser (`{"role":"assistant", "content":[...]}`),
+so it passed without ever exercising the real Claude Code schema. The
+bug was discoverable only by inspecting an actual transcript or by
+noticing that `last_blocked_turn` was never being written to disk.
+
+### Fix
+
+`hooks/scripts/stop_guard.py` — `_last_assistant_message_from_transcript`:
+
+- Read `entry.get("message", {}).get("content")` first (Claude Code 2.x
+  schema), fall back to top-level `entry.get("content")` for backwards
+  compatibility with the older / generic schema.
+- Skip entries whose extracted text is empty so the most recent
+  text-bearing reply wins, instead of being clobbered by a trailing
+  tool_use entry.
+
+### Added
+
+- `tests/test_stop_guard.py::TestTranscriptFallback`:
+  - `test_falls_back_to_transcript_claude_code_2x_schema` — real
+    `{"type":"assistant","message":{"content":[...]}}` schema (the
+    case that exposes bug 1).
+  - `test_falls_back_to_transcript_legacy_top_level_schema` —
+    backwards-compat for `{"role":"assistant","content":[...]}`.
+  - `test_falls_back_to_transcript_string_content` — bare-string
+    `content` form.
+  - `test_text_reply_wins_over_later_tool_use_entry` — exposes bug 2;
+    text reply followed by a trailing tool_use entry must still BLOCK.
+- Test count 76 → **79 pass**.
+
+### Verified
+
+```
+$ python -m unittest discover tests
+...............................................................................
+Ran 79 tests in <X>s
+OK
+```
+
+Smoke against the actual session transcript at
+`~/.claude/projects/d--Projects-anti-laziness/<sid>.jsonl`:
+
+- Parser now extracts the most recent text-bearing assistant entry
+  (66 chars on this session at fix time) instead of the empty string.
+- End-to-end Stop hook with a fake done-claim appended to the real
+  transcript now BLOCKs at Layer (a) (rule 06 base) when no evidence
+  is supplied, and at Layer (d) (rule 07) when evidence + rule-06
+  marker are present but no rule-07 fidelity marker.
+
+### Impact on user experience
+
+After upgrading and restarting Claude Code, all four Stop-hook layers
+will fire for the first time. Replies that say "done" / "fixed" /
+"已解决" / etc. will be blocked unless they include the rule-06 and
+rule-07 evidence required by the discipline contract. This is the
+behaviour the documentation has promised since v0.6.0; v0.9.1 is the
+first release where the promise is actually kept.
+
+The one-shot guard (3-turn grace window after each block) still
+prevents infinite re-block loops — the agent gets exactly one
+corrective turn, then up to two more "free" Stop attempts before the
+hook fires again.
+
+---
+
 ## [0.9.0] — 2026-05-04
 
 **Project rename: `anti-laziness` → `cc-enslaver` (and marketplace
@@ -1039,7 +1132,8 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
 [0.8.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
 [0.7.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.2...v0.7.0

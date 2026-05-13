@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.9.1"
+    "version": "0.10.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior.",
-      "version": "0.9.1",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.10 adds Step 0 = build feedback loop to systematic-debug (10 concrete loop construction patterns from mattpocock-skills:diagnose, with mandatory checkpoint before hypothesis-generation).",
+      "version": "0.10.0",
       "author": {
         "name": "skymanbp"
       },

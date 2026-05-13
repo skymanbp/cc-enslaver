@@ -18,7 +18,70 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Stop hook deep file-claim verification** — parse "I edited X" patterns
   in the agent's last message and check `git diff` / mtime against the
   session-start baseline. v0.7.0 layered (b)+(c) on rule 06; v0.8.0 layered
-  (d) on rule 07; the file-claim version is still a v0.10+ candidate.
+  (d) on rule 07; the file-claim version is still a future-version candidate.
+
+---
+
+## [0.10.0] — 2026-05-13
+
+### Added — `systematic-debug` Step 0 = build feedback loop
+
+The `systematic-debug` skill previously went straight from Step 1 (restate the
+problem) into Step 3 (hypothesise root causes). In practice this collapsed
+under hard bugs because **without a reproducible signal, Step 4 (verify
+hypotheses) has nothing to act on** — the agent ends up writing plausible
+explanations that cannot be falsified. The output looked disciplined but the
+discipline never bound.
+
+This release adds **Step 0 — Construct a Reproducible Signal (Feedback Loop)**
+as a mandatory prerequisite to Step 1. It borrows the Phase-1 framing of
+`mattpocock-skills:diagnose` ("If you have a fast, deterministic,
+agent-runnable pass/fail signal for the bug, you will find the cause") and
+adapts it to the cc-enslaver verification discipline.
+
+Step 0 contents (all enforced, not advisory):
+
+- **0.1 — Pick a loop form, in priority order**, from 10 concrete patterns:
+  failing test → curl/HTTP script → CLI snapshot diff → headless browser →
+  replay captured trace → throwaway harness → property/fuzz loop → bisection
+  harness → differential loop → HITL bash script.
+- **0.2 — Iterate on the loop itself**: faster, sharper signal, more
+  deterministic. A 30-second flaky loop barely beats no loop; a 2-second
+  deterministic loop is a debugging superpower.
+- **0.3 — Non-deterministic bugs**: target a higher reproduction rate (50%
+  flake is debuggable; 1% isn't). Loop the trigger 100×, parallelise, narrow
+  timing windows.
+- **0.4 — Cannot build a loop**: list the attempts, ask the user for
+  environment access / captured artifact / instrumentation permission —
+  **forbidden** to drop into Step 3 hypothesis-generation without a loop.
+- **0.5 — Mandatory checkpoint before Step 1**: must answer four concrete
+  questions — what is the loop, how fast does it run, how often does it hit
+  the bug, what does the signal look like.
+
+The verify-convergence step (Step 7.1) now reuses the same loop from Step 0
+rather than asking the agent to recall the original repro command.
+
+Three new entries in the forbidden-behaviours list:
+
+- Skipping Step 0 and going straight to Step 3
+- Treating a one-off stack-trace observation as "the loop is already built"
+- Using "the loop is slow" as an excuse to fall back on impression-based debug
+
+### Why this and why now
+
+`mattpocock-skills` was installed on 2026-05-13 as a Claude Code marketplace.
+The `diagnose` skill in that pack codifies what "build a feedback loop first"
+actually looks like as a 10-pattern menu, which is exactly the gap
+cc-enslaver's systematic-debug skill had. Importing those patterns (with
+attribution; the upstream is MIT-licensed) closes the gap without inventing
+a parallel taxonomy.
+
+### Compatibility
+
+No breaking changes — Step 0 is additive. Existing Step 1–Step 7 behaviour is
+preserved; Step 7.1 now reads "rerun the Step 0 loop" instead of "rerun the
+original command" (semantically equivalent for users who do build a loop, and
+strictly stricter for users who don't).
 
 ---
 

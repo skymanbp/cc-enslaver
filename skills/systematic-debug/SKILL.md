@@ -10,6 +10,59 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 
 ## 强制流程（按顺序执行，不允许跳步）
 
+### Step 0 · 构建可复现信号（feedback loop）
+
+> **这是本 skill 最核心的一步。** 借鉴 `mattpocock-skills:diagnose` 的 Phase-1 原则：
+> "If you have a fast, deterministic, agent-runnable pass/fail signal for the bug, you will find the cause."
+> 没有可复现信号，后续 Step 3 / Step 4 的"假设 → 证伪"全是空中楼阁——你只能凭印象写"应该是 X"。
+>
+> **未建立可复现信号前，禁止进入 Step 3。** 反复试图绕开 Step 0 跳到 Step 3 是本 skill 的高频违规。
+
+**0.1 · 选一种 loop 形态（按优先级试 10 种）**
+
+按下面顺序尝试，先选满足"快 + 确定 + agent 可跑"三条的最高优先级：
+
+1. **Failing test** —— 在合适的层（unit / integration / e2e）写一个最小测试，断言 bug 行为。最佳。
+2. **Curl / HTTP script** —— 对运行中的 dev server 发请求，把响应跟期望 diff。
+3. **CLI invocation + snapshot diff** —— 用 fixture 输入跑 CLI，跟已知正确输出 byte-diff。
+4. **Headless browser 脚本** —— Playwright / Puppeteer 驱动 UI，断言 DOM / console / network。
+5. **Replay captured trace** —— 把真实 request / payload / event log 存盘，在隔离环境里重放。
+6. **Throwaway harness** —— 起一个最小子集（单 service + mocked deps），单函数调用触发 bug 路径。
+7. **Property / fuzz loop** —— bug 是 "sometimes wrong" 时，跑 1000 个随机输入找失败模式。
+8. **Bisection harness** —— bug 出现在已知两个状态间（commit / dataset / version）→ "boot at state X, check, repeat" 自动化，让 `git bisect run` 直接跑。
+9. **Differential loop** —— 同一输入分别跑 old vs new（或两个 config），diff 输出。
+10. **HITL bash 脚本** —— 最后兜底；若必须人手点击，至少用脚本驱动人，捕获输出回喂给你。
+
+**0.2 · 把 loop 当成产品迭代**
+
+选定后立即问：
+- 能不能更快？（缓存 setup、跳无关 init、缩窄测试范围）
+- signal 能不能更尖锐？（断言具体症状，而不是"没崩"）
+- 能不能更确定？（pin 时间、seed RNG、isolate fs、freeze network）
+
+**30 秒间歇 flaky loop 比没 loop 强不了多少；2 秒确定 loop 就是 debug 超能力。**
+
+**0.3 · 非确定性 bug：提高复现率而不是要"干净 repro"**
+
+50% flake 可 debug；1% 不可。Loop 触发器 100×、并行、加压、缩窄时间窗、注入 sleep——把命中率拉高到能 debug 为止。**目标不是 "能必定复现"，是 "够频繁能落到 trace"。**
+
+**0.4 · 真的造不出 loop —— 显式停下**
+
+不允许"造不出 loop 就直接猜"。必须：
+- 列出已尝试的 loop 形态 + 各自失败原因
+- 向用户索取：(a) 能复现的环境访问，或 (b) 抓到的 artifact（HAR / log dump / core dump / 带时间戳的录屏），或 (c) 在生产临时加 instrumentation 的授权
+- **绝对禁止**：在没 loop 的状态下进 Step 3 假设根源——这等于规则 01 "凭印象断言" 的违规。
+
+**0.5 · loop 建立确认（强制 checkpoint）**
+
+进入 Step 1 前必须能回答：
+1. loop 是什么？（贴一行命令 / 一段脚本 / 一个测试名）
+2. 跑一次多少秒？
+3. 跑 N 次有几次命中 bug？（确定性 = N/N；非确定性 = 给比例）
+4. signal 长什么样？（具体 stdout / 错误码 / 截图 / DOM 状态——不允许 "好像不对"）
+
+任一答不出来 → loop 不算建立 → 不允许进 Step 1。
+
 ### Step 1 · 复述与边界
 
 用一两句话**复述**用户描述的问题，并明确：
@@ -65,7 +118,7 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 > 这一步是 [`rules/06-verify-convergence.md`](rules/06-verify-convergence.md) 的执行入口。
 > 完成下面所有子步骤前**禁止**声称完成；如有任意一步揭示问题未解决，**回到 Step 3 重新假设根源**。
 
-**7.1 · 重触发原症状**：用用户在 Step 1 描述的同一条命令 / 输入重跑。粘贴新输出，明确"原报错消失"。
+**7.1 · 重触发原症状**：用 **Step 0 建立的同一个 feedback loop** 重跑（不是凭记忆复述命令）。粘贴新输出，明确"原报错消失"。Step 0 投入做的尖锐 / 确定性的 loop，在这一步直接付息——如果 loop 跑完仍命中原 signal，root cause 没修对，回 Step 3。
 
 **7.2 · 边界 + 反向用例**：至少跑 1 个边界（空输入 / 错误路径 / 并发 / 跨平台 / Unicode）+ 1 个反向用例（应该 fail 的仍 fail）。
 
@@ -89,15 +142,19 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 - ❌ 测试失败就让测试通过（不问为什么之前失败）
 - ❌ "我猜可能是 X" → 改 X → "应该好了" → 通通是反应式
 - ❌ 跳过 Step 4（验证假设）直接进 Step 5
+- ❌ **跳过 Step 0**（没建 feedback loop 直接进 Step 3 假设根源） — 这是新增的高频违规；没 loop 等于在 Step 4 没法证伪假设，整个流程退化成"猜 + 改 + 期待"
+- ❌ "我跑过一次 stack trace 看到了，就当 loop 已经建立" → 错；Step 0 要求**可重复的 agent 可跑信号**，一次性人眼看到不算
+- ❌ "loop 跑得太慢，先用印象判断" → 错；让 loop 变快是 Step 0.2 的任务，不是绕开 Step 0 的借口
 
 ## 输出契约
 
 完成上述流程后，最终回复给用户的内容**必须包含**：
 
-1. **根源说明**（一段话讲清楚机理）
-2. **修改清单**（含 `file:line`）
-3. **连带项处理**（"我同时改了 X / 检查了 Y / 未改 Z 因为…"）
-4. **收敛验证证据**（rule 06 的 Step 7 全部 5 个子步骤的产物：重触发输出、边界用例结果、连带测试结果、4 题自答、量化对比）
+1. **Feedback loop 描述**（Step 0 的产物：用了哪种 loop 形态、跑一次多少秒、命中率）
+2. **根源说明**（一段话讲清楚机理）
+3. **修改清单**（含 `file:line`）
+4. **连带项处理**（"我同时改了 X / 检查了 Y / 未改 Z 因为…"）
+5. **收敛验证证据**（rule 06 的 Step 7 全部 5 个子步骤的产物：用 Step 0 同一个 loop 重触发的输出、边界用例结果、连带测试结果、4 题自答、量化对比）
 
 如果中途发现问题超出预期复杂度（例如根源在另一个模块），**先回到用户**说明情况，不要单方面扩大修改范围。
 

@@ -42,8 +42,9 @@ class TestInjectContextSessionStart(unittest.TestCase):
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        # Should mention all 7 numbered rules and the rules/ directory.
-        for label in ("01", "02", "03", "04", "05", "06", "07", "rules/"):
+        # v0.11: 9 numbered rules now, all must appear in the session-
+        # start injection.
+        for label in ("01", "02", "03", "04", "05", "06", "07", "08", "09", "rules/"):
             self.assertIn(label, ctx, msg=f"context missing {label!r}")
 
     def test_content_references_rule_06_convergence(self) -> None:
@@ -102,6 +103,56 @@ class TestInjectContextSessionStart(unittest.TestCase):
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("忠实", ctx, msg="user-prompt missing fidelity reminder")
+
+    def test_content_references_rule_08_read_before_edit(self) -> None:
+        # v0.11 — rule 08 (read-before-edit / think-before-write) must
+        # appear in the session-start injection with both halves named.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "改前必读",
+            "写前必想",
+            "rule 08",
+            # The Stop-hook layer (e) reference confirms physical-
+            # enforcement disclosure in the injection.
+            "layer (e)",
+        ):
+            self.assertIn(needle, ctx, msg=f"session-start prompt missing {needle!r}")
+
+    def test_content_references_rule_09_systematic_modification(self) -> None:
+        # v0.11 — rule 09 (systematic modification, no patch-style) must
+        # appear in the session-start injection with the anti-patch
+        # vocabulary and the physical-enforcement callout.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "系统式修改",
+            "禁止打补丁",
+            "rule 09",
+            "layer (f)",
+        ):
+            self.assertIn(needle, ctx, msg=f"session-start prompt missing {needle!r}")
+
+    def test_user_prompt_includes_rule_08_and_09_reminders(self) -> None:
+        # The per-turn reminder must surface rule-08 + rule-09 nudges
+        # since they govern the "during this turn" workflow.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "UserPromptSubmit"],
+            stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "改前必读",
+            "写前必想",
+            "系统式",
+        ):
+            self.assertIn(needle, ctx, msg=f"user-prompt missing {needle!r}")
 
     def test_content_is_utf8_intact(self) -> None:
         # Smoke test for the Windows cp936 stdout regression: the prompt

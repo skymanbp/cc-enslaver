@@ -8,8 +8,8 @@
 
 ## 语言
 
-- **中文（canonical）** — [`../rules/01-*.md` ~ `../rules/06-*.md`](../rules/)。所有钩子注入（`prompts/`）、命令、skill 都基于中文。
-- **English mirror（v0.6.2）** — [`../rules/en/`](../rules/en/)。best-effort 翻译，与中文 1-1 对应；如出现 drift，中文版优先。供非 CJK 读者 / 非 Claude agent system prompt 使用。
+- **中文（canonical）** — [`../rules/01-*.md` ~ `../rules/09-*.md`](../rules/)。所有钩子注入（`prompts/`）、命令、skill 都基于中文。
+- **English mirror（v0.6.2 + v0.11）** — [`../rules/en/`](../rules/en/)。best-effort 翻译，与中文 1-1 对应；如出现 drift，中文版优先。供非 CJK 读者 / 非 Claude agent system prompt 使用。
 
 ---
 
@@ -17,7 +17,7 @@
 
 - 编号格式：`<两位数>-<kebab-case-名>.md`
 - 编号一旦发布**不再回收**（即使规则被废弃，也不复用编号）。
-- 当前编号区间：`01–07`。
+- 当前编号区间：`01–09`。
 
 ---
 
@@ -32,6 +32,8 @@
 | 05 | 引用必须可追溯 | **must** | [`../rules/05-cite-sources.md`](../rules/05-cite-sources.md) | 任何对外陈述（PR 描述、回复用户、报告） |
 | 06 | 验证收敛 | **must** | [`../rules/06-verify-convergence.md`](../rules/06-verify-convergence.md) | 任何修复 / 更新 / 补丁完成后的强制收敛验证 |
 | 07 | 任务忠实 | **must** | [`../rules/07-task-fidelity.md`](../rules/07-task-fidelity.md) | 任何任务声称完成前的请求覆盖、无降级、无遗漏二次确认 |
+| 08 | 改前必读，写前必想 | **must** | [`../rules/08-read-before-edit-think-before-write.md`](../rules/08-read-before-edit-think-before-write.md) | 任何 `Edit` / `Write` 前的前置硬纪律（v0.11 物理强制）|
+| 09 | 系统式修改，禁止打补丁 | **must** | [`../rules/09-systematic-modification.md`](../rules/09-systematic-modification.md) | 修改过程中的反补丁内容拦截（v0.11 物理强制）|
 
 ---
 
@@ -61,9 +63,19 @@
        └─────────────────┬────────────────────┘
                          │
                          ▼
+       ╔══════════════════════════════════════╗
+       ║ 08 改前必读 / 写前必想（前置硬纪律 · 物理强制）║
+       ╚═════════════════┬════════════════════╝
+                         │
+                         ▼
        ┌──────────────────────────────────────┐
        │   03 修根因                            │
        └─────────────────┬────────────────────┘
+                         │
+                         ▼
+       ╔══════════════════════════════════════╗
+       ║ 09 系统式修改 / 反补丁（内容硬纪律 · 物理强制）║
+       ╚═════════════════┬════════════════════╝
                          │
                          ▼
        ┌──────────────────────────────────────┐
@@ -78,9 +90,12 @@
 
 - **01 / 04 / 05** 是**输入端**约束：决定 agent 如何获取与陈述事实。
 - **02** 是**思考过程**约束：决定 agent 如何把事实组织成方案。
+- **08** 是**修改前置硬纪律**：把 04 + 02 折叠成 `Edit` / `Write` 之前的最低必答清单，并由 PreToolUse + Stop layer (e) 物理强制（v0.11）。
 - **03** 是**输出端 (改什么)** 约束：决定 agent 修改代码时是否触达根因。
+- **09** 是**输出端 (怎么改)** 约束：把 03 的"反偷懒"升级为修改内容层的硬纪律，由 PreToolUse new_string 内容检测 + Stop layer (f) 物理强制（v0.11）。
 - **06** 是**输出端 (改完之后 · 技术面)** 约束：决定 agent 是否真的把根因解决到收敛、是否经得起验证。
 - **07** 是**输出端 (改完之后 · 契约面)** 约束：决定 agent 是否把用户**要求的全部**按**原标准**交付（无遗漏、无降级、无范围溢出）。06 与 07 互补：06 解决"症状-根因"轴，07 解决"请求-交付"轴。
+- **08 与 09 互补**：08 是修改**前**的"准备充分了吗"，09 是修改**内容**的"姿势对了吗"。08 在 PreToolUse 的"已读检查"上 + Stop layer (e) 的"系统式自答"上落地；09 在 PreToolUse 的"new_string 内容检测"上 + Stop layer (f) 的"根因 + 影响 + 方案三件套"上落地。
 
 ---
 
@@ -88,21 +103,24 @@
 
 | 组件 | 引用方式 |
 |------|---------|
-| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 7 条规则的浓缩版 |
-| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 7 条规则的一行式提醒 |
-| [`../commands/checklist.md`](../commands/checklist.md) | 把 7 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实） |
-| [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证 |
-| [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 |
+| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 9 条规则的浓缩版（v0.11 加入 rule 08 / 09 + 标准回答骨架） |
+| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 9 条规则的结构化每轮自检清单（v0.11 重构）|
+| [`../commands/checklist.md`](../commands/checklist.md) | 把 9 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实 / E 改前必读·写前必想 / F 系统式修改） |
+| [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证；同时尊重规则 07 + 08 |
+| [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 + 08 + 09 |
+| [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) | 规则 04 + 08（read-before-edit）+ 规则 09（new_string 补丁标记物理拦截）|
+| [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py) | 规则 03 + 09（bypass 模式拦截）|
+| [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) |
 
 ---
 
 ## 添加新规则的流程
 
-1. 在 [`../rules/`](../rules/) 下创建 `08-xxx.md`，保留前 7 条编号不变。
+1. 在 [`../rules/`](../rules/) 下创建 `10-xxx.md`（v0.11 起编号区间是 01–09，新规则从 10 开始）。
 2. 文件必须包含 YAML frontmatter（参考现有任意规则的开头）：
    ```yaml
    ---
-   id: "08"
+   id: "10"
    title: "<规则标题>"
    severity: must
    ---
@@ -112,5 +130,6 @@
    - [`../prompts/session-start.md`](../prompts/session-start.md)
    - [`../prompts/user-prompt.md`](../prompts/user-prompt.md)
    - [`../commands/checklist.md`](../commands/checklist.md) 的检查项
-   - [`../rules/00-index.md`](../rules/00-index.md) 程序可读索引
+   - [`../rules/00-index.md`](../rules/00-index.md) 程序可读索引（中 + 英）
+   - 视情况：物理强制层（hooks/scripts/ + tests/）
 4. 在 [`../CHANGELOG.md`](../CHANGELOG.md) "Unreleased" 段记录新增规则。

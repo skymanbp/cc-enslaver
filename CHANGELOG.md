@@ -18,7 +18,205 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Stop hook deep file-claim verification** — parse "I edited X" patterns
   in the agent's last message and check `git diff` / mtime against the
   session-start baseline. v0.7.0 layered (b)+(c) on rule 06; v0.8.0 layered
-  (d) on rule 07; the file-claim version is still a future-version candidate.
+  (d) on rule 07; v0.11.0 layered (e)+(f) on rule 08+09 — the file-claim
+  version is still a future-version candidate.
+- **Rolling-patch PreToolUse interception (rule 09 hardening)** — count
+  `edits_per_file` in session state; DENY when same file > 5 small Edits
+  in one session without a single ≥ 50-line systematic rewrite. v0.11
+  punts this to soft layer (Stop layer (f) + rule 09 doc) on false-
+  positive concerns; hard interception would require a "small Edit"
+  heuristic that doesn't trip on legitimate small typo fixes.
+- **English prompts** — `rules/en/` is complete through rule 09 (v0.11),
+  but `prompts/session-start.md` and `prompts/user-prompt.md` are still
+  Chinese-only. Hook injection therefore only benefits CJK Claude Code
+  users in their native flow; the English mirror today is primarily for
+  copy-pasting into other LLM system prompts.
+
+---
+
+## [0.11.0] — 2026-05-19
+
+**全面规范化 + 新增 rule 08 (改前必读 / 写前必想) + rule 09 (系统式修改 / 禁止打补丁) + 两条新 Stop hook layer + PreToolUse(Edit|Write) 内容层物理拦截。**
+
+This release responds directly to four concrete demands from the user:
+"全面规范化"、"加入改前必读、写前必想且强制"、"物理上强制 Claude Code
+遵守本插件规则"、"强化系统式修改严禁打补丁"。Each one lands as a
+verifiable hard action (hook deny / Stop block / regex match), not as
+soft documentation.
+
+### Why rule 06 + 07 weren't enough
+
+Rule 06 covers "did the part you edited actually converge?" (technical
+axis). Rule 07 covers "did you do everything the user asked for at the
+standard requested?" (contractual axis). But two adjacent failure modes
+weren't being caught:
+
+1. **Pre-action laziness** — an agent could Edit without ever Reading
+   the call sites, or without recording *why* they were making the
+   change. The PreToolUse read-before-edit gate (v0.3.2) only checked
+   the *target* file was Read; downstream / connected files could be
+   skipped silently, and the "think before write" half had no
+   enforcement at all.
+2. **Patch-style content** — even when rule 06 + 07 + read_guard all
+   passed, the agent could land a `new_string` containing `try /
+   except: pass`, `# noqa`, `@ts-ignore`, `time.sleep(0.5) # race`,
+   etc., as the actual fix. These are rule 03 violations in spirit but
+   rule 03 was a text rule; nothing physically intercepted them at the
+   PreToolUse boundary.
+
+Rule 08 closes axis (1); rule 09 closes axis (2). Both axes get
+physical enforcement, not just text reminders, because the user's
+literal demand was "物理上强制 Claude Code 遵守本插件规则" — system-
+prompt-only enforcement was insufficient.
+
+### Added — rule 08 (read-before-edit / think-before-write)
+
+- **`rules/08-read-before-edit-think-before-write.md`** (Chinese
+  canonical) + **`rules/en/08-*.md`** (English mirror). Defines:
+  - **Read-half** — full Read of target + call sites + connected files
+    is mandatory before any Edit.
+  - **Think-half** — at least 3 of six rule-02 keywords (architecture
+    / responsibility / root cause / solution / impact / risk + a
+    "alternatives compared" item) must be surfaced in chain-of-thought
+    or final reply before Edit / Write submission.
+- **Stop hook layer (e)** — fires when `last_edit_turn == turn_count`
+  (i.e., this turn actually edited a file) and the message lacks both
+  an explicit rule-08 marker AND fewer than 3 of the six rule-02
+  keywords. Read-only / analysis turns are never blocked by (e).
+
+### Added — rule 09 (systematic modification, no patch-style)
+
+- **`rules/09-systematic-modification.md`** (Chinese canonical) +
+  **`rules/en/09-*.md`** (English mirror). 8 banned patch-style
+  patterns + 6 patch-marker regex categories + 13 rationale tokens.
+- **`hooks/scripts/read_guard.py` patch-style detector** — at
+  PreToolUse, scans `new_string` (Edit) / `content` (Write) for:
+
+  | Pattern | Reason |
+  |---|---|
+  | `try:\n …\nexcept …:\npass` (bare multi-line) | Silent exception swallow |
+  | `# noqa` without rationale | Lint suppression |
+  | `# type: ignore` without rationale | Type-checker suppression |
+  | `// @ts-ignore` / `// @ts-expect-error` without rationale | TS suppression |
+  | `// eslint-disable[-next-line\|-line]` without rationale | Lint suppression |
+  | `time.sleep(...) # race/wait/workaround` | Sleep masking a race |
+
+  Each is allowed when accompanied by an immediately-adjacent
+  rationale comment containing one of: `because`, `原因`, `why`,
+  `正当`, `rationale`, `see issue/pr/comment/ticket`,
+  `intentional[ly]`, `deliberate[ly]`, `third-party`, `per
+  spec/rfc/standard`. A bare suppression = laziness = DENY with a
+  precise diagnostic citing rule 09.
+
+- **Stop hook layer (f)** — fires on edit turns when the message
+  lacks both an explicit rule-09 marker AND any of the three triplet
+  axes (root cause / impact / solution). All three must be present
+  for the keyword fallback to count.
+
+### Added — physical enforcement infrastructure
+
+- **`hooks/scripts/lib/state.py`**:
+  - `record_edit_turn(session_id, turn_count)` — stamps
+    `state["last_edit_turn"] = turn_count` after every accepted
+    Edit/Write.
+  - `did_edit_this_turn(session_id, turn_count)` — boolean used by
+    stop_guard to scope layers (e)+(f) to edit turns. Returns False
+    when `turn_count is None` (preferring false negatives over
+    spurious blocks on missing payload).
+- **`hooks/scripts/read_guard.py`** — refactored to:
+  - Branch on tool (Read / Write / Edit) with patch-style check
+    inserted between "read-before-edit" gate and "allow + record"
+    path.
+  - New `_find_unjustified_patch_marker(new_string)` helper with
+    `_line_window(±1 line)` rationale-lookup window.
+  - New `PATCH_DENY_TEMPLATE` with rule-09 diagnostic + acceptable-
+    form examples in the deny reason.
+  - Calls `state_lib.record_edit_turn(session_id, turn_count)` on
+    every accepted Edit/Write.
+- **`hooks/scripts/stop_guard.py`** — adds layers (e) and (f):
+  - `RULE_08_MARKERS` (6 patterns) + `RULE_02_KEYWORDS` (6
+    bilingual regex) + `_has_rule08_marker_or_keywords(text)`.
+  - `RULE_09_MARKERS` (7 patterns) + `RULE_09_TRIPLET` (3 axes,
+    bilingual) + `_has_rule09_marker_or_triplet(text)`.
+  - Layered into `main()` after (d) and gated by
+    `state_lib.did_edit_this_turn(...)`.
+  - Two new block reason templates: `MISSING_RULE08_REASON`,
+    `MISSING_RULE09_REASON`, each citing exactly which discipline
+    failed and how to surface the missing markers.
+
+### Added — full prompts / commands regularization (诉求 1)
+
+- **`prompts/session-start.md`** — full rewrite:
+  - Opens with a "🚨 物理强制层" advisory making the hook-deny /
+    Stop-block surface explicit.
+  - 9-rule summary section (was 7) with hook-enforcement annotations
+    on every rule.
+  - **Workflow constraints split into three time-ordered stages**:
+    🔍 改前 / ✏️ 改中 / ✅ 改后, each tying back to specific rules.
+  - **Standard response skeleton (§3)** — 5-stage template (改前 /
+    改中 / 改后 rule 06 / 改后 rule 07 / rule 08+09 收尾) that
+    modification-class tasks must follow. Explicit field list with
+    sample contents.
+  - Self-check trigger list extended with hook-enforcement callouts
+    (e.g., "即将写 `# noqa` 无 why 注释 → 会被 PreToolUse 物理 DENY").
+- **`prompts/user-prompt.md`** — full rewrite from a 7-item bullet
+  list to a structured 9-item self-check broken into 改前 / 改中 /
+  改后 stages, ended with a "物理强制提示" table mapping each
+  laziness attempt to the specific hook that will catch it.
+- **`commands/checklist.md`** — adds **section E** (rule 08, 5
+  items E1–E5) + **section F** (rule 09, 8 items F1–F8). Default
+  invocation now prints A/B/C/D/E/F. Argument-hint extended with
+  `pre-edit` and `systematic`. Output-requirements section gains a
+  unified icon legend (✅ / ⚠️ / ❌ / 🔍 / ✏️ / 🚨).
+- **`agents/verifier.md`** — meta-rules section adds rule 08 as a
+  constraint the verifier itself must respect (full Read before
+  verdict, never grep-only).
+
+### Changed
+
+- **`docs/RULES.md`** — rule count 7 → 9; numbering range `01–07`
+  → `01–09`; relationship diagram extends with rule 08 + rule 09
+  boxes; component-table extended with hook scripts; "addition
+  flow" updated for `10-xxx.md`.
+- **`rules/00-index.md`** + **`rules/en/00-index.md`** — new rows
+  for 08 and 09; range updated; English relationship paragraph
+  extended.
+- **`docs/ARCHITECTURE.md`** — Layer 1 hook table now mentions all
+  three responsibilities (read-before-edit / patch-style / edit-
+  turn stamping); Stop decision tree extended from 6 steps to 8
+  steps; new "Edit / Write patch-style content blocking (v0.11)"
+  subsection with regex catalog and rationale-token list; new
+  rule-08 keyword table and rule-09 triplet table; connected-files
+  matrix updated for all three changed scripts.
+- **`CLAUDE.md`** — new §2.10 (rule 08) + §2.11 (rule 09);
+  repository structure tree adds rules 08 / 09; §6 当前版本 fully
+  rewritten with v0.11 detail block.
+- **`.claude-plugin/plugin.json`** + **`marketplace.json`** —
+  version bumped 0.10.0 → 0.11.0; descriptions rewritten to
+  surface the v0.11 rule additions and physical-enforcement
+  changes.
+
+### Removed (from Unreleased roadmap)
+
+- "Stop hook deep enforcement on more rules" — rule 08 and rule 09
+  layers (e)+(f) cover the next two axes; remaining file-claim
+  verification axis stays roadmap.
+
+### Verified
+
+```
+# rule 06 convergence: see "Phase F" section in the v0.11 commit
+# message for the full self-quiz (真解决 / 更好方案 / 哪些没验 /
+# 验证合理).
+```
+
+Self-applied rule 06 + rule 07 + rule 08 + rule 09 before claiming
+completion. Hook-layer dogfood confirmed in this very session: when
+the agent tried to Edit `CLAUDE.md` without first having Read it via
+the Read tool (the file was only available as injected `claudeMd`
+context), `read_guard.py` correctly DENY-ed the Edit with the rule-
+04/08 reason. The agent then Read the file and retried — exactly the
+intended physical-enforcement loop.
 
 ---
 
@@ -1195,7 +1393,9 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
 [0.8.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0

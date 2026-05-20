@@ -69,6 +69,45 @@ class _GuardTestBase(unittest.TestCase):
             env_overrides=self.env,
         )
 
+    def _pre_edit_with_new_string(
+        self,
+        file_path: str,
+        new_string: str,
+        turn_count: int | None = None,
+    ) -> tuple[int, dict | None, str]:
+        payload: dict = {
+            "session_id": self.sid,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": file_path,
+                "new_string": new_string,
+                "old_string": "",
+            },
+        }
+        if turn_count is not None:
+            payload["turn_count"] = turn_count
+        return run_hook([GUARD], payload, env_overrides=self.env)
+
+    def _pre_write_with_content(
+        self,
+        file_path: str,
+        content: str,
+        turn_count: int | None = None,
+    ) -> tuple[int, dict | None, str]:
+        payload: dict = {
+            "session_id": self.sid,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": file_path,
+                "content": content,
+            },
+        }
+        if turn_count is not None:
+            payload["turn_count"] = turn_count
+        return run_hook([GUARD], payload, env_overrides=self.env)
+
     def _state_files(self) -> list[Path]:
         return list((self.tmpdir / "sessions").glob("*.json"))
 
@@ -219,6 +258,186 @@ class TestFailOpen(_GuardTestBase):
         )
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, b"")
+
+
+class TestPatchStyleEdit(_GuardTestBase):
+    """v0.11 — rule 09 PreToolUse(Edit|Write) new_string content guard.
+
+    The detector scans the new content for unjustified suppression
+    markers and DENY-s with a rule-09 reason. Each marker is allowed
+    when accompanied by an adjacent rationale comment.
+
+    Note on dogfooding: the fixtures below intentionally trigger the
+    detector at *runtime* (the new_string sent to the hook subprocess).
+    To avoid this test file's own source tripping read_guard when this
+    file is later edited, race/workaround/etc. fixtures are built via
+    runtime string concatenation so the literal regex match does not
+    appear in this file's source.
+    """
+
+    def test_bare_try_except_pass_is_denied(self) -> None:
+        # try/except: pass is unambiguous at the source level; no need
+        # for runtime concatenation here — the detector regex is multi-
+        # line and won't match this single-string-literal in source.
+        target = self._existing_file()
+        self._pre("Read", target)
+        new_string = (
+            "try:\n"
+            "    risky()\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(out, msg="bare try/except: pass must DENY")
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        self.assertIn("rule 09", spec["permissionDecisionReason"])
+
+    def test_bare_noqa_is_denied(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        # Build via concatenation so this test file's source doesn't
+        # itself contain a bare-noqa pattern.
+        bare = "# " + "no" + "qa"
+        new_string = "x = unused_var  " + bare + "\n"
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNotNone(out, msg="bare noqa must DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("rule 09", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_noqa_with_rationale_is_allowed(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        # Justified form: rationale contains "because" within the ±1
+        # line window of the marker.
+        marker = "# " + "no" + "qa: E501"
+        new_string = (
+            marker + "  -- URL must stay on one line, because splitting hurts readability\n"
+            "LONG_URL = 'https://example.com/very/long'\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(
+            out,
+            msg=f"noqa with adjacent 'because' rationale must allow, got {out!r}",
+        )
+
+    def test_ts_ignore_with_rationale_is_allowed(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        ts_marker = "// " + "@ts-" + "ignore"
+        new_string = (
+            ts_marker + ": third-party lib has incomplete type, see issue #1234\n"
+            "const result = legacy.foo();\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg="@ts-ignore with rationale must allow")
+
+    def test_bare_eslint_disable_next_line_is_denied(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        es_marker = "// " + "eslint-" + "disable-next-line"
+        new_string = (
+            es_marker + " no-console\n"
+            "console.log('hi');\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNotNone(out, msg="bare eslint-disable must DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_time_sleep_workaround_is_denied(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        # Runtime concatenation: source never has `# workaround` adjacent
+        # to a `time.sleep(...)` call, but the runtime new_string does.
+        race_keyword = "work" + "around"
+        new_string = (
+            "import time\n"
+            "time.sleep(0.5)  # " + race_keyword + "\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNotNone(
+            out,
+            msg="time.sleep with race/wait/workaround marker must DENY",
+        )
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_clean_new_string_is_allowed(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        new_string = "def add(a, b):\n    return a + b\n"
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg="clean new_string must allow silently")
+
+    def test_write_new_file_with_bare_noqa_is_denied(self) -> None:
+        target = str(self.tmpdir / "new_module.py")
+        bare = "# " + "no" + "qa"
+        content = "import sys  " + bare + "\nprint(sys.path)\n"
+        rc, out, _ = self._pre_write_with_content(target, content)
+        self.assertIsNotNone(out, msg="even new-file Write must DENY bare noqa")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+class TestRecordEditTurn(_GuardTestBase):
+    """v0.11 — accepted Edits/Writes stamp last_edit_turn into state.
+
+    The stamp is what Stop layers (e)+(f) check to scope themselves to
+    edit turns. Without this stamp, those layers silently allow.
+    """
+
+    def test_successful_edit_stamps_edit_turn(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(
+            target,
+            "x = 1\n",
+            turn_count=7,
+        )
+        self.assertIsNone(out, msg="clean Edit must allow")
+        state = self._state()
+        self.assertEqual(
+            state.get("last_edit_turn"),
+            7,
+            msg=f"expected last_edit_turn=7, got {state!r}",
+        )
+
+    def test_successful_write_stamps_edit_turn(self) -> None:
+        target = str(self.tmpdir / "fresh.py")
+        rc, out, _ = self._pre_write_with_content(
+            target,
+            "def f(): pass\n",
+            turn_count=12,
+        )
+        self.assertIsNone(out, msg="clean Write of new file must allow")
+        state = self._state()
+        self.assertEqual(state.get("last_edit_turn"), 12)
+
+    def test_denied_edit_does_not_stamp_edit_turn(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(
+            target,
+            "try:\n    risky()\nexcept Exception:\n    pass\n",
+            turn_count=4,
+        )
+        self.assertIsNotNone(out)
+        state = self._state()
+        self.assertNotEqual(
+            state.get("last_edit_turn"),
+            4,
+            msg="denied Edit must not stamp last_edit_turn",
+        )
+
+    def test_no_turn_count_does_not_stamp(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(target, "x = 1\n")
+        self.assertIsNone(out)
+        state = self._state()
+        self.assertIsNone(
+            state.get("last_edit_turn"),
+            msg="missing turn_count must not produce a stamp",
+        )
 
 
 class TestPathNormalization(_GuardTestBase):

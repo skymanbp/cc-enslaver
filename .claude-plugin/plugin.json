@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.10 adds Step 0 = build feedback loop to the systematic-debug skill (10 concrete loop construction patterns borrowed from mattpocock-skills:diagnose — failing test / curl script / CLI snapshot diff / headless browser / replay trace / throwaway harness / fuzz / bisection / differential / HITL — plus loop-iteration discipline and a mandatory 4-question checkpoint before entering Step 1).",
-  "version": "0.10.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.11 adds rule 08 (read-before-edit / think-before-write) + rule 09 (systematic modification, no patch-style) with physical enforcement: PreToolUse(Edit|Write) now intercepts unjustified patch markers (try/except: pass, # noqa, @ts-ignore, eslint-disable, time.sleep over a race) in new_string content; Stop hook gains two layers (e + f) scoped to turns that actually edited files. Includes a full prompts/commands regularization pass (standard response skeleton, 9-question per-turn self-check checklist).",
+  "version": "0.11.0",
   "author": {
     "name": "skymanbp"
   },

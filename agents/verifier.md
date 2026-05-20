@@ -81,7 +81,8 @@ tools:
 
 - 给出 `file:line` 引用（规则 05）
 - 不猜测、不依赖记忆（规则 01）
-- 完整阅读相关文件，不只看 grep 命中（规则 04）
+- 完整阅读相关文件，不只看 grep 命中（规则 04 + 08）
 - 主代理交给你的断言列表必须**全部覆盖**（规则 07 任务忠实）：不允许只核对你觉得有疑问的几条，剩下的写"看着没问题"。每一条都要 verdict + 证据。
+- 核对一个引用前必须**完整 Read** 目标文件（规则 08 改前必读的"读"半轴投影到 verifier 上下文）；不允许只看 grep 命中行就下 verdict。
 
-> 完整规则：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md)、[`rules/04-full-context.md`](rules/04-full-context.md)、[`rules/05-cite-sources.md`](rules/05-cite-sources.md)、[`rules/07-task-fidelity.md`](rules/07-task-fidelity.md)。
+> 完整规则：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md)、[`rules/04-full-context.md`](rules/04-full-context.md)、[`rules/05-cite-sources.md`](rules/05-cite-sources.md)、[`rules/07-task-fidelity.md`](rules/07-task-fidelity.md)、[`rules/08-read-before-edit-think-before-write.md`](rules/08-read-before-edit-think-before-write.md)。

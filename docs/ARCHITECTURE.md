@@ -48,9 +48,9 @@ Five hook entries across four events:
 |---|---|---|---|
 | `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
-| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file |
-| `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns; also register file-as-read on `register_read.py` invocation |
-| `Stop` | — | `stop_guard.py` | Four-layer block: no-evidence / hedged-completion / missing rule-06 quiz / missing rule-07 fidelity quiz |
+| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09); stamp `last_edit_turn` for Stop layers (e)+(f) |
+| `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (rule 03 + 09); also register file-as-read on `register_read.py` invocation |
+| `Stop` | — | `stop_guard.py` | Six-layer block: (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking (edit turns only) / (f) missing rule-09 triplet (edit turns only) |
 
 #### Why everything in `PreToolUse` (and not split with `PostToolUse`)
 
@@ -146,7 +146,7 @@ the agent — discipline enforcement must never become an obstacle to actual wor
 Claude Code spec) inspects `payload.assistant_message` (or falls back to
 the last assistant entry in `payload.transcript_path`).
 
-**Decision tree (v0.8.0):**
+**Decision tree (v0.11.0):**
 
 | Step | Condition | Action |
 |------|-----------|--------|
@@ -156,7 +156,9 @@ the last assistant entry in `payload.transcript_path`).
 | 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
 | 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
 | 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
-| 6 | All gates passed | Allow |
+| 6 | `last_edit_turn == turn_count` AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**) | **Block** (`MISSING_RULE08_REASON`) |
+| 7 | `last_edit_turn == turn_count` AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (`MISSING_RULE09_REASON`) |
+| 8 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
 `完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
@@ -212,6 +214,52 @@ already shown it both has evidence and engaged with the rule-06
 self-quiz; the fidelity layer adds the orthogonal "did you deliver
 everything the user asked for?" check before allowing the Stop.
 
+**v0.11.0 rule-08 closing markers** (layer (e); single match
+suffices to pass the gate): `rule 08` / `改前必读` / `写前必想` /
+`read-before-edit` / `think-before-write` / `系统式自答`.
+
+**v0.11.0 rule-02 systematic-thinking keywords** (layer (e)
+fallback; ≥ 3 of 6 must match):
+
+| # | Keyword (CN / EN) |
+|---|-------------------|
+| 1 | 架构 / architecture / architectural |
+| 2 | 职责 / responsibility |
+| 3 | 根源 / 根因 / root-cause |
+| 4 | 方案 / solution / approach |
+| 5 | 连带 / 下游 / 影响范围 / downstream / impact / connected |
+| 6 | 风险 / 不变量 / invariant / risk |
+
+**v0.11.0 rule-09 closing markers** (layer (f); single match
+suffices to pass the gate): `rule 09` / `系统式修改` / `打补丁` /
+`systematic modification` / `patch-style` / `non-patch` / `反补丁`.
+
+**v0.11.0 rule-09 triplet keywords** (layer (f) fallback; **all
+three** must match):
+
+| # | Triplet axis (CN / EN) |
+|---|-------------------------|
+| 1 | 根源 / 根因 / root-cause |
+| 2 | 连带 / 影响范围 / impact / blast-radius / downstream |
+| 3 | 方案 / solution / approach / alternative |
+
+**Why layers (e)+(f) are scoped to edit turns**: a pure analysis /
+answer turn should not be forced to surface think-before-write or
+root-cause/impact/solution markers — there was nothing modified for
+those to apply to. `read_guard.py` stamps `state.last_edit_turn =
+turn_count` on every accepted Edit / Write; layer (e) and (f) check
+`state_lib.did_edit_this_turn(session_id, turn_count)` and silently
+allow on read-only turns. The one-shot guard still applies.
+
+**Why detection is heuristic and lightweight**: same rationale as
+layers (c)(d). A careful agent who genuinely did the rule-08/09
+work will naturally use these keywords in their own phrasing;
+demanding a verbatim formula would false-positive on legitimate
+prose. The single-marker escape (`rule 08` / `rule 09`) lets an
+agent who used non-keyword phrasing still flag they did the work.
+The one-shot guard caps false-positive cost at exactly 1 corrective
+turn per block.
+
 **One-shot guard**: `state_lib.record_stop_block(session_id, turn_count)`
 on every block; `state_lib.was_just_blocked(session_id, turn_count)`
 returns True for `turn_count ∈ [last + 1, last + 3]` so the agent has a
@@ -231,6 +279,32 @@ evidence is robust (a careful agent always cites evidence per rule 05,
 so this only fires on actual laziness). v0.7.0 deepened the rule-06
 side (hedge + self-quiz); v0.8.0 added the rule-07 fidelity layer.
 File-claim verification is now a v0.9+ candidate.
+
+#### `Edit` / `Write` patch-style content blocking (v0.11.0)
+
+`read_guard.py` gains a second responsibility beyond read-before-edit:
+the `new_string` (Edit) or `content` (Write) is scanned for **patch-
+style markers** — `try / except: pass`, `# noqa`, `# type: ignore`,
+`// @ts-ignore`, `// @ts-expect-error`, `// eslint-disable[-next-
+line]`, `time.sleep(...) # race/wait/workaround` — and DENY-ed when
+present **without an adjacent rationale comment** (the line itself or
+±1 line must contain one of: `because`, `原因`, `why`, `正当`,
+`rationale`, `see issue/pr/comment/ticket`, `intentional`,
+`deliberate`, `third-party`, `per spec/rfc/standard`).
+
+| Pattern | Why |
+|---|---|
+| `try:\n …\nexcept …:\npass` (multi-line, bare) | Silent exception swallow (rule 03 + 09) |
+| `# noqa` without rationale | Lint suppression without justification (rule 03 + 09) |
+| `# type: ignore` without rationale | Type-checker suppression (rule 03 + 09) |
+| `// @ts-ignore` / `// @ts-expect-error` without rationale | TS suppression (rule 03 + 09) |
+| `// eslint-disable[-next-line\|-line]` without rationale | Lint suppression (rule 03 + 09) |
+| `time.sleep(...) # race/wait/workaround` | Sleep masking a race (rule 03 + 09) |
+
+This is the **physical-enforcement** half of rule 09. The
+soft-layer half (the `rules/09-systematic-modification.md`
+discipline + Stop layer (f) closing check) covers the cases the
+regex set cannot catch (rolling patches, loosened assertions, etc.).
 
 #### `Bash` bypass-pattern blocking
 
@@ -445,13 +519,13 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 
 | If you edit… | Also re-check… |
 |---|---|
-| `rules/<n>-*.md` | `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
+| `rules/<n>-*.md` | `rules/en/<n>-*.md` (English mirror), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/en/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
 | `prompts/*.md` | `hooks/scripts/inject_context.py` (filename mapping), this doc |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
-| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract), this doc §2 (deny output contract), `tests/test_read_guard.py` |
-| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` |
+| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table), `tests/test_read_guard.py` (read-before-edit cases + patch-style positive/negative cases + record_edit_turn cases) |
+| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
-| `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases) |
+| `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers + `did_edit_this_turn`), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases; rule 08 / rule 09 layer (e)+(f) cases) |
 | `hooks/scripts/gc_state.py` | `commands/gc.md` (`/cc-enslaver:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |
 | `hooks/scripts/register_read.py` | `hooks/scripts/bash_guard.py` (the actual register handling lives there), this doc §2 "Read-cache escape hatch", `tests/test_register_read.py` |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |

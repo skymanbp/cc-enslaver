@@ -150,3 +150,55 @@ def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
     # [last + 1, last + 3], treat the most recent block as still "fresh"
     # and don't re-block. After 3 turns of grace, we're free to block again.
     return last < turn_count <= last + 3
+
+
+# --------------------------------------------------------------------------- #
+# Edit-turn recording (v0.11.0 — for rule 08 + rule 09 Stop-hook layers).
+#
+# When the agent successfully Edits or Writes a file, we stamp the current
+# turn_count into `last_edit_turn`. The Stop hook layers (e) and (f) only
+# fire when `last_edit_turn == current turn_count`: this scopes the
+# rule-08/09 closing checks to turns that actually modified files,
+# avoiding false positives on read-only / analysis turns.
+#
+# Why not record per-file edit counts: rolling-patch detection (rule 09)
+# could use that, but at v0.11 we tolerate the rolling-patch detection
+# being soft (rule 09 doc-level discipline + Stop-hook layer (f) on the
+# "missing root-cause/impact/solution markers" axis is enough). If we
+# ever want PreToolUse-level rolling-patch DENY, we'll extend this with
+# `edits_per_file: {path: count}` then.
+# --------------------------------------------------------------------------- #
+def record_edit_turn(session_id: str, turn_count: int | None) -> None:
+    """Stamp `last_edit_turn = turn_count` on the session state.
+
+    Called from read_guard immediately after a successful Edit or Write
+    (Pre-tool-use; "successful" here means the guard did not DENY — the
+    tool may still fail downstream, but that's harmless: the rule-08/09
+    closing checks only matter when the agent claims completion in the
+    same turn as a real edit, and a failed Edit followed by a done-claim
+    is itself a rule-06 violation caught by layer (a)).
+    """
+    if turn_count is None:
+        return
+    state = load(session_id)
+    state["last_edit_turn"] = turn_count
+    save(state)
+
+
+def did_edit_this_turn(session_id: str, turn_count: int | None) -> bool:
+    """True if the session's last Edit/Write was stamped at exactly
+    `turn_count`.
+
+    Used by stop_guard layer (e)+(f) to scope the rule-08/09 closing
+    checks to "turns that actually modified files". A read-only / pure-
+    analysis turn never trips these layers, regardless of how the agent
+    phrases the closing message.
+
+    If `turn_count` is None (Claude Code didn't supply it), we
+    conservatively return False — better to occasionally miss a layer
+    (e)/(f) trigger than to false-positive on a non-editing turn.
+    """
+    if turn_count is None:
+        return False
+    state = load(session_id)
+    return state.get("last_edit_turn") == turn_count

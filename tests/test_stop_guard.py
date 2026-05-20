@@ -279,6 +279,222 @@ class TestFidelityLayer(_StopBase):
         self.assertIsNone(out, msg=f"emoji checklist should pass, got {out!r}")
 
 
+class TestRule08Layer(_StopBase):
+    """v0.11 — Layer (e) rule 08 (read-before-edit / think-before-write).
+
+    Layer (e) fires **only on edit turns** (state.last_edit_turn ==
+    turn_count). On non-edit turns it silently allows.
+
+    Pass condition (either):
+      (1) any explicit rule-08 marker, OR
+      (2) at least 3 of the six rule-02 keywords.
+    """
+
+    def _seed_edit_turn(self, turn_count: int) -> None:
+        """Plant `last_edit_turn = turn_count` in this session's state
+        file so the Stop hook sees this as an edit turn."""
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        state_path = sessions / f"{self.sid}.json"
+        state_path.write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+            }),
+            encoding="utf-8",
+        )
+
+    def test_non_edit_turn_passes_silently(self) -> None:
+        # No edit this turn — layer (e) MUST silently allow even if the
+        # message would otherwise lack rule-08 markers. Message includes
+        # rule 06 + 07 markers so it survives layers (a-d).
+        msg = (
+            "已修复并验证。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求只有一项，已完成，无降级、无超范围。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out,
+            msg=f"non-edit turn must not trigger layer (e), got {out!r}",
+        )
+
+    def test_edit_turn_without_rule08_marker_blocks(self) -> None:
+        # Plant an edit turn. Message passes (a-d) but contains NO
+        # rule-08 markers and fewer than 3 of 6 rule-02 keywords. Must
+        # block with rule-08 reason.
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 用户原始请求 1 项，无降级、无超范围。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="edit turn without rule-08 marker must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 08", out["reason"])
+
+    def test_edit_turn_with_explicit_rule08_marker_passes(self) -> None:
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级、无遗漏。\n"
+            "rule 08: 改前必读 (auth.py 第 3 次工具调用 Read 完整) + 写前必想 "
+            "(根因 / 影响 / 方案 三件套见下).\n"
+            "rule 09: 根因 = 缺锁 (auth.py:142); 影响 = routes/login.py:88 调用链; "
+            "方案 = 复用 session._pending_lock。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"explicit rule-08 marker must pass, got {out!r}")
+
+    def test_edit_turn_with_three_rule02_keywords_passes(self) -> None:
+        # 3 of 6 rule-02 keywords: 架构 + 根源 + 方案. Plus rule 09
+        # triplet (because layer (f) also checks).
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "**架构定位**: auth.py 是登录链路第 3 步; "
+            "**根源**: auth.py:142 缺锁; "
+            "**方案**: 复用 session._pending_lock (覆盖 connected impact)。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out,
+            msg=f"3 rule-02 keywords + rule-09 triplet must pass, got {out!r}",
+        )
+
+    def test_edit_turn_with_only_two_rule02_keywords_blocks_at_e(self) -> None:
+        # 2 of 6 rule-02 keywords (root cause + solution but not the
+        # third) → fewer than threshold → layer (e) blocks.
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "**根源**: 缺锁; **方案**: 加锁。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="2 keywords < threshold must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 08", out["reason"])
+
+
+class TestRule09Layer(_StopBase):
+    """v0.11 — Layer (f) rule 09 (systematic modification, no patch-style).
+
+    Layer (f) fires **only on edit turns** AND only after (a)-(e) pass.
+    Pass condition (either):
+      (1) any explicit rule-09 marker, OR
+      (2) ALL THREE of the triplet keywords (root-cause + impact +
+          solution).
+    """
+
+    def _seed_edit_turn(self, turn_count: int) -> None:
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        state_path = sessions / f"{self.sid}.json"
+        state_path.write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+            }),
+            encoding="utf-8",
+        )
+
+    def test_edit_turn_passes_e_but_lacks_rule09_triplet_blocks(self) -> None:
+        # Passes (a-e) with rule-08 marker but never names rule-09 / no
+        # complete triplet (only root cause present, missing impact +
+        # solution at the triplet level).
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级、无遗漏。\n"
+            "rule 08: 改前必读 + 写前必想 (架构 / 职责 / 风险 三件套)。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="edit turn without rule-09 triplet must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 09", out["reason"])
+
+    def test_edit_turn_with_explicit_rule09_marker_passes(self) -> None:
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "rule 09: 系统式修改完成。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out,
+            msg=f"explicit rule-09 marker must pass, got {out!r}",
+        )
+
+    def test_edit_turn_with_complete_triplet_passes(self) -> None:
+        # All three triplet axes present without explicit rule 09 marker.
+        # Also has rule 08 markers so layer (e) passes.
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "**根源**: auth.py:142 缺锁。\n"
+            "**影响范围**: routes/login.py:88, tests/test_auth.py:55。\n"
+            "**方案**: 复用 session._pending_lock（与方案 B 锁全表对比，A 更轻量）。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out,
+            msg=f"complete rule-09 triplet must pass, got {out!r}",
+        )
+
+    def test_edit_turn_with_only_two_triplet_axes_blocks(self) -> None:
+        # 根源 + 方案 but no 影响/impact → triplet incomplete → block.
+        # rule 08 satisfied so (e) passes.
+        self._seed_edit_turn(turn_count=5)
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "**根源**: 缺锁。\n"
+            "**方案**: 加锁。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 09", out["reason"])
+
+    def test_non_edit_turn_silently_passes_f(self) -> None:
+        # No edit this turn — layer (f) must not fire even with no
+        # rule-09 marker / no triplet.
+        msg = (
+            "已修复。\n"
+            "$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级、无遗漏。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out)
+
+
 class TestNoDoneClaim(_StopBase):
     def test_no_done_claim_allows(self) -> None:
         # Plain analysis with no completion claim.

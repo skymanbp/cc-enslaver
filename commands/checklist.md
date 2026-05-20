@@ -1,12 +1,12 @@
 ---
-description: 打印 cc-enslaver 七条核心规则的可勾选检查清单（修改前 / 修改后 / 收敛验证 / 任务忠实）。
-argument-hint: "[before|after|converge|fidelity] (可选；默认 all)"
+description: 打印 cc-enslaver 九条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改）。
+argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；默认 all)"
 ---
 
 # /cc-enslaver:checklist
 
-> 强制纪律检查。无参数则同时输出 A "修改前"、B "修改后"、C "收敛验证"、D "任务忠实" 四份清单；
-> 参数为 `before` / `after` / `converge` / `fidelity` 则只输出对应一份。
+> 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改" 六份清单；
+> 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` 则只输出对应一份。
 
 请你（receiving agent）**逐项核对**以下检查清单，并明确回答每一条 ✅ / ❌ / N/A。
 不要笼统地说"都做了"——每一条都要单独写明依据（`file:line` 或具体动作）。
@@ -82,9 +82,63 @@ argument-hint: "[before|after|converge|fidelity] (可选；默认 all)"
 
 ---
 
+## E. 改前必读 · 写前必想（参考 `rules/08`） —— **物理强制层** 🚨
+
+> rule 08 = rule 04（完整阅读） + rule 02（七问） 的**前置硬纪律**。
+> 物理强制：`PreToolUse(Edit|Write)` 已读检查 + `Stop` layer (e) 系统式自答兜底。
+
+- [ ] **E1 · 改前必读 · 目标文件** — 待改的每一个文件本会话已 `Read` **完整**内容？引用：列出文件 + Read 调用次序。
+- [ ] **E2 · 改前必读 · 调用点** — 已 `Grep` 待改符号的所有引用点 + `Read` 每个 ≥ 20 行上下文？引用：列出 grep 命令 + 引用点清单。
+- [ ] **E3 · 改前必读 · 连带文件** — 修改 `rules/*.md` 时是否也读了 `prompts/` / `commands/` / `docs/RULES.md`？修改 hook 脚本时是否读了 `hooks/hooks.json` / `docs/ARCHITECTURE.md` §8 / 对应 `tests/test_*.py`？
+- [ ] **E4 · 写前必想 · 显式记录 ≥ 3 项**：
+  - [ ] **E4.1 · 根因**（rule 02 Q3）— 为什么要这样改？机理是什么？file:line 证据是？
+  - [ ] **E4.2 · 架构定位**（rule 02 Q1-2）— 改动落在架构哪个区域？职责是什么？上下游是谁？
+  - [ ] **E4.3 · 方案触底**（rule 02 Q4）— 从底层解决还是掩盖症状？
+  - [ ] **E4.4 · 连带影响**（rule 02 Q5）— 哪些下游 / 调用点 / 测试需要同步改？
+  - [ ] **E4.5 · 风险**（rule 02 Q6）— 可能破坏哪些不变量 / 合约 / 测试？
+  - [ ] **E4.6 · 方案对比** — 替代方案 A / B 是什么？我为什么选 X？
+- [ ] **E5 · 物理强制状态** — `PreToolUse(Edit|Write)` 是否对我的 Edit 调用 DENY 过？如有，是否已 Read 后重试，而**不是**强行用 register_read 绕过？
+
+> 任意 E 项答 "不知道 / 应该 / 凭感觉" → **未达 rule 08**，回到 Read / Grep / 验证。
+> 禁止：先 Edit 再补"我读过"；先 Write 再补"我想过"；用 register_read 注册一个并未真读的文件。
+
+---
+
+## F. 系统式修改 · 禁止打补丁（参考 `rules/09`） —— **物理强制层** 🚨
+
+> rule 09 = rule 03 的**结构化升级**。
+> 物理强制：`PreToolUse(Edit|Write)` 拦截 new_string 中未带 why 注释的补丁标记 + `Stop` layer (f) "根因+影响+方案"三件套兜底。
+
+- [ ] **F1 · 根因 vs 症状** — 修改点位于因果链**源头**还是症状处？引用：根因 file:line + 它如何引发症状。
+- [ ] **F2 · 根因证据** — 我对根因的判断有当场验证过吗？引用：Read / Grep / 命令输出。
+- [ ] **F3 · 完整覆盖影响范围** — 根因牵涉的所有连带点是否**一次性**全修了？没有"先修一个其他下次再说"？
+- [ ] **F4 · 方案对比** — 至少对比了 2 个修复方案？引用：方案 A vs B 在简洁性 / 性能 / 架构契合度 / 维护性 上的权衡。
+- [ ] **F5 · 无补丁标记** — new_string 中**没有**下列裸标记（未带紧邻 why 注释）：
+  - [ ] 无 `try / except: pass` 静默吞错
+  - [ ] 无 `# noqa` 无解释（屏蔽 lint）
+  - [ ] 无 `# type: ignore` 无解释（屏蔽 mypy）
+  - [ ] 无 `// @ts-ignore` 无解释（屏蔽 TS）
+  - [ ] 无 `// eslint-disable` 无解释
+  - [ ] 无 `time.sleep` 掩盖竞态
+- [ ] **F6 · 测试 / timeout / 断言未被偷工放宽** — 没把失败的测试改宽容、没把超时拉长、没把断言放宽、没注释/`@skip` 失败用例。
+- [ ] **F7 · 非滚动补丁** — 本会话对同一文件的 Edit ≤ 3 次（超过则可能是 rolling patches，需重新考虑系统性重写）。
+- [ ] **F8 · 新建不变量已记录** — 若修改建立了新不变量（"X 永远 ≠ None" / "必须先获取锁"），在代码注释或文档里说明？
+
+> 任意 F 项答 "不知道 / 应该可以 / 大概 / 暂时" → **未达 rule 09**，回到 rule 02 + rule 03 + rule 08 重新分析。
+> 禁止：把"打补丁"包装成"最小有效更改"；用 `# noqa` 后**只写规则号不写原因**；用 sleep 让 flaky 测试"稳定"。
+
+---
+
 ## 输出要求
 
-针对每一条检查项**逐条回复**：
+针对每一条检查项**逐条回复**，使用统一图标系统：
+
+| 图标 | 含义 |
+|---|---|
+| ✅ | 完成 + 证据 |
+| ⚠️ | 部分 / 降级 + 说明 |
+| ❌ | 未做 + 原因 |
+| 🚨 | 物理强制层提示（hook 触发过 / 必须留意） |
 
 ```
 A1 · 完整阅读 ✅  src/auth.py 在第 3 次工具调用 Read 完整 (1-227 行)
@@ -93,9 +147,15 @@ A2 · 影响面探查 ✅  grep -rn "session_token" → 4 处命中 (...)
 B5 · 半成品检查 ❌  我在 src/auth.py:188 留了 TODO (锁超时未配置)；已在最终回复中告知。
 C1 · 重触发原症状 ✅  $ curl -X POST /login concurrent x100 → 0 errors (修前 23 errors)
 C4.1 · 真解决？ ✅  并发输出从 23/100 → 0/100；锁覆盖了 critical section auth.py:140-145
+D6.1 · 覆盖性 ✅  原始请求拆 3 项；3/3 完成（详见 D2）
+E1 · 改前必读 · 目标文件 ✅  本会话 Read auth.py (1-227 行) 共 2 次
+E4.1 · 根因 ✅  根因在 auth.py:142 缺锁（rule 02 Q3 + rule 03）
+F1 · 根因 vs 症状 ✅  修改点 auth.py:140-145（根因），非 routes/login.py:88（症状）
+F5 · 无补丁标记 ✅  new_string 中无裸 `# noqa` / `try/except: pass`
+🚨 read_guard 未触发 DENY；stop_guard layer (a-f) 全过
 ...
 ```
 
 **不允许**笼统的"都做了"。**不允许**虚报 ✅。如果某条不通过，请在最终回复中**优先修复后再宣告完成**。
 
-> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/07-task-fidelity.md`](rules/07-task-fidelity.md)。
+> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/09-systematic-modification.md`](rules/09-systematic-modification.md)。

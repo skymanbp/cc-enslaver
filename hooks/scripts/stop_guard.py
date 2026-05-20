@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""cc-enslaver — Stop hook enforcing rules 06 + 07.
+"""cc-enslaver — Stop hook enforcing rules 06 + 07 + 08 + 09.
 
 At every Stop event, this hook inspects the agent's last assistant
-message and refuses to let the agent finish the turn when any of four
+message and refuses to let the agent finish the turn when any of six
 laziness signals appear in proximity to a "done" claim:
 
   (a) [v0.6.0] No convergence evidence at all (no `$ ` shell prompt,
@@ -21,7 +21,7 @@ laziness signals appear in proximity to a "done" claim:
       least 2 of the 4 self-questions (真解决? 更好方案? 哪些没验?
       验证合理?).
 
-  (d) [v0.8.0 NEW] Missing rule-07 task-fidelity confirmation: even
+  (d) [v0.8.0] Missing rule-07 task-fidelity confirmation: even
       after passing rule-06 convergence, the agent must show it has
       reconciled what it shipped against the user's *original* request
       — coverage (no omission), standard (no degrade from "mandatory"
@@ -32,7 +32,27 @@ laziness signals appear in proximity to a "done" claim:
       `request coverage`, `no degrad`, `no omission`) OR at least 2 of
       3 self-questions (覆盖 / 标准 / 忠实) matched.
 
-When any of (a)-(d) hold, the hook returns
+  (e) [v0.11.0 NEW] Rule 08 closing check — read-before-edit /
+      think-before-write. Layer (e) fires **only when the agent
+      actually edited a file this turn** (state.did_edit_this_turn is
+      True). Pass condition: any rule-08 marker (`rule 08`, `改前必读`,
+      `写前必想`, `read-before-edit`, `think-before-write`) OR at
+      least 3 of the six rule-02 systematic-thinking keywords
+      (架构 / 职责 / 根源 / 方案 / 连带 / 风险 / 全局, or English
+      equivalents). Without an actual edit this turn, layer (e)
+      silently allows — analysis-only / answer-only turns aren't
+      required to surface think-before-write markers.
+
+  (f) [v0.11.0 NEW] Rule 09 closing check — systematic modification,
+      no patch-style. Layer (f) also fires **only on edit turns**.
+      Pass condition: any rule-09 marker (`rule 09`, `系统式修改`,
+      `根因`, `打补丁`, `systematic modification`, `root cause`,
+      `patch-style`) OR all three of the "root cause + impact +
+      solution" triplet keywords (root-cause + impact + solution /
+      根因 + 影响 + 方案). Without an actual edit this turn, layer
+      (f) silently allows.
+
+When any of (a)-(f) hold, the hook returns
 `{"decision": "block", "reason": <appropriate reminder>}`. The agent
 gets one corrective turn.
 
@@ -336,6 +356,95 @@ def _has_fidelity_marker_or_quiz(text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# v0.11.0 — rule 08 (read-before-edit / think-before-write) closing check.
+#
+# Pass condition (either):
+#   (1) an explicit rule-08 marker appears, or
+#   (2) at least 3 of the six rule-02 seven-questions keywords surface
+#       (架构 / 职责 / 根源 / 方案 / 连带 / 风险, or English equivalents).
+#
+# Layer (e) only fires when the agent actually edited a file this turn;
+# analysis-only / answer-only turns are never blocked by (e).
+# --------------------------------------------------------------------------- #
+RULE_08_MARKERS = [
+    re.compile(r"\brule\s*0?8\b", re.IGNORECASE),
+    re.compile(r"改前必读"),
+    re.compile(r"写前必想"),
+    re.compile(r"read[\s-]before[\s-]edit", re.IGNORECASE),
+    re.compile(r"think[\s-]before[\s-]write", re.IGNORECASE),
+    re.compile(r"系统式自答"),
+]
+
+# Six rule-02 systematic-thinking keywords. We accept ≥ 3 of these as a
+# stand-in for "the agent demonstrated rule-08 think-before-write
+# discipline in their own phrasing". Each keyword has Chinese + English
+# variants joined into one regex to keep the count honest (matching the
+# same idea twice in two languages still counts as one).
+RULE_02_KEYWORDS = [
+    # Q1 / Q2 — architecture + responsibility
+    re.compile(r"架构|architecture|architectural", re.IGNORECASE),
+    re.compile(r"职责|responsibilit", re.IGNORECASE),
+    # Q3 — root cause
+    re.compile(r"根源|根因|root[\s-]?cause", re.IGNORECASE),
+    # Q4 — solution / bottom-out
+    re.compile(r"方案|solution|approach", re.IGNORECASE),
+    # Q5 — connected impact
+    re.compile(r"连带|下游|影响范围|downstream|impact|connected", re.IGNORECASE),
+    # Q6 — risk / invariants
+    re.compile(r"风险|不变量|invariant|risk", re.IGNORECASE),
+]
+
+
+def _has_rule08_marker_or_keywords(text: str) -> bool:
+    """v0.11 — True if the agent demonstrated rule-08 awareness via:
+        (1) any explicit rule-08 marker, or
+        (2) at least 3 of the six rule-02 systematic-thinking keywords.
+    """
+    if any(p.search(text) for p in RULE_08_MARKERS):
+        return True
+    matched = sum(1 for p in RULE_02_KEYWORDS if p.search(text))
+    return matched >= 3
+
+
+# --------------------------------------------------------------------------- #
+# v0.11.0 — rule 09 (systematic modification, no patch-style) closing
+# check. Pass condition (either):
+#   (1) an explicit rule-09 marker, or
+#   (2) all three of the "root-cause + impact + solution" triplet
+#       keywords (which is also the rule-09 systematic-modification
+#       requirement).
+#
+# Layer (f) only fires when the agent actually edited a file this turn.
+# --------------------------------------------------------------------------- #
+RULE_09_MARKERS = [
+    re.compile(r"\brule\s*0?9\b", re.IGNORECASE),
+    re.compile(r"系统式修改"),
+    re.compile(r"打补丁"),
+    re.compile(r"patch[\s-]?style", re.IGNORECASE),
+    re.compile(r"systematic[\s-]?modification", re.IGNORECASE),
+    re.compile(r"non[\s-]?patch", re.IGNORECASE),
+    re.compile(r"反补丁"),
+]
+
+# The three rule-09 "triplet" keywords. All three must be present for
+# the keyword fallback to count as satisfying the gate.
+RULE_09_TRIPLET = (
+    # Root cause
+    re.compile(r"根源|根因|root[\s-]?cause", re.IGNORECASE),
+    # Impact / blast radius
+    re.compile(r"连带|影响范围|impact|blast[\s-]?radius|downstream", re.IGNORECASE),
+    # Solution / alternatives considered
+    re.compile(r"方案|solution|approach|alternative", re.IGNORECASE),
+)
+
+
+def _has_rule09_marker_or_triplet(text: str) -> bool:
+    if any(p.search(text) for p in RULE_09_MARKERS):
+        return True
+    return all(p.search(text) for p in RULE_09_TRIPLET)
+
+
+# --------------------------------------------------------------------------- #
 # Block reason templates.
 #
 # Three distinct templates so the agent sees exactly which discipline
@@ -417,6 +526,69 @@ write it down now.
 (One-shot guard: this is the only time you'll be blocked for this
 sequence. The next Stop will allow even with weak quiz coverage. Use
 this turn well.)
+"""
+
+MISSING_RULE08_REASON = """cc-enslaver · rule 08 enforcement (Stop hook v0.11)
+
+You modified a file this turn (Edit / Write was actually executed) and
+are now claiming completion ({matched_phrase!r}). But your message did
+not surface the rule-08 "read-before-edit / think-before-write"
+closing markers.
+
+Rule 08 collapses rule 04 (read fully) and rule 02 (seven questions)
+into one pre-action hard discipline. The closing check is light: it
+expects you to record, in chain-of-thought or final reply, **either**
+
+  (a) an explicit rule-08 marker (`rule 08`, `改前必读`, `写前必想`,
+      `read-before-edit`, `think-before-write`, `系统式自答`), or
+
+  (b) at least 3 of the six rule-02 systematic-thinking keywords:
+        架构 / architecture
+        职责 / responsibility
+        根源 / root cause
+        方案 / solution
+        连带 / impact / downstream
+        风险 / invariant / risk
+
+If you actually did the rule-08 work but did not write it down,
+write it down now. If you skipped rule-08 (jumped to Edit without
+Reading the call sites, or wrote new code without considering root
+cause / impact / risk), surface what you skipped and either run the
+missing pre-action step or alert the user.
+
+(One-shot guard: this is the only time you'll be blocked for this
+sequence. The next Stop will be allowed even if the rule-08 marker
+is still missing. Use this turn well.)
+"""
+
+MISSING_RULE09_REASON = """cc-enslaver · rule 09 enforcement (Stop hook v0.11)
+
+You modified a file this turn and are now claiming completion
+({matched_phrase!r}). But your message did not surface the rule-09
+"systematic modification, no patch-style" triplet markers.
+
+Rule 09 demands that the modification be **systematic, not a local
+patch**. The closing check is light: it expects, in chain-of-thought
+or final reply, **either**
+
+  (a) an explicit rule-09 marker (`rule 09`, `系统式修改`, `打补丁`,
+      `systematic modification`, `patch-style`, `非补丁`, `反补丁`,
+      `root cause`), or
+
+  (b) **all three** of the triplet keywords:
+        根源 / 根因 / root cause
+        连带 / 影响范围 / impact / blast radius / downstream
+        方案 / solution / approach / alternative
+
+If you did the rule-09 work (rooted the cause, mapped impact,
+compared at least 2 fix strategies), write the triplet down now.
+If you didn't, your edit is likely patch-style; surface what is
+incomplete and either redo the modification systematically or flag
+the half-finish to the user.
+
+(One-shot guard: this is the only time you'll be blocked for this
+sequence. The next Stop will be allowed even if the rule-09 triplet
+is still missing.)
 """
 
 MISSING_FIDELITY_REASON = """cc-enslaver · rule 07 enforcement (Stop hook v0.8)
@@ -618,7 +790,32 @@ def main() -> int:
             _emit_block(MISSING_FIDELITY_REASON.format(matched_phrase=matched))
             return 0
 
-        # All four gates passed — allow.
+        # v0.11.0 layers (e) + (f): rule-08 / rule-09 closing checks
+        # **only fire on turns that actually edited a file**. A pure
+        # analysis / answer turn shouldn't be forced to surface
+        # think-before-write or root-cause/impact/solution markers —
+        # there was nothing modified for those to apply to.
+        edited_this_turn = state_lib.did_edit_this_turn(
+            session_id, turn_count,
+        )
+        if edited_this_turn:
+            # Layer (e): rule 08 — read-before-edit / think-before-write
+            # closing marker. Pass if either an explicit rule-08 marker
+            # OR ≥ 3 of six rule-02 keywords are present.
+            if not _has_rule08_marker_or_keywords(message):
+                state_lib.record_stop_block(session_id, turn_count)
+                _emit_block(MISSING_RULE08_REASON.format(matched_phrase=matched))
+                return 0
+
+            # Layer (f): rule 09 — systematic-modification triplet.
+            # Pass if either an explicit rule-09 marker OR all three of
+            # (root-cause + impact + solution) keywords are present.
+            if not _has_rule09_marker_or_triplet(message):
+                state_lib.record_stop_block(session_id, turn_count)
+                _emit_block(MISSING_RULE09_REASON.format(matched_phrase=matched))
+                return 0
+
+        # All six gates passed — allow.
     except Exception:
         # Failing open: log to stderr but never block by accident.
         sys.stderr.write("[cc-enslaver] stop_guard exception:\n")

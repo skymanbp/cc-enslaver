@@ -47,8 +47,26 @@ severity: must
 | 拦截层 | 钩子 | 触发条件 | 动作 |
 |---|---|---|---|
 | **Edit/Write 内容层** | `PreToolUse(Edit\|Write)` | new_string 含未带 "why" 注释的补丁标记 | **DENY** |
+| **Edit/Write 频率层**（v0.13） | `PreToolUse(Edit\|Write)` | 同一文件本会话第 4 次"小幅 Edit" (≤ 10 行 且 < 200 字符) 而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | **DENY** |
 | **Bash 命令层** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY**（v0.3 bash_guard） |
 | **收尾层** | `Stop` layer (f) | 本轮做了 Edit 但最终回复缺"根因 + 影响 + 方案"标记 | **BLOCK** |
+
+### Edit/Write 频率层 — rolling-patch 计数器（v0.13）
+
+每个文件维护一个**小幅 Edit 计数器** `state.edits_per_file[path]`：
+
+| 分类 | 边界 | 计数器动作 |
+|---|---|---|
+| **small** | max(\|old\|, \|new\|) < 200 字符 **且** max 行数 ≤ 10 | +1（若预计达到 4 → DENY，**不增**） |
+| **systematic** | max 字符 ≥ 1500 **或** max 行数 ≥ 50 | 重置为 0 |
+| **medium** | 介于两者之间 | 不动 |
+
+预计到达阈值（4）即 DENY，且**不**增加计数器。这使得后续小幅 Edit 仍然被拦，直到一次系统式重写出现把计数器清零——这正是规则 09 想要的：**重新理解整个文件结构，而不是继续打补丁**。
+
+DENY 时给出的恢复路径：
+1. 合并多个待办小改成一次系统式 Edit（new_string ≥ 50 行）；
+2. 用 `Write` 整体覆写（content ≥ 50 行）；
+3. 停下来 surface 给用户，让其评估是否需要架构级重构。
 
 ### Edit/Write 内容层 — 补丁标记清单
 
@@ -85,7 +103,7 @@ const result = legacy.foo();
 - ❌ **测试放宽**：原测试要求 X==5，改成 X>0 让它过。
 - ❌ **超时拉长**：原 timeout=5s 拉到 60s 掩盖性能问题。
 - ❌ **注释掉失败测试**：删除 / 注释 / `@skip` 失败用例当作"修好了"。
-- ❌ **滚动补丁**：同一文件本会话 ≥ 4 次小幅 Edit 而**没有**一次系统性重写，属于反应式累加。
+- ❌ **滚动补丁**：同一文件本会话 ≥ 4 次小幅 Edit 而**没有**一次系统性重写，属于反应式累加。v0.13 起由 `PreToolUse(Edit|Write)` 频率层物理拦截，不再是软纪律。
 - ❌ **修一个留三个 TODO**：不允许"先把这个修好其他下次再说"，必须一次性覆盖完整根因影响范围。
 
 ## 与其他规则的关系

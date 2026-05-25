@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.12.0"
+    "version": "0.13.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.12 adds 圣旨 (Imperial Edicts) — user-defined per-project hard rules (.claude/cc-enslaver/edicts.toml) with PreToolUse(Edit|Write|Bash) DENY + CRUD slash command, reformats Stop block reasons as uniform 6-row status tables, and thins soft-layer prompts 54%.",
-      "version": "0.12.0",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.13 adds the rule-09 rolling-patch frequency layer: PreToolUse(Edit|Write) DENYs the 4th small edit (≤ 10 lines, < 200 chars) to the same file in one session unless a systematic rewrite (≥ 50 lines / ≥ 1500 chars) has reset the counter.",
+      "version": "0.13.0",
       "author": {
         "name": "skymanbp"
       },

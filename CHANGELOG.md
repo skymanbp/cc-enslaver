@@ -11,9 +11,101 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
+- **Stop hook deep file-claim verification** — parse "I edited X" patterns
+  in the agent's last message and check `git diff` / mtime against a
+  session-start baseline. Catches the "claim edited but didn't" lying
+  pattern. v0.13 closed rolling-patch; this is the next major axis.
+- **More Bash bypasses + 圣旨 polish** — evaluate `git reset --hard` (if
+  uncommitted), `git rebase --skip`, `pip install --break-system-packages`;
+  add `--global` flag to `manage_edicts.py add`; subprocess-test the CLI
+  subcommands themselves.
+- **English prompts mirror** — `prompts/en/session-start.md` +
+  `prompts/en/user-prompt.md`, with `CC_ENSLAVER_LANG=en` env switch in
+  inject_context.py. Today only `rules/en/` is mirrored; injection is
+  Chinese-only.
 - **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
-  for one-shot prompts. Currently 圣旨 lives in `.claude/cc-enslaver/edicts.toml`;
-  team-shared but not transient.
+  for one-shot prompts (currently 圣旨 is project-persistent only).
+
+---
+
+## [0.13.0] — 2026-05-25
+
+**Rule-09 rolling-patch frequency layer (hard interception).**
+
+Closes the largest remaining v0.11 escape route: rolling patches were
+soft-layer-only — Stop layer (f) checked for "root cause + impact +
+solution" closing markers but could not see the per-file edit
+*pattern*. An agent could pile up 6 small Edits to the same file,
+surface the right tokens at Stop, and pass — even though the
+aggregate behavior was the exact rule-09 anti-pattern. v0.13 moves
+that check from soft Stop-layer fallback to a hard `PreToolUse(Edit|
+Write)` deny at the moment of intent.
+
+### Added — rolling-patch counter (rule 09 hard layer)
+
+- **`hooks/scripts/lib/state.py`**:
+  - `get_edit_count(session_id, file_path) -> int`
+  - `record_small_edit(session_id, file_path) -> int` (increments,
+    returns new count)
+  - `reset_edit_count(session_id, file_path)` (clears on systematic
+    rewrite)
+  - New JSON field: `edits_per_file: {normalized_path: count}`.
+- **`hooks/scripts/read_guard.py`**:
+  - `_classify_change(old, new) -> "small" | "systematic" | "medium"`.
+  - `_check_rolling_patch(old, new)` wired into both Edit and Write
+    branches.
+  - Constants at module top: `SMALL_EDIT_MAX_CHARS = 200`,
+    `SMALL_EDIT_MAX_LINES = 10`, `SYSTEMATIC_MIN_CHARS = 1500`,
+    `SYSTEMATIC_MIN_LINES = 50`, `ROLLING_PATCH_THRESHOLD = 4`.
+  - New deny template `ROLLING_PATCH_DENY_TEMPLATE` explaining the
+    counter state and three recovery paths (combine into systematic
+    Edit / Write whole file / surface to user).
+- **+8 tests** in `tests/test_read_guard.py::TestRollingPatchInterception`
+  covering: 3-allowed-4th-denied, denied-attempt-doesn't-increment,
+  systematic-Edit-resets, two-files-independent-counters, medium-edit-
+  no-op, systematic-Write-resets, new-file-write-no-count, JSON-field-
+  contract.
+
+### Classification thresholds (rule 09 §"Edit/Write 频率层")
+
+| Class | Bounds | Counter action |
+|---|---|---|
+| **small** | max(\|old\|, \|new\|) < 200 chars AND max line count ≤ 10 | +1 (if predicted reach of 4 → DENY, **no increment**) |
+| **systematic** | max chars ≥ 1500 OR max line count ≥ 50 | reset to 0 |
+| **medium** | between the two | no change |
+
+Why threshold = 4: matches the rule-09 doc's existing禁令 wording
+"同一文件本会话 ≥ 4 次小幅 Edit". Why deny-without-increment:
+incrementing on DENY would silently disable the threshold (next
+attempt would be at 5, then 6 — the wall keeps moving). The pinned
+counter forces a systematic edit to recover, which is the rule-09
+intended behavior.
+
+### Why this is rule 09 hard layer #2 (not a separate rule)
+
+Rule 09 already covers both "content shape" (no patch markers) and
+"aggregate pattern" (no rolling patches). v0.11 shipped only the
+content shape as hard layer because the aggregate-pattern detector
+needed per-file state plumbing (state.edits_per_file) which v0.11
+deferred. v0.13 ships that state field and the matching detector.
+Both are rule 09; the doc table now lists two separate "Edit/Write"
+rows (content + frequency) under the same rule.
+
+### Changed — documentation
+
+- **`rules/09-systematic-modification.md`**: 物理拦截 table now lists
+  the new frequency-layer row + a dedicated "Edit/Write 频率层 —
+  rolling-patch 计数器 (v0.13)" subsection with classification table
+  + recovery paths.
+- **`rules/en/09-systematic-modification.md`**: same structural update.
+- **`CLAUDE.md`** §2.11: physical-enforcement bullets now include the
+  frequency layer.
+- **`prompts/session-start.md`**: 物理强制 table gains a 5th row for
+  the rolling-patch DENY trigger.
+
+### Tests
+
+- 135 → 143 (+8).
 
 ---
 

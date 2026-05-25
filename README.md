@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.12.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.13.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -27,7 +27,9 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 
 `cc-enslaver` ships a **layered defense** against all six, currently 9 built-in rules + user-defined 圣旨 + 6 Stop-hook gates (v0.12.0):
 
-> **New in v0.12** — 🏛️ **圣旨 (Imperial Edicts)**: user-defined per-project hard rules loaded from `.claude/cc-enslaver/edicts.toml`. Define a regex, set `severity = "must"`, and the `PreToolUse(Edit|Write|Bash)` hook will physically DENY any matching tool call. See [`docs/EDICTS.md`](docs/EDICTS.md). Stop-hook block reasons now render as uniform **6-row status tables** so the failed layer is obvious at a glance. Soft-layer prompts thinned 54% into high-density tables that survive context compaction better.
+> **New in v0.13** — 🔁 **Rule-09 rolling-patch hard layer**: `PreToolUse(Edit|Write)` now physically DENYs the 4th small Edit (≤ 10 lines AND < 200 chars on both sides) to the same file in one session, unless a systematic rewrite (≥ 50 lines OR ≥ 1500 chars on `new_string`/`content`) has reset the counter. Closes the last major v0.11 escape route — rolling patches were soft-layer-only at Stop layer (f); now they get caught at the moment of intent. See [`rules/09-systematic-modification.md`](rules/09-systematic-modification.md) §"Edit/Write 频率层".
+>
+> **From v0.12** — 🏛️ **圣旨 (Imperial Edicts)**: user-defined per-project hard rules loaded from `.claude/cc-enslaver/edicts.toml`. Define a regex, set `severity = "must"`, and the `PreToolUse(Edit|Write|Bash)` hook will physically DENY any matching tool call. See [`docs/EDICTS.md`](docs/EDICTS.md). Stop-hook block reasons render as uniform **6-row status tables**. Soft-layer prompts thinned 54%.
 
 
 1. **Soft layer (prompt injection)** — at session start and before every user prompt, the plugin injects a concise reminder of the 9 discipline rules into the agent's context. v0.11 adds a **standard response skeleton** (5-stage template: pre-edit / mid-edit / rule-06 / rule-07 / rule-08+09 closing) and a **9-item per-turn self-check checklist** with a physical-enforcement table mapping each lazy attempt to the specific hook that catches it.

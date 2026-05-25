@@ -47,8 +47,27 @@ These are not "fixes" — they **defer** problems. Rule 09 elevates them to a ha
 | Layer | Hook | Trigger | Action |
 |---|---|---|---|
 | **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` contains an unjustified patch marker | **DENY** |
+| **Edit/Write frequency** (v0.13) | `PreToolUse(Edit\|Write)` | same file, 4th "small edit" (≤ 10 lines AND < 200 chars) in one session without a systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | **DENY** |
 | **Bash command** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY** (v0.3 bash_guard) |
 | **Closing** | `Stop` layer (f) | this turn did Edit but the final reply lacks "root cause + impact + solution" markers | **BLOCK** |
+
+### Edit/Write frequency layer — rolling-patch counter (v0.13)
+
+The guard maintains a per-file small-edit counter at
+`state.edits_per_file[path]`:
+
+| Classification | Bounds | Counter action |
+|---|---|---|
+| **small** | max(\|old\|, \|new\|) < 200 chars **and** max line count ≤ 10 | +1 (if predicted to reach 4 → DENY, **no increment**) |
+| **systematic** | max chars ≥ 1500 **or** max line count ≥ 50 | reset to 0 |
+| **medium** | between the two | no change |
+
+A predicted reach of the threshold (4) triggers DENY and the counter is **not** incremented. Subsequent small edits to the same file therefore also DENY until a systematic rewrite resets the counter — which is exactly what rule 09 wants: **re-engage with the whole file structure, don't keep patching**.
+
+Recovery paths offered in the DENY message:
+1. Combine the pending small fixes into a single systematic Edit (new_string ≥ 50 lines);
+2. Use `Write` to replace the file wholesale (content ≥ 50 lines);
+3. Stop and surface to the user that the file needs a refactor.
 
 ### Edit/Write content layer — patch-marker catalog
 
@@ -85,7 +104,7 @@ A bare marker without justification = laziness, intercepted.
 - ❌ **Loosening tests**: original asserts `X == 5`, you change to `X > 0` to make it pass.
 - ❌ **Extending timeouts**: original `timeout=5s`, you push to `60s` to mask a performance issue.
 - ❌ **Commenting out failing tests**: deleting / commenting / `@skip` to declare "done".
-- ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation.
+- ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation. As of v0.13 this is physically intercepted by the `PreToolUse(Edit|Write)` frequency layer, not just soft discipline.
 - ❌ **Fix one and leave three TODOs**: "I'll patch the rest later" is not allowed; one pass must cover the full root-cause impact.
 
 ## Relationships

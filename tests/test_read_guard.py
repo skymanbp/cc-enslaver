@@ -440,6 +440,213 @@ class TestRecordEditTurn(_GuardTestBase):
         )
 
 
+class TestRollingPatchInterception(_GuardTestBase):
+    """v0.13 — rule 09 rolling-patch hard interception.
+
+    The PreToolUse(Edit) guard classifies each change as small /
+    systematic / medium and tracks a per-file counter. When the predicted
+    next small-edit count reaches 4, the guard DENIES — without
+    incrementing the counter, so subsequent attempts also DENY until a
+    systematic edit (≥ 50 lines or ≥ 1500 chars) resets the counter.
+
+    These tests intentionally pin the threshold (4) and the small/
+    systematic boundaries (10 lines / 200 chars, 50 lines / 1500 chars)
+    so accidental retuning of the constants doesn't silently degrade
+    enforcement.
+    """
+
+    def _small_edit_payload(self, target: str) -> tuple[str, str]:
+        # Both sides are well under (10 lines, 200 chars).
+        return ("old line\n", "new line\n")
+
+    def _systematic_edit_payload(self) -> tuple[str, str]:
+        # ≥ 50 lines on new_string side triggers the systematic branch.
+        new = "\n".join(f"line {i}" for i in range(60))
+        return ("old\n", new)
+
+    def _writable_target(self, name: str = "target.py") -> str:
+        target = self.tmpdir / name
+        target.write_text("# initial\n", encoding="utf-8")
+        return str(target)
+
+    def _do_small_edit(self, target: str):
+        old, new = self._small_edit_payload(target)
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": target,
+                    "old_string": old,
+                    "new_string": new,
+                },
+            },
+            env_overrides=self.env,
+        )
+
+    def _do_systematic_edit(self, target: str):
+        old, new = self._systematic_edit_payload()
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": target,
+                    "old_string": old,
+                    "new_string": new,
+                },
+            },
+            env_overrides=self.env,
+        )
+
+    def _counter(self, target: str) -> int:
+        state = self._state()
+        if not state:
+            return 0
+        counters = state.get("edits_per_file") or {}
+        import os
+        norm = os.path.normcase(os.path.realpath(target))
+        return counters.get(norm, 0)
+
+    def test_three_small_edits_allowed_fourth_denied(self) -> None:
+        target = self._writable_target()
+        self._pre("Read", target)
+        # 1, 2, 3 — allow
+        for i in range(3):
+            rc, out, _ = self._do_small_edit(target)
+            self.assertIsNone(
+                out,
+                msg=f"small edit #{i + 1} should be allowed, got {out!r}",
+            )
+        self.assertEqual(self._counter(target), 3)
+        # 4 — DENY
+        rc, out, _ = self._do_small_edit(target)
+        self.assertIsNotNone(out, msg="4th small edit must DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("rule 09", reason)
+        self.assertIn("rolling-patch", reason)
+        # Counter must NOT advance on DENY (else next attempt is 5 not 4).
+        self.assertEqual(self._counter(target), 3)
+
+    def test_denied_attempt_does_not_increment_so_next_also_denies(self) -> None:
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self._do_small_edit(target)  # denied
+        # Another attempt is also denied — counter stuck at 3.
+        rc, out, _ = self._do_small_edit(target)
+        self.assertIsNotNone(out)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self._counter(target), 3)
+
+    def test_systematic_edit_resets_counter(self) -> None:
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        # Systematic Edit clears the counter.
+        rc, out, _ = self._do_systematic_edit(target)
+        self.assertIsNone(out, msg="systematic edit should be allowed")
+        self.assertEqual(
+            self._counter(target),
+            0,
+            msg="systematic edit must reset the counter",
+        )
+        # We can now do 3 more small edits.
+        for i in range(3):
+            rc, out, _ = self._do_small_edit(target)
+            self.assertIsNone(
+                out,
+                msg=f"post-reset small edit #{i + 1} should be allowed",
+            )
+
+    def test_two_files_have_independent_counters(self) -> None:
+        a = self._writable_target("a.py")
+        b = self._writable_target("b.py")
+        self._pre("Read", a)
+        self._pre("Read", b)
+        for _ in range(3):
+            self._do_small_edit(a)
+        # a is at the threshold; b has touched zero counter.
+        self.assertEqual(self._counter(a), 3)
+        self.assertEqual(self._counter(b), 0)
+        rc, out, _ = self._do_small_edit(b)
+        self.assertIsNone(
+            out,
+            msg="b's counter is 0, edit must be allowed even when a's is at limit",
+        )
+
+    def test_medium_edit_does_not_count_or_reset(self) -> None:
+        target = self._writable_target()
+        self._pre("Read", target)
+        # Medium: between small (< 200 chars / ≤ 10 lines) and systematic
+        # (≥ 1500 chars or ≥ 50 lines). 15 lines, ~150 chars: lines >
+        # small-max but chars < small-max → medium because lines > 10
+        # and lines < 50.
+        medium_new = "\n".join(f"l{i}" for i in range(15))
+        rc, out, _ = run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": target,
+                    "old_string": "a\n",
+                    "new_string": medium_new,
+                },
+            },
+            env_overrides=self.env,
+        )
+        self.assertIsNone(out, msg="medium edit should be allowed")
+        self.assertEqual(
+            self._counter(target),
+            0,
+            msg="medium edit should not increment the small-edit counter",
+        )
+
+    def test_systematic_write_resets_counter(self) -> None:
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        # Systematic Write (60 lines of content) resets.
+        big = "\n".join(f"line {i}" for i in range(60))
+        rc, out, _ = self._pre_write_with_content(target, big)
+        self.assertIsNone(out, msg="systematic Write should allow + reset")
+        self.assertEqual(self._counter(target), 0)
+
+    def test_write_new_file_does_not_increment_counter(self) -> None:
+        # Writing a brand-new (non-existent) file is creation, not a
+        # rolling patch. Counter must stay at 0.
+        target = str(self.tmpdir / "brand-new.py")
+        rc, out, _ = self._pre_write_with_content(
+            target,
+            "def f(): pass\n",  # small content
+        )
+        self.assertIsNone(out)
+        self.assertEqual(self._counter(target), 0)
+
+    def test_state_persists_edits_per_file_field(self) -> None:
+        # Quick sanity check that the JSON field name is what other tools
+        # (e.g. /cc-enslaver:gc, future tooling) can rely on.
+        target = self._writable_target()
+        self._pre("Read", target)
+        self._do_small_edit(target)
+        state = self._state()
+        self.assertIn("edits_per_file", state)
+        self.assertEqual(len(state["edits_per_file"]), 1)
+        self.assertEqual(list(state["edits_per_file"].values()), [1])
+
+
 class TestPathNormalization(_GuardTestBase):
     def test_forward_and_backward_slash_match(self) -> None:
         target = self._existing_file()

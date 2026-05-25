@@ -27,6 +27,7 @@
 |---|---|---|
 | Edit 一个本会话**没 Read 过**的已存在文件 | `PreToolUse(Edit\|Write)` DENY | 先 Read 完整文件再 Edit |
 | Edit/Write 含未带 why 的 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` / `time.sleep` 工作绕过 | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释，或改成真修根因 |
+| 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
 | Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限的根因 |
 | Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 6 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
 

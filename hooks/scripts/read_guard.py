@@ -121,6 +121,105 @@ be used to bypass the read requirement.
 """
 
 
+# --------------------------------------------------------------------------- #
+# Rolling-patch classification thresholds (v0.13.0 — rule 09 hard layer).
+#
+# Heuristics — deliberately tunable as module-level constants so they can
+# be reviewed in one place:
+#
+#   "small edit"      = max(|old|, |new|) < SMALL_EDIT_MAX_CHARS chars
+#                       AND max(lines(old), lines(new)) ≤ SMALL_EDIT_MAX_LINES
+#   "systematic"      = max chars ≥ SYSTEMATIC_MIN_CHARS
+#                       OR  max lines ≥ SYSTEMATIC_MIN_LINES
+#   "medium"          = neither (no counter change)
+#
+# DENY fires when the predicted next small-edit count would be ≥
+# ROLLING_PATCH_THRESHOLD. The recorded count is *not* incremented on
+# DENY (a denied edit never landed; counting it would double-count and
+# silently disable the threshold). Recovery: do one systematic edit to
+# reset the counter to 0.
+# --------------------------------------------------------------------------- #
+SMALL_EDIT_MAX_CHARS = 200
+SMALL_EDIT_MAX_LINES = 10
+SYSTEMATIC_MIN_CHARS = 1500
+SYSTEMATIC_MIN_LINES = 50
+ROLLING_PATCH_THRESHOLD = 4
+
+
+def _lines(text: str) -> int:
+    """Line count of `text`. Treats empty string as 0 lines, not 1."""
+    if not text:
+        return 0
+    return text.count("\n") + 1
+
+
+def _classify_change(old_string: str, new_string: str) -> str:
+    """Return 'systematic' / 'small' / 'medium' for an edit's footprint.
+
+    For Edit, both old and new are meaningful. For Write, callers pass
+    old_string="" so the classification falls back to new_string alone.
+    For Edit-with-empty-old_string (rare insertion case) the same applies.
+    """
+    old = old_string or ""
+    new = new_string or ""
+    max_chars = max(len(old), len(new))
+    max_lines = max(_lines(old), _lines(new))
+    if max_chars >= SYSTEMATIC_MIN_CHARS or max_lines >= SYSTEMATIC_MIN_LINES:
+        return "systematic"
+    if max_chars < SMALL_EDIT_MAX_CHARS and max_lines <= SMALL_EDIT_MAX_LINES:
+        return "small"
+    return "medium"
+
+
+ROLLING_PATCH_DENY_TEMPLATE = """cc-enslaver · rule 09 violation (rolling-patch interception)
+
+Tool: {tool_name}
+Target: {file_path}
+Rolling-patch counter: {current_count} small edit(s) already applied
+this session; this would be attempt #{attempt_count} — at or above the
+threshold of {threshold}.
+
+Per rule 09 (rules/09-systematic-modification.md), the cumulative
+pattern of repeated **small** edits to the same file without a single
+**systematic** rewrite is forbidden as "rolling patches":
+
+> 同一文件本会话 ≥ 4 次小幅 Edit 而没有一次系统性重写，属于反应式累加。
+
+Each small edit fixes one symptom in isolation; the aggregate signal
+is that you have not re-engaged with the file's overall structure or
+identified the root cause.
+
+Classification used here:
+  small      = max(|old_string|, |new_string|) < {small_chars} chars
+               AND max line count ≤ {small_lines}
+  systematic = max chars ≥ {sys_chars} OR max line count ≥ {sys_lines}
+               (resets the counter to 0)
+  medium     = anything in between (does not count, does not reset)
+
+To proceed, do one of:
+
+  (1) **Systematic rewrite**: combine your pending small fixes into a
+      single Edit (or Write) of ≥ {sys_lines} lines / ≥ {sys_chars}
+      chars on `new_string` / `content`. This counts as systematic and
+      resets the counter to 0 for this file.
+
+  (2) **Batch multiple typo-class fixes**: if you genuinely have several
+      independent small unrelated changes, expand the surrounding context
+      so each individual Edit clears the small-edit threshold (≥ 10
+      lines / ≥ 200 chars), or use Write to replace the whole file at
+      once.
+
+  (3) **Stop and surface**: tell the user "this file needs a systematic
+      rewrite; please review my plan before I continue". Let them
+      decide whether to relax the constraint or refactor the approach.
+
+Note: this is NOT the patch-marker check — your new_string is clean of
+try/except: pass, # noqa, @ts-ignore, etc. It is the AGGREGATE PATTERN
+check: too many small fixes signal a comprehension gap, not a
+suppression.
+"""
+
+
 PATCH_DENY_TEMPLATE = """cc-enslaver · rule 09 violation (patch-style new_string)
 
 Tool: {tool_name}
@@ -335,9 +434,43 @@ def _handle_pre_tool_use(payload: dict) -> None:
             ))
             return  # unreachable; _emit_raw_deny exits
 
+    def _check_rolling_patch(old_string: str, new_string: str) -> None:
+        """Rule-09 rolling-patch counter (v0.13).
+
+        Classify the change and either DENY (small-edit threshold met),
+        reset the counter (systematic rewrite), or increment-and-allow
+        (small edit under threshold). Medium-sized changes are a no-op:
+        too big to count as "rolling" but too small to count as a
+        re-engagement reset.
+        """
+        kind = _classify_change(old_string, new_string)
+        if kind == "systematic":
+            state_lib.reset_edit_count(session_id, file_path)
+            return
+        if kind != "small":
+            return  # "medium" — leave counter untouched
+        current = state_lib.get_edit_count(session_id, file_path)
+        attempt = current + 1
+        if attempt >= ROLLING_PATCH_THRESHOLD:
+            _emit_deny(
+                ROLLING_PATCH_DENY_TEMPLATE,
+                tool_name=tool,
+                file_path=file_path,
+                current_count=current,
+                attempt_count=attempt,
+                threshold=ROLLING_PATCH_THRESHOLD,
+                small_chars=SMALL_EDIT_MAX_CHARS,
+                small_lines=SMALL_EDIT_MAX_LINES,
+                sys_chars=SYSTEMATIC_MIN_CHARS,
+                sys_lines=SYSTEMATIC_MIN_LINES,
+            )
+            return  # unreachable; _emit_deny exits
+        state_lib.record_small_edit(session_id, file_path)
+
     if tool == "Write":
         target_exists = os.path.exists(file_path)
-        # New file creation: nothing to gate on read-before-edit.
+        # New file creation: nothing to gate on read-before-edit, and
+        # no prior small-edit history to consider (it's a fresh file).
         if not target_exists:
             state_lib.add_read(session_id, file_path)
             # rule 09 patch-style check still applies even for new files —
@@ -379,6 +512,10 @@ def _handle_pre_tool_use(payload: dict) -> None:
             return
         # 圣旨 check (v0.12).
         _check_edicts(content)
+        # Rolling-patch check (v0.13). A Write to an existing file is
+        # effectively a full-file replacement; classify by `content`
+        # alone (old_string="" yields the right small/systematic split).
+        _check_rolling_patch("", content)
         state_lib.add_read(session_id, file_path)
         state_lib.record_edit_turn(session_id, turn_count)
         return
@@ -399,6 +536,7 @@ def _handle_pre_tool_use(payload: dict) -> None:
         # replace_all flag; the new_string is what actually lands in the
         # file, so that's what we scan.
         new_string = tool_input.get("new_string") or ""
+        old_string = tool_input.get("old_string") or ""
         hit = _find_unjustified_patch_marker(new_string)
         if hit is not None:
             _emit_deny(
@@ -411,6 +549,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
             return  # unreachable; _emit_deny exits
         # 圣旨 check (v0.12) — scan the incoming new_string.
         _check_edicts(new_string)
+        # Rolling-patch check (v0.13).
+        _check_rolling_patch(old_string, new_string)
         # Edit allowed — stamp the edit-turn for Stop layers (e)+(f).
         # We do NOT add_read here because Edit is downstream of a prior
         # Read/Write that already recorded.

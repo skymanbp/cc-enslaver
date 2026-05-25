@@ -161,12 +161,14 @@ def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
 # rule-08/09 closing checks to turns that actually modified files,
 # avoiding false positives on read-only / analysis turns.
 #
-# Why not record per-file edit counts: rolling-patch detection (rule 09)
-# could use that, but at v0.11 we tolerate the rolling-patch detection
-# being soft (rule 09 doc-level discipline + Stop-hook layer (f) on the
-# "missing root-cause/impact/solution markers" axis is enough). If we
-# ever want PreToolUse-level rolling-patch DENY, we'll extend this with
-# `edits_per_file: {path: count}` then.
+# v0.13 — adds the rolling-patch counter (`edits_per_file`) that v0.11
+# foreshadowed. PreToolUse(Edit|Write) classifies the incoming edit as
+# "small" (≤ 10 lines AND < 200 chars on both sides) or "systematic"
+# (≥ 50 lines OR ≥ 1500 chars on new_string/content) and either
+# increments the per-file counter (small) or resets it to zero
+# (systematic). When the predicted count would reach 4, read_guard DENYs
+# without incrementing — making rolling patches a physically-blocked
+# rule-09 violation rather than a Stop-layer-only nudge.
 # --------------------------------------------------------------------------- #
 def record_edit_turn(session_id: str, turn_count: int | None) -> None:
     """Stamp `last_edit_turn = turn_count` on the session state.
@@ -202,3 +204,52 @@ def did_edit_this_turn(session_id: str, turn_count: int | None) -> bool:
         return False
     state = load(session_id)
     return state.get("last_edit_turn") == turn_count
+
+
+# --------------------------------------------------------------------------- #
+# Rolling-patch counter (v0.13.0 — rule 09 hard interception).
+#
+# Counter semantics:
+#   - get_edit_count(sid, path) → current count of small edits applied
+#     to `path` in this session (0 if never edited or after reset).
+#   - record_small_edit(sid, path) → increment by 1, return new count.
+#     Called only when the guard has decided to ALLOW a small edit.
+#   - reset_edit_count(sid, path) → clear the counter, called on a
+#     systematic rewrite (≥ 50 lines / ≥ 1500 chars on new_string).
+#
+# The DENY decision lives in read_guard (which has all the classification
+# logic); this module just stores the count. Threshold = 4 means the 4th
+# small edit attempt is denied — the recorded count stays at 3 until a
+# systematic rewrite resets it, so subsequent small-edit attempts also
+# DENY (the agent must do a systematic change to recover).
+# --------------------------------------------------------------------------- #
+def get_edit_count(session_id: str, file_path: str) -> int:
+    """Return the small-edit count for `file_path` in this session."""
+    state = load(session_id)
+    counters = state.get("edits_per_file") or {}
+    return int(counters.get(normalize_path(file_path), 0))
+
+
+def record_small_edit(session_id: str, file_path: str) -> int:
+    """Increment the small-edit counter for `file_path`; return new count.
+
+    Should only be called after the guard has decided to ALLOW the edit
+    (i.e., when `get_edit_count(...) + 1 < ROLLING_PATCH_THRESHOLD`).
+    """
+    state = load(session_id)
+    counters = state.setdefault("edits_per_file", {})
+    norm = normalize_path(file_path)
+    counters[norm] = int(counters.get(norm, 0)) + 1
+    save(state)
+    return counters[norm]
+
+
+def reset_edit_count(session_id: str, file_path: str) -> None:
+    """Clear the small-edit counter for `file_path` (systematic rewrite)."""
+    state = load(session_id)
+    counters = state.get("edits_per_file") or {}
+    norm = normalize_path(file_path)
+    if norm in counters:
+        del counters[norm]
+        state["edits_per_file"] = counters
+        save(state)

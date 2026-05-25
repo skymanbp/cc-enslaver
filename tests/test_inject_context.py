@@ -168,6 +168,84 @@ class TestInjectContextSessionStart(unittest.TestCase):
         self.assertIn("规则", ctx)
 
 
+class TestInjectContextEnglish(unittest.TestCase):
+    """v0.15 — CC_ENSLAVER_LANG=en switches to prompts/en/*.md.
+
+    The Chinese prompts remain canonical (default mode); these tests
+    cover the English mirror path and the fallback behavior when the
+    English file is missing.
+    """
+
+    def test_lang_en_uses_english_session_start(self) -> None:
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+            env_overrides={"CC_ENSLAVER_LANG": "en"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        # English-mirror keyword contract — must include the rule
+        # numbers + the English-equivalent disciplinary phrases.
+        for needle in (
+            "Session Discipline Contract",
+            "Verify, don't guess",
+            "Systematic, not reactive",
+            "Read-before-edit",
+            "think-before-write",
+            "Did this really solve the problem",
+            "Is there a better solution",
+            "Has the change been verified",
+            "Is the verification reasonable",
+            "Task fidelity",
+            "rule 08",
+            "rule 09",
+            "layer (e)",
+            "layer (f)",
+        ):
+            self.assertIn(needle, ctx, msg=f"english session-start missing {needle!r}")
+        # And critically: the Chinese canonical headers should NOT bleed
+        # into the English injection (proves we're actually reading en/).
+        self.assertNotIn("会话纪律合约", ctx)
+        self.assertNotIn("强制注入", ctx)
+
+    def test_lang_en_uses_english_user_prompt(self) -> None:
+        _, out, _ = run_hook(
+            [INJECT, "--event", "UserPromptSubmit"],
+            stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
+            env_overrides={"CC_ENSLAVER_LANG": "en"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "Decision-time triggers",
+            "convergence",
+            "fidelity",
+            "read-before-edit",
+            "think-before-write",
+            "systematic",
+        ):
+            self.assertIn(needle, ctx, msg=f"english user-prompt missing {needle!r}")
+
+    def test_unknown_lang_falls_back_to_chinese(self) -> None:
+        # Defensive: a typo or unsupported language must not silently
+        # drop the injection; we fall back to the canonical Chinese.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+            env_overrides={"CC_ENSLAVER_LANG": "fr"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("会话", ctx)
+        self.assertNotIn("Session Discipline Contract", ctx)
+
+    def test_no_lang_env_var_uses_chinese(self) -> None:
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+            # No CC_ENSLAVER_LANG in env.
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("规则", ctx)
+
+
 class TestInjectContextUserPromptSubmit(unittest.TestCase):
     def test_returns_valid_hook_output(self) -> None:
         rc, out, err = run_hook(

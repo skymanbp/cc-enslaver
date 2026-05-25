@@ -11,16 +11,74 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **English prompts mirror** — `prompts/en/session-start.md` +
-  `prompts/en/user-prompt.md`, with `CC_ENSLAVER_LANG=en` env switch in
-  inject_context.py. Today only `rules/en/` is mirrored; injection is
-  Chinese-only.
 - **Stop hook deep file-claim verification** — parse "I edited X" patterns
   in the agent's last message and check `git diff` / mtime against a
   session-start baseline. Catches the "claim edited but didn't" lying
-  pattern. v0.13 closed rolling-patch; this is the next major axis.
+  pattern.
 - **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
   for one-shot prompts (currently 圣旨 is project-persistent only).
+
+---
+
+## [0.15.0] — 2026-05-25
+
+**English prompts mirror + `CC_ENSLAVER_LANG=en` injection switch.**
+
+Closes the v0.6.2 / v0.11 follow-up: `rules/en/` has shipped all 9
+rules in English since v0.6.2, but `prompts/` (the soft layer
+injected at SessionStart / UserPromptSubmit) was Chinese-only. English
+Claude Code users were getting English rule references but Chinese
+discipline injections. v0.15 ships the matching `prompts/en/*.md` and
+the language-switch plumbing.
+
+### Added
+
+- **`prompts/en/session-start.md`** — English mirror of the 9-rule
+  table, the physical-enforcement table, the standard reply skeleton,
+  the decision-time triggers, and the docs locations. Same density as
+  the Chinese canonical (~95 lines).
+- **`prompts/en/user-prompt.md`** — English mirror of the 13-row
+  decision triggers table (~30 lines).
+- **`hooks/scripts/inject_context.py`**:
+  - `_resolved_lang()` reads `CC_ENSLAVER_LANG` env var
+    (`zh` default; `en` switches; any other value falls back to `zh`
+    fail-safe).
+  - `load_prompt()` tries `prompts/en/<file>` when `lang == "en"`;
+    falls back to `prompts/<file>` Chinese canonical with stderr
+    warning if the English file is missing.
+
+### Tests (+4)
+
+`TestInjectContextEnglish`:
+- `test_lang_en_uses_english_session_start` — keyword contract for
+  English (Verify don't guess / Did this really solve the problem /
+  rule 08 / layer (e), etc.) + asserts Chinese headers do NOT bleed
+  through (proves the en/ file is actually being read).
+- `test_lang_en_uses_english_user_prompt` — keyword contract for
+  per-turn English injection.
+- `test_unknown_lang_falls_back_to_chinese` — `CC_ENSLAVER_LANG=fr`
+  must not drop the injection.
+- `test_no_lang_env_var_uses_chinese` — defensive default-path test.
+
+Existing 11 `TestInjectContextSessionStart` keyword-contract tests
+still pass — Chinese remains the no-env-var default.
+
+### Why default is `zh`, not the system locale
+
+The user is a Chinese speaker (CLAUDE.md §5), the rules are written
+in Chinese canonical, and most existing test contracts assert
+Chinese phrases. Defaulting to system locale would silently flip
+behavior on different developer machines (CI, Windows-vs-Linux,
+LANG=C, etc.). Explicit opt-in via `CC_ENSLAVER_LANG=en` keeps
+behavior deterministic.
+
+### Tests: 154 → 158 (+4)
+
+### Docs
+
+- `CLAUDE.md` §3 repo tree: `prompts/en/` subdirectory + the v0.15
+  switch note added.
+- `CLAUDE.md` §5 metadata: `CC_ENSLAVER_LANG=en` env-var note.
 
 ---
 

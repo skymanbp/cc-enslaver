@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.14.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.15.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -27,7 +27,9 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 
 `cc-enslaver` ships a **layered defense** against all six, currently 9 built-in rules + user-defined 圣旨 + 6 Stop-hook gates (v0.12.0):
 
-> **New in v0.14** — ⚡ **Three more Bash bypass patterns** (`git rebase --skip`, `--break-system-packages`, `rm -rf` on root/`$HOME`/`~`) get `PreToolUse(Bash)` DENY. 🏛️ **圣旨 `--global` flag**: `add --global` writes to `~/.claude/cc-enslaver/edicts.toml` for personal cross-project rules; `remove` falls back from project to global. Full subprocess test coverage of the `manage_edicts.py` CLI.
+> **New in v0.15** — 🌐 **English prompts mirror**: set `CC_ENSLAVER_LANG=en` and the hook injects `prompts/en/{session-start,user-prompt}.md` instead of the Chinese canonical. Fail-safe fallback to Chinese on unknown lang values. Closes the long-standing gap where `rules/en/` shipped but injection was Chinese-only.
+>
+> **From v0.14** — ⚡ **Three more Bash bypass patterns** (`git rebase --skip`, `--break-system-packages`, `rm -rf` on root/`$HOME`/`~`) get `PreToolUse(Bash)` DENY. 🏛️ **圣旨 `--global` flag**: `add --global` writes to `~/.claude/cc-enslaver/edicts.toml` for personal cross-project rules.
 >
 > **From v0.13** — 🔁 **Rule-09 rolling-patch hard layer**: `PreToolUse(Edit|Write)` physically DENYs the 4th small Edit (≤ 10 lines AND < 200 chars) to the same file in one session unless a systematic rewrite (≥ 50 lines OR ≥ 1500 chars) resets the counter. See [`rules/09-systematic-modification.md`](rules/09-systematic-modification.md) §"Edit/Write 频率层".
 >

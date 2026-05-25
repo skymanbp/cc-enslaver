@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -56,13 +57,45 @@ EVENT_TO_PROMPT: dict[str, str] = {
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = PLUGIN_ROOT / "prompts"
 
+# --------------------------------------------------------------------------- #
+# Language switch (v0.15).
+#
+# Default prompts are Chinese (the user's primary language). Set
+# CC_ENSLAVER_LANG=en to inject the English mirror under prompts/en/.
+# Any other value falls back to Chinese — fail-safe to the canonical
+# language, never silently miss the injection.
+# --------------------------------------------------------------------------- #
+SUPPORTED_LANGS = {"zh", "en"}
+
+
+def _resolved_lang() -> str:
+    """Return the active language. Defaults to 'zh'; 'en' if explicitly set."""
+    lang = (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower()
+    if lang in SUPPORTED_LANGS:
+        return lang
+    return "zh"
+
 
 def load_prompt(filename: str) -> str:
     """Read prompt content from prompts/<filename>. Fail loudly on missing file.
 
-    Failing loudly (rather than returning '') is itself an cc-enslaver
+    Failing loudly (rather than returning '') is itself a cc-enslaver
     measure: a silent empty injection would mask broken configuration.
+
+    v0.15: when CC_ENSLAVER_LANG=en, reads from prompts/en/<filename>
+    first; if missing, falls back to prompts/<filename> (Chinese
+    canonical) with a stderr warning. The fallback prevents a missing
+    English translation from blanking the injection.
     """
+    lang = _resolved_lang()
+    if lang == "en":
+        en_path = PROMPTS_DIR / "en" / filename
+        if en_path.is_file():
+            return en_path.read_text(encoding="utf-8")
+        sys.stderr.write(
+            f"[cc-enslaver] CC_ENSLAVER_LANG=en but missing {en_path}; "
+            f"falling back to Chinese canonical.\n"
+        )
     path = PROMPTS_DIR / filename
     if not path.is_file():
         # Surface the misconfiguration to Claude Code's error stream.

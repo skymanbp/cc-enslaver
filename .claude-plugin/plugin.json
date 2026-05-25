@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.14 adds three more PreToolUse(Bash) rule-03 bypass patterns (git rebase --skip, --break-system-packages, rm -rf on root/$HOME/~) and rounds out the v0.12 圣旨 system with --global flag for personal-scope edicts under ~/.claude plus subprocess test coverage of the manage_edicts CLI.",
-  "version": "0.14.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.15 adds English prompts/en/{session-start,user-prompt}.md mirroring the Chinese canonical, plus a CC_ENSLAVER_LANG=en environment switch in inject_context.py — closing the long-standing gap where rules/en/ shipped English rule text but injection was Chinese-only.",
+  "version": "0.15.0",
   "author": {
     "name": "skymanbp"
   },

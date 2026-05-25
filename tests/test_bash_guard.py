@@ -65,6 +65,34 @@ CASES: list[tuple[str, str, str, str | None]] = [
     ("chmod -R 777 dir", "chmod -R 777 dir/", "deny", "777"),
     ("chmod 0777", "chmod 0777 file.txt", "deny", "777"),
     ("chmod -R 0777", "chmod -R 0777 dir/", "deny", "777"),
+
+    # ----- v0.14 new patterns: git rebase --skip -----
+    ("git rebase --skip", "git rebase --skip", "deny", "git rebase"),
+    ("git rebase mid-cmd --skip", "git rebase --onto main HEAD~3 --skip", "deny", "--skip"),
+    ("git rebase plain (no --skip)", "git rebase main", "allow", None),
+    # Note: echo "git rebase --skip" inside a string would false-positive
+    # here, same as `echo "--no-verify"` does for the --no-verify pattern.
+    # Accepted trade-off: rare false-positive < agents actually running --skip.
+
+    # ----- v0.14 new patterns: --break-system-packages -----
+    ("pip install --break-system-packages", "pip install requests --break-system-packages", "deny", "break-system-packages"),
+    ("pip3 install --break-system-packages mid", "pip3 install --break-system-packages requests", "deny", "break-system-packages"),
+    ("pip install normal", "pip install requests", "allow", None),
+    ("python -m pip with venv", "python -m pip install requests", "allow", None),
+
+    # ----- v0.14 new patterns: rm -rf on root / $HOME / ~ -----
+    ("rm -rf /", "rm -rf /", "deny", "rm -rf"),
+    ("rm -rf / with trailing args", "rm -rf / --no-preserve-root", "deny", "rm -rf"),
+    ("rm -rf /etc", "rm -rf /etc", "deny", "rm -rf"),
+    ("rm -rf /usr", "rm -rf /usr/local/share", "deny", "rm -rf"),
+    ("rm -rf $HOME", "rm -rf $HOME", "deny", "rm -rf"),
+    ("rm -rf $HOME/.config", "rm -rf $HOME/.config", "deny", "rm -rf"),
+    ("rm -rf ~", "rm -rf ~", "deny", "rm -rf"),
+    ("rm -rf ~/", "rm -rf ~/", "deny", "rm -rf"),
+    ("rm -rf ./node_modules (allow)", "rm -rf ./node_modules", "allow", None),
+    ("rm -rf /tmp/foo (allow)", "rm -rf /tmp/foo", "allow", None),
+    ("rm -rf relative path (allow)", "rm -rf build/", "allow", None),
+    ("rm without -r (allow)", "rm /etc/myfile", "allow", None),
 ]
 
 

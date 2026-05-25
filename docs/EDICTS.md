@@ -115,9 +115,25 @@ hook fires before reaching the edict layer.
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" list
 python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" add ID "TEXT" [--must|--should] \
-    [--deny-edit REGEX]* [--deny-bash REGEX]* [--note NOTE]
-python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" remove ID
+    [--deny-edit REGEX]* [--deny-bash REGEX]* [--note NOTE] [--global]
+python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" remove ID [--global]
+python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" path
 ```
+
+#### `--global` flag (v0.14)
+
+By default `add` writes to `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
+(team-shareable, recommended). Pass `--global` to write to
+`${HOME}/.claude/cc-enslaver/edicts.toml` instead — useful for
+personal rules that should apply across all your projects (e.g. "never
+let claude touch my dotfiles", "always use my preferred test runner").
+
+`remove` without `--global` looks in the project file first then falls
+back to the global file; pass `--global` to restrict removal to the
+global file only.
+
+The loader (used by all hooks) tries project first then global, so
+project edicts take precedence when both files define the same id.
 
 ### Hand-edit
 
@@ -177,9 +193,6 @@ note = "并发会被串行化；用 Promise.all(arr.map(async ...))"
 - **Per-session ephemeral edicts** (e.g. `/cc-enslaver:edict add --session ...`)
   not yet supported. Add an edict to the file or pass `--should` for a
   light-touch reminder instead.
-- **Global ~/.claude fallback** is loaded but the `add` CLI only writes
-  to `${CLAUDE_PROJECT_DIR}`. Hand-edit `~/.claude/cc-enslaver/edicts.toml`
-  for personal-global edicts.
 - **No exception mechanism** — an edict either matches or it doesn't.
   If you want a per-file exemption, write a more specific regex or
   remove the edict.

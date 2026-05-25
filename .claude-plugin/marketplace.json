@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.13.0"
+    "version": "0.14.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.13 adds the rule-09 rolling-patch frequency layer: PreToolUse(Edit|Write) DENYs the 4th small edit (≤ 10 lines, < 200 chars) to the same file in one session unless a systematic rewrite (≥ 50 lines / ≥ 1500 chars) has reset the counter.",
-      "version": "0.13.0",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.14 adds three more PreToolUse(Bash) rule-03 bypass patterns (git rebase --skip, --break-system-packages, rm -rf on root/$HOME/~) and rounds out the v0.12 圣旨 system with --global personal-scope edicts + CLI subprocess test coverage.",
+      "version": "0.14.0",
       "author": {
         "name": "skymanbp"
       },

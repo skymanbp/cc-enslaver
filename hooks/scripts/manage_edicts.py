@@ -59,15 +59,25 @@ _HEADER = """# cc-enslaver — 圣旨 (Imperial Edicts) file
 """
 
 
-def _resolve_path() -> Path:
+def _project_path() -> Path:
     p = edicts_lib.default_project_path()
     if p is None:
         sys.stderr.write(
             "CLAUDE_PROJECT_DIR is not set; cannot resolve project edicts.toml. "
-            "Set CLAUDE_PROJECT_DIR or pass an explicit path.\n"
+            "Set CLAUDE_PROJECT_DIR or use --global.\n"
         )
         sys.exit(2)
     return p
+
+
+def _global_path() -> Path:
+    """Personal-global edicts.toml under ~/.claude (v0.14)."""
+    return Path.home() / ".claude" / "cc-enslaver" / "edicts.toml"
+
+
+def _resolve_path(use_global: bool = False) -> Path:
+    """Pick write target. --global → ~/.claude; otherwise project-level."""
+    return _global_path() if use_global else _project_path()
 
 
 def _read_raw_edicts(path: Path) -> list[dict]:
@@ -158,7 +168,7 @@ def cmd_list(_: argparse.Namespace) -> int:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    path = _resolve_path()
+    path = _resolve_path(use_global=getattr(args, "global_", False))
     existing = _read_raw_edicts(path)
     if any(r.get("id") == args.id for r in existing):
         sys.stderr.write(f"Edict id {args.id!r} already exists. Use 'remove' first.\n")
@@ -173,20 +183,29 @@ def cmd_add(args: argparse.Namespace) -> int:
         new["deny_bash"] = list(args.deny_bash)
     existing.append(new)
     _write_edicts(path, existing)
-    print(f"Added edict {args.id!r} ({sev}) → {path}")
+    scope = "global" if getattr(args, "global_", False) else "project"
+    print(f"Added edict {args.id!r} ({sev}, {scope}) → {path}")
     return 0
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
-    path = _resolve_path()
-    existing = _read_raw_edicts(path)
-    keep = [r for r in existing if r.get("id") != args.id]
-    if len(keep) == len(existing):
-        sys.stderr.write(f"No edict with id {args.id!r} found.\n")
-        return 1
-    _write_edicts(path, keep)
-    print(f"Removed edict {args.id!r} → {path}")
-    return 0
+    # Try project first; if not found there, try global. Explicit --global
+    # overrides this fallback.
+    if getattr(args, "global_", False):
+        paths = [_global_path()]
+    else:
+        paths = [_project_path(), _global_path()]
+    for path in paths:
+        if not path.is_file():
+            continue
+        existing = _read_raw_edicts(path)
+        if any(r.get("id") == args.id for r in existing):
+            keep = [r for r in existing if r.get("id") != args.id]
+            _write_edicts(path, keep)
+            print(f"Removed edict {args.id!r} → {path}")
+            return 0
+    sys.stderr.write(f"No edict with id {args.id!r} found in any edicts.toml.\n")
+    return 1
 
 
 def cmd_reload(_: argparse.Namespace) -> int:
@@ -234,10 +253,20 @@ def main() -> int:
         help="Regex matched against Bash commands. May repeat.",
     )
     p_add.add_argument("--note", help="Optional rationale shown in deny reason.")
+    p_add.add_argument(
+        "--global", action="store_true", dest="global_",
+        help="Write to personal global ~/.claude/cc-enslaver/edicts.toml "
+        "instead of project-level .claude/cc-enslaver/edicts.toml (v0.14).",
+    )
     p_add.set_defaults(func=cmd_add)
 
     p_rm = sub.add_parser("remove", help="Remove an edict by id.")
     p_rm.add_argument("id")
+    p_rm.add_argument(
+        "--global", action="store_true", dest="global_",
+        help="Restrict removal to the global ~/.claude edicts.toml. "
+        "Without this flag, looks in project then falls back to global (v0.14).",
+    )
     p_rm.set_defaults(func=cmd_remove)
 
     args = parser.parse_args()

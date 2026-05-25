@@ -11,20 +11,88 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Stop hook deep file-claim verification** — parse "I edited X" patterns
-  in the agent's last message and check `git diff` / mtime against a
-  session-start baseline. Catches the "claim edited but didn't" lying
-  pattern. v0.13 closed rolling-patch; this is the next major axis.
-- **More Bash bypasses + 圣旨 polish** — evaluate `git reset --hard` (if
-  uncommitted), `git rebase --skip`, `pip install --break-system-packages`;
-  add `--global` flag to `manage_edicts.py add`; subprocess-test the CLI
-  subcommands themselves.
 - **English prompts mirror** — `prompts/en/session-start.md` +
   `prompts/en/user-prompt.md`, with `CC_ENSLAVER_LANG=en` env switch in
   inject_context.py. Today only `rules/en/` is mirrored; injection is
   Chinese-only.
+- **Stop hook deep file-claim verification** — parse "I edited X" patterns
+  in the agent's last message and check `git diff` / mtime against a
+  session-start baseline. Catches the "claim edited but didn't" lying
+  pattern. v0.13 closed rolling-patch; this is the next major axis.
 - **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
   for one-shot prompts (currently 圣旨 is project-persistent only).
+
+---
+
+## [0.14.0] — 2026-05-25
+
+**Three more Bash bypass patterns + 圣旨 polish (global scope + CLI tests).**
+
+A focused batch of v0.12/v0.13 roadmap items that share a theme: tighten
+existing surfaces without introducing new architectural pieces.
+
+### Added — three new Bash bypass patterns (rule 03)
+
+`bash_guard.py` `STATIC_PATTERNS` now includes three additional regexes,
+each with a positive deny case + at least one negative allow case in
+`tests/test_bash_guard.py`:
+
+| Pattern | Trigger | Rationale |
+|---|---|---|
+| `git rebase --skip` | `git rebase` followed anywhere by `--skip` | Skipping a conflict silently abandons the commit; conflicts are real semantic divergences (rule 03). Recovery: resolve, or `--abort`. |
+| `--break-system-packages` | flag anywhere in the command | Bypasses PEP 668 protection; fix is venv / pipx / system package manager (rule 03). |
+| `rm -rf` on root / `$HOME` / `~` | recursive force delete targeting `/`, system dirs (`/etc`, `/usr`, `/var`, etc.), `$HOME`, or `~/` | Catastrophic / irrecoverable; agents should surface to user, not act on their behalf (rule 03). Allows `rm -rf ./node_modules`, `rm -rf build/`, `rm -rf /tmp/foo`. |
+
+Pattern-precedence-design note: `git reset --hard` was **not** added —
+reliably detecting "with uncommitted changes" would require a
+synchronous `git status` invocation inside the hook, which is too
+invasive. False-positive rate would be high.
+
+### Added — 圣旨 `--global` scope (v0.12 follow-up)
+
+- **`hooks/scripts/manage_edicts.py`**:
+  - `_global_path()` returns `~/.claude/cc-enslaver/edicts.toml`.
+  - `add --global` writes to global file (was previously project-only).
+  - `remove` falls back from project to global when not finding the
+    edict in project; `remove --global` restricts to global file.
+- **`commands/edict.md`**: documents `--global` for `add` and `remove`.
+- **`docs/EDICTS.md`**: dedicated `--global` flag section + removed the
+  "Limitations" entry that previously called this out as unsupported.
+
+The loader's project-then-global resolution order is unchanged — project
+edicts always take precedence when both files define the same id. The
+add-CLI now matches that mental model on the write side too.
+
+### Added — CLI subprocess test coverage (v0.12 follow-up)
+
+`tests/test_edicts.py` gains two new test classes:
+
+- **`TestManageCLI`** — 6 tests covering `path` on empty state, `add`
+  writes + `list` reflection, add/remove round-trip, duplicate-id
+  rejection, missing-id rejection, severity persistence.
+- **`TestManageCLIGlobalFlag`** — 5 tests covering `--global` writes
+  to HOME (not CLAUDE_PROJECT_DIR), loader fallback finds global file,
+  project precedence over global in `list`, `remove` falls back to
+  global, `remove --global` restricted to global only.
+
+Both classes sandbox both `CLAUDE_PROJECT_DIR` and `HOME` so writes
+land inside tmp dirs (no contamination of the real user's `~/.claude`).
+
+### Tests: 143 → 154 (+11)
+
+| Class | New tests |
+|---|---|
+| `TestBashGuardMatrix` (extended) | +14 matrix rows |
+| `TestManageCLI` | +6 |
+| `TestManageCLIGlobalFlag` | +5 |
+
+### Changed — docs
+
+- `commands/edict.md`: argument-hint includes `[--global]` for `add`
+  and `remove`; subcommand table notes fallback behavior; one global-
+  scoped example added.
+- `docs/EDICTS.md`: new `#### --global flag (v0.14)` subsection;
+  Limitations entry about hand-editing for global edicts removed.
 
 ---
 

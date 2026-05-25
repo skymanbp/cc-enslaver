@@ -455,5 +455,149 @@ class TestMultipleEdicts(_EdictsBase):
         self.assertNotIn("E02", reason)
 
 
+# --------------------------------------------------------------------------- #
+# manage_edicts.py CLI subprocess tests (v0.14).
+#
+# Tests the actual subprocess invocation surface that /cc-enslaver:edict
+# and shell users hit. Catches integration bugs (argparse drift, file
+# layout, write-then-read round-trip) that the lib-level tests miss.
+# --------------------------------------------------------------------------- #
+MANAGE = str(SCRIPTS_DIR / "manage_edicts.py")
+
+
+class _ManageCLIBase(unittest.TestCase):
+    """Sandbox both CLAUDE_PROJECT_DIR and HOME so --global writes
+    land inside our tmp dir, not the real user's ~/.claude."""
+
+    def setUp(self) -> None:
+        self.proj = Path(tempfile.mkdtemp(prefix="ccens-cli-proj-"))
+        self.home = Path(tempfile.mkdtemp(prefix="ccens-cli-home-"))
+        self.env = {
+            "CLAUDE_PROJECT_DIR": str(self.proj),
+            "HOME": str(self.home),
+            "USERPROFILE": str(self.home),
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.proj, ignore_errors=True)
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _run(self, *args: str):
+        import os
+        env = {**os.environ, **self.env}
+        # PATH may have weird things; force just-this-python to avoid
+        # surprises in shebang resolution.
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, MANAGE, *args],
+            capture_output=True,
+            env=env,
+        )
+        return (
+            proc.returncode,
+            proc.stdout.decode("utf-8", errors="replace"),
+            proc.stderr.decode("utf-8", errors="replace"),
+        )
+
+
+class TestManageCLI(_ManageCLIBase):
+
+    def test_path_when_no_file_prints_intended_location(self) -> None:
+        rc, out, _ = self._run("path")
+        self.assertEqual(rc, 0)
+        self.assertIn("does not exist yet", out)
+        self.assertIn(str(self.proj), out)
+
+    def test_add_creates_file_and_list_shows_it(self) -> None:
+        rc, out, err = self._run(
+            "add", "E01", "禁止 mongoose",
+            "--must", "--deny-bash", r"npm\s+i\s+mongoose",
+        )
+        self.assertEqual(rc, 0, msg=f"add failed: {err}")
+        # File written into project-level location.
+        f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.assertTrue(f.is_file())
+        # list reflects the new edict.
+        rc, out, _ = self._run("list")
+        self.assertEqual(rc, 0)
+        self.assertIn("[E01]", out)
+        self.assertIn("must", out)
+        self.assertIn("deny_bash×1", out)
+
+    def test_add_then_remove_round_trip(self) -> None:
+        self._run("add", "E01", "x", "--deny-bash", "foo")
+        rc, out, _ = self._run("remove", "E01")
+        self.assertEqual(rc, 0)
+        self.assertIn("Removed", out)
+        rc, out, _ = self._run("list")
+        self.assertIn("empty", out.lower())
+
+    def test_duplicate_add_rejected(self) -> None:
+        self._run("add", "E01", "first")
+        rc, _, err = self._run("add", "E01", "second")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("already exists", err)
+
+    def test_remove_nonexistent_rejected(self) -> None:
+        rc, _, err = self._run("remove", "E99")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("No edict", err)
+
+    def test_should_severity_persists(self) -> None:
+        self._run("add", "E01", "soft", "--should", "--deny-bash", "x")
+        rc, out, _ = self._run("list")
+        self.assertIn("should", out)
+        # And the file actually says severity = "should".
+        f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.assertIn('severity = "should"', f.read_text(encoding="utf-8"))
+
+
+class TestManageCLIGlobalFlag(_ManageCLIBase):
+    """v0.14 --global writes to ~/.claude/cc-enslaver/edicts.toml."""
+
+    def test_global_add_writes_to_home(self) -> None:
+        rc, out, err = self._run(
+            "add", "E01", "global edict", "--global", "--deny-bash", "x",
+        )
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("global", out.lower())
+        # File goes under HOME, not under CLAUDE_PROJECT_DIR.
+        global_f = self.home / ".claude" / "cc-enslaver" / "edicts.toml"
+        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.assertTrue(global_f.is_file())
+        self.assertFalse(proj_f.is_file())
+
+    def test_global_add_then_list_finds_it_via_fallback(self) -> None:
+        # No project file → loader's HOME fallback picks up the global file.
+        self._run("add", "E01", "g", "--global", "--deny-bash", "x")
+        rc, out, _ = self._run("list")
+        self.assertIn("[E01]", out)
+
+    def test_project_add_takes_precedence_over_global_in_list(self) -> None:
+        # Both files exist → project wins (loader's documented order).
+        self._run("add", "E01", "global", "--global", "--deny-bash", "x")
+        self._run("add", "E02", "project", "--deny-bash", "y")
+        rc, out, _ = self._run("list")
+        # E02 is in project file; E01 is in global. list uses load() which
+        # returns the first-found file, so we should see project's E02 but
+        # NOT global's E01.
+        self.assertIn("[E02]", out)
+        self.assertNotIn("[E01]", out)
+
+    def test_remove_falls_back_from_project_to_global(self) -> None:
+        # Add to global only; remove without --global should still find it.
+        self._run("add", "E01", "g", "--global", "--deny-bash", "x")
+        rc, out, _ = self._run("remove", "E01")
+        self.assertEqual(rc, 0)
+        self.assertIn("Removed", out)
+
+    def test_global_remove_restricted_to_global_file(self) -> None:
+        # E01 exists only in project; remove --global should fail.
+        self._run("add", "E01", "p", "--deny-bash", "x")
+        rc, _, err = self._run("remove", "E01", "--global")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("No edict", err)
+
+
 if __name__ == "__main__":
     unittest.main()

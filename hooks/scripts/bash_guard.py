@@ -92,6 +92,79 @@ STATIC_PATTERNS = [
             "a restrictive mode like 750 or 640)."
         ),
     },
+    # ----------------------------------------------------------------- #
+    # v0.14 — three additional bypass patterns.
+    #
+    # Selected from the v0.12 / v0.13 CHANGELOG roadmap. Each one has a
+    # narrow regex so false-positive rate stays low; `git reset --hard`
+    # was deliberately NOT added because reliably detecting "with
+    # uncommitted changes" requires `git status` invocation which is too
+    # invasive for a synchronous hook.
+    # ----------------------------------------------------------------- #
+    {
+        "name": "git rebase --skip (silently abandoning a conflict)",
+        # Matches the --skip subcommand of git rebase, anywhere in the
+        # command after `git rebase`. Word boundary on the right.
+        "regex": re.compile(r"\bgit\s+rebase\b[^\n]*\s--skip\b"),
+        "rule": "03",
+        "explanation": (
+            "`git rebase --skip` abandons the conflicting commit silently "
+            "rather than resolving the conflict. Per rule 03 "
+            "(rules/03-root-cause.md), conflicts arise from real semantic "
+            "divergence — skipping them loses code or hides design issues "
+            "that surface for a reason. Either: (1) resolve the conflict "
+            "(`git status` to see what's in conflict, edit, `git add`, "
+            "`git rebase --continue`), (2) abort and pick a different "
+            "rebase strategy (`git rebase --abort`), or (3) if you are "
+            "absolutely sure the skipped commit is unnecessary, ask the "
+            "user to run --skip manually."
+        ),
+    },
+    {
+        "name": "pip install --break-system-packages (bypassing PEP 668)",
+        "regex": re.compile(r"(?:^|\s)--break-system-packages\b"),
+        "rule": "03",
+        "explanation": (
+            "`--break-system-packages` bypasses the PEP 668 protection "
+            "added in Python 3.11+ to prevent pip from modifying the "
+            "system Python and breaking package-manager-installed "
+            "software. Per rule 03 (rules/03-root-cause.md), the fix "
+            "is to install into a venv (`python -m venv .venv && source "
+            ".venv/bin/activate && pip install …`), pipx for tools, or "
+            "the system package manager (`apt install python3-X`). "
+            "Breaking the system Python to make one install succeed is "
+            "the canonical symptom-over-root-cause anti-pattern."
+        ),
+    },
+    {
+        "name": "rm -rf on root / $HOME / ~",
+        # Catches the catastrophic forms:
+        #   rm -rf /
+        #   rm -rf /<system-dir>
+        #   rm -rf $HOME[/...]
+        #   rm -rf ~  / rm -rf ~/...
+        # while still allowing rm -rf /tmp/foo, rm -rf ./node_modules,
+        # rm -rf relative paths.
+        "regex": re.compile(
+            r"\brm\s+(?:-[rRf]+\s+)+"
+            r"(?:/(?:\s|$|bin\b|boot\b|etc\b|home\b|lib\b|opt\b|root\b|sbin\b|sys\b|tmp/?\s*$|usr\b|var\b)"
+            r"|\$HOME\b|~/?(?:\s|$))"
+        ),
+        "rule": "03",
+        "explanation": (
+            "Recursive force-deletion against system root, $HOME, or ~ "
+            "is catastrophic and almost never the right tool. Per rule "
+            "03 (rules/03-root-cause.md), if you need to clean a build "
+            "artifact use the project's clean target (`make clean`, "
+            "`npm run clean`, etc.) or remove a more specific path; if "
+            "you need to reset the workspace, use git (`git clean -fdx` "
+            "scoped to the worktree, or `git reset --hard HEAD` after "
+            "stashing). If the user truly asked for a destructive root-"
+            "level rm, surface the deny and let them run the command "
+            "manually — do not act on their behalf for irrecoverable "
+            "operations."
+        ),
+    },
 ]
 
 

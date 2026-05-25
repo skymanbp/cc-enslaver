@@ -125,6 +125,7 @@ keeps false-positive cost at exactly 1 turn.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import traceback
@@ -472,6 +473,158 @@ def _has_rule09_marker_or_triplet(text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# v0.16.0 — Layer (g): file-claim verification (rule 01 + 06).
+#
+# Detects "I edited X" / "I created Y" / "我修改了 Z" claims in the
+# agent's final message and verifies them against state.baseline_mtimes
+# captured by read_guard. If the on-disk evidence definitively
+# contradicts a claim (file exists in baseline AND current mtime ==
+# baseline mtime AND claim says "edited"; OR file did NOT exist in
+# baseline AND still does not exist AND claim says "created") → BLOCK.
+#
+# Conservative-by-design: false-negatives (missed lies) preferred over
+# false-positives (blocking honest claims). Specifically:
+#
+#   - "no baseline for this file" → skip the claim, never block on it
+#   - regex requires explicit verb + path-with-extension token
+#   - skips negated forms ("did NOT edit X")
+#   - mtime granularity may miss same-second no-op edits — that's the
+#     "Edit produced no net change" case, which IS a false claim worth
+#     blocking on (per the recovery message), so we accept this edge
+#
+# A user-controlled escape hatch is provided via the
+# `CC_ENSLAVER_DISABLE_LAYER_G` env var (set to any non-empty value to
+# skip the layer entirely) — for cases where the layer misfires on a
+# real workflow we don't yet know how to handle.
+# --------------------------------------------------------------------------- #
+
+# Match a file-path token: at least one alnum char + extension + total
+# length > 3. Allows /, \, ., -, _ as path chars. Excludes whitespace,
+# quotes, brackets, parens. The extension restriction is what keeps
+# casual phrases ("I think it's done") from looking like file paths.
+_PATH_TOKEN = r"[\w./\\-]+\.[A-Za-z][A-Za-z0-9_]{0,15}"
+
+# English claim verbs. Restricted to verbs that unambiguously assert
+# the agent did the action: created / wrote / edited / modified. "updated"
+# / "changed" are too loose ("updated the issue tracker" = social action).
+_FILE_CLAIMS_EN = re.compile(
+    # Optional "I", then a verb, then optional "the"/"a"/"to", then path.
+    # Verb captured so the verifier can distinguish edit-vs-create logic.
+    r"\bI\s+(edited|modified|wrote(?:\s+to)?|created|added\s+to)\s+"
+    r"(?:the\s+|a\s+|new\s+)?(?:file\s+)?"
+    # Path may be in backticks, square brackets, or bare.
+    r"[`\[]?(" + _PATH_TOKEN + r")[`\]]?",
+    re.IGNORECASE,
+)
+
+# Chinese claim verbs.
+_FILE_CLAIMS_ZH = re.compile(
+    r"(修改|更新|创建|新增|新建|编辑|写入|添加|生成)了\s*"
+    r"[`「\[]?(" + _PATH_TOKEN + r")[`」\]]?"
+)
+
+# Negation guard: don't extract claims when negated.
+_NEGATED_BEFORE = re.compile(
+    r"(?:not?|n't|没有|未|不|沒)\s+\S{0,12}\Z",
+    re.IGNORECASE,
+)
+
+
+def _extract_file_claims(message: str) -> list[tuple[str, str, str]]:
+    """Return list of (verb, path, claim_type) from `message`.
+
+    claim_type is "create" for verbs that assert creation (created /
+    wrote / 创建 / 新增 / 新建 / 生成); "edit" for the rest.
+
+    Negated forms ("I did not edit X", "没修改 X") are filtered out by
+    checking the immediately preceding window for negation tokens.
+    """
+    if not message:
+        return []
+    out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    create_verbs_en = {"wrote", "wrote to", "created"}
+    create_verbs_zh = {"创建", "新增", "新建", "生成"}
+
+    for pattern in (_FILE_CLAIMS_EN, _FILE_CLAIMS_ZH):
+        for m in pattern.finditer(message):
+            verb = m.group(1).lower()
+            path = m.group(2)
+            # Negation window: look at up to 30 chars before the verb.
+            preceding = message[max(0, m.start() - 30):m.start()]
+            if _NEGATED_BEFORE.search(preceding):
+                continue
+            ctype = "create" if (
+                verb in create_verbs_en or verb in create_verbs_zh
+            ) else "edit"
+            key = (path, ctype)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((verb, path, ctype))
+    return out
+
+
+def _verify_claims(
+    session_id: str,
+    claims: list[tuple[str, str, str]],
+    cwd: str | None,
+) -> list[str]:
+    """Return a list of human-readable contradictions, one per false claim.
+
+    A claim is contradicted only when:
+      - claim_type == "edit" AND baseline exists with mtime AND current
+        file exists with mtime == baseline mtime (no change), OR
+      - claim_type == "create" AND baseline exists with mtime == None
+        (didn't exist before) AND file still doesn't exist now.
+
+    Otherwise the claim is unverifiable (no baseline) or verified
+    (changed since baseline) — we report nothing.
+    """
+    import os
+    contradictions: list[str] = []
+    for verb, path, ctype in claims:
+        # Resolve relative paths against cwd if provided.
+        if cwd and not os.path.isabs(path):
+            resolved = os.path.join(cwd, path)
+        else:
+            resolved = path
+        have_baseline, baseline_mtime = state_lib.get_baseline(
+            session_id, resolved,
+        )
+        if not have_baseline:
+            continue  # never tracked, can't verify
+        try:
+            current_mtime = os.path.getmtime(resolved)
+            current_exists = True
+        except OSError:
+            current_mtime = None
+            current_exists = False
+        if ctype == "edit":
+            # Need: baseline existed (mtime != None), current exists,
+            # and mtimes match → contradicted.
+            if (
+                baseline_mtime is not None
+                and current_exists
+                and current_mtime == baseline_mtime
+            ):
+                contradictions.append(
+                    f"  • Claimed `{verb} {path}` but file is unchanged "
+                    f"since first encounter (mtime stable)."
+                )
+        else:  # create
+            # Need: baseline was None (file didn't exist), current still
+            # doesn't exist → contradicted.
+            if baseline_mtime is None and not current_exists:
+                contradictions.append(
+                    f"  • Claimed `{verb} {path}` but file still does "
+                    f"not exist on disk."
+                )
+    return contradictions
+
+
+# --------------------------------------------------------------------------- #
 # Layer metadata & status-table rendering (v0.12).
 #
 # The block reason text used to be six ~50-line monolithic templates. v0.12
@@ -529,6 +682,12 @@ LAYER_META: list[dict[str, str]] = [
         "label": "rule 09 — systematic-modification triplet",
         "recovery_keyword": "rule 09",
     },
+    {
+        "id": "(g)",
+        "rule": "01+06",
+        "label": "rule 01+06 — file-claim verification (v0.16)",
+        "recovery_keyword": "rule 01 + 06 file-claim",
+    },
 ]
 
 # Per-layer short "note" rendered in the status table when that layer is
@@ -540,6 +699,7 @@ _LAYER_FAIL_NOTE = {
     "(d)": "fidelity marker / quiz absent",
     "(e)": "rule-08 marker / 3+ keywords absent",
     "(f)": "rule-09 marker / triplet incomplete",
+    "(g)": "file-edit claim contradicts disk state",
 }
 
 
@@ -567,8 +727,9 @@ def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
             note = _LAYER_FAIL_NOTE.get(lid, "")
         else:
             # Layer not evaluated yet (gated by earlier fail) OR not
-            # applicable (e/f on non-edit turn).
-            if lid in ("(e)", "(f)") and not edit_turn:
+            # applicable (e/f/g on non-edit turn — they all reason about
+            # this turn's edits).
+            if lid in ("(e)", "(f)", "(g)") and not edit_turn:
                 status = "—  n/a"
                 note = "(non-edit turn)"
             else:
@@ -721,6 +882,39 @@ Pass condition is either:
 If the edit was actually patch-style (one local suppression, no impact
 analysis, no alternative considered), redo it systematically or flag
 the half-finish to the user."""
+
+_RECOVERY_G = """Your reply claims to have edited / created / modified one or
+more files, but the on-disk state contradicts at least one of those
+claims:
+
+{contradictions}
+
+Per rule 01 (verify don't guess) + rule 06 (verify convergence), a
+claim about your own actions must be true. If you said "I edited
+X.py" but X.py's content/mtime matches what it was when you first
+encountered it this session, you either:
+
+  (1) did not actually run the Edit (it was DENIED by another hook;
+      check earlier in the transcript), or
+  (2) ran Edit on a different file than the one you claimed, or
+  (3) the Edit produced no net change (old_string == new_string).
+
+In any of these cases the claim is false and the user is being
+misled. Fix the reply:
+
+  • If (1): retry the Edit, or surface the deny to the user.
+  • If (2): correct the path in your reply.
+  • If (3): retract the claim — describe what you actually did.
+
+This layer is **only** triggered when the on-disk evidence
+**contradicts** a claim. If we don't have a baseline for the claimed
+file (you never Read it) we can't verify it — those claims pass
+through silently. If the file actually changed but you forgot to
+mention it, that's also fine — we only catch claimed-but-didn't.
+
+If this fires falsely (you DID edit the file via another tool /
+external editor / etc.), surface the discrepancy and let the user
+decide whether to override."""
 
 
 def _emit_block(reason_text: str) -> None:
@@ -923,7 +1117,29 @@ def main() -> int:
                 ))
                 return 0
 
-        # All six gates passed — allow.
+            # v0.16 Layer (g): file-claim verification (rule 01 + 06).
+            # Parse "I edited X" / "我修改了 X" claims and verify them
+            # against baselines captured by read_guard. Only block when
+            # the on-disk evidence definitively contradicts a claim.
+            # Honors CC_ENSLAVER_DISABLE_LAYER_G escape hatch.
+            if not os.environ.get("CC_ENSLAVER_DISABLE_LAYER_G"):
+                claims = _extract_file_claims(message)
+                if claims:
+                    contradictions = _verify_claims(
+                        session_id, claims, payload.get("cwd"),
+                    )
+                    if contradictions:
+                        state_lib.record_stop_block(session_id, turn_count)
+                        _emit_block(_build_block_reason(
+                            "(g)", edited_this_turn,
+                            _RECOVERY_G.format(
+                                contradictions="\n".join(contradictions),
+                            ),
+                            matched_phrase=matched,
+                        ))
+                        return 0
+
+        # All seven gates passed — allow.
     except Exception:
         # Failing open: log to stderr but never block by accident.
         sys.stderr.write("[cc-enslaver] stop_guard exception:\n")

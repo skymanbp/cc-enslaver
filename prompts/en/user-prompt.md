@@ -22,6 +22,7 @@
 | Modifier words "mandatory / strict / complete / all" implemented as "soft suggestion / doc reminder" | rule 07 standard degradation | Stop layer (d) BLOCK |
 | This turn did Edit but chain-of-thought lacks "root cause / architecture / solution / impact / risk" ≥ 3 items | rule 08 | Stop layer (e) BLOCK |
 | This turn did Edit but reply lacks "root cause + impact + solution" triplet | rule 09 | Stop layer (f) BLOCK |
+| Claim "I edited X.py / created Y.md" but disk mtime unchanged / file does not exist | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | Left TODO / FIXME but said "done" / did refactors the user didn't ask for | rule 07 fidelity | Stop layer (d) BLOCK |
 
 ## Closing skeleton (mandatory for modification tasks)

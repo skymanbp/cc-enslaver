@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.15 adds English prompts/en/{session-start,user-prompt}.md mirroring the Chinese canonical, plus a CC_ENSLAVER_LANG=en environment switch in inject_context.py — closing the long-standing gap where rules/en/ shipped English rule text but injection was Chinese-only.",
-  "version": "0.15.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.16 adds Stop hook Layer (g) — file-claim verification. read_guard captures per-file mtime baselines on first encounter; stop_guard parses `I edited X.py` / `我修改了 Y.md` claims and blocks the Stop when on-disk state definitively contradicts a claim. Conservative-by-design (no baseline / any ambiguity → pass; CC_ENSLAVER_DISABLE_LAYER_G escape hatch).",
+  "version": "0.16.0",
   "author": {
     "name": "skymanbp"
   },

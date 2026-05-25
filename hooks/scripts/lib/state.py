@@ -253,3 +253,64 @@ def reset_edit_count(session_id: str, file_path: str) -> None:
         del counters[norm]
         state["edits_per_file"] = counters
         save(state)
+
+
+# --------------------------------------------------------------------------- #
+# File-state baseline (v0.16.0 — rule 01/06 honest-claim verification).
+#
+# Stop layer (g) catches the "claimed to edit X but didn't actually edit X"
+# pattern. To do so it needs a baseline of what each file looked like the
+# first time the agent encountered it this session. The baseline is
+# captured lazily by read_guard on the first Read / Edit / Write of each
+# file — earlier interactions don't have a meaningful baseline.
+#
+# Schema:
+#     state["baseline_mtimes"] = {
+#         normalized_path: <float mtime>      file existed at baseline time
+#                       | None,               file did NOT exist at baseline time
+#     }
+#
+# A path being absent from the dict means we never saw it — Stop layer
+# (g) treats that as "no claim verification possible" (skip, no block).
+#
+# We store mtime (not hash) for cheapness; the verifier compares
+# current mtime against the recorded one and treats any difference as
+# evidence of modification. The signal is one-directional: if the file
+# actually changed externally between read and Stop, we may treat a
+# false claim as true (false-negative on lying). This is the chosen
+# trade-off — false-positive on honest claims is worse.
+# --------------------------------------------------------------------------- #
+def record_baseline(session_id: str, file_path: str) -> None:
+    """Record the current on-disk state of `file_path` (lazy, idempotent).
+
+    First time we encounter a file, capture either its current mtime or
+    None (if missing on disk). Subsequent calls are no-ops — the
+    baseline is whatever the first encounter saw, regardless of later
+    modifications.
+    """
+    state = load(session_id)
+    baselines = state.setdefault("baseline_mtimes", {})
+    norm = normalize_path(file_path)
+    if norm in baselines:
+        return  # already captured
+    try:
+        baselines[norm] = os.path.getmtime(file_path)
+    except OSError:
+        baselines[norm] = None
+    save(state)
+
+
+def get_baseline(session_id: str, file_path: str) -> tuple[bool, float | None]:
+    """Return (have_baseline, baseline_mtime_or_None).
+
+    have_baseline=False → we never captured a baseline for this file;
+    caller should treat any claim about it as unverifiable.
+    have_baseline=True + mtime=None → file did NOT exist at baseline time.
+    have_baseline=True + mtime=float → file existed with that mtime.
+    """
+    state = load(session_id)
+    baselines = state.get("baseline_mtimes") or {}
+    norm = normalize_path(file_path)
+    if norm not in baselines:
+        return (False, None)
+    return (True, baselines[norm])

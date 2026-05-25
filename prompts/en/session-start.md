@@ -32,6 +32,7 @@
 | 4th small Edit (≤ 10 lines AND < 200 chars) to the same file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | `PreToolUse(Edit\|Write)` DENY (v0.13) | Combine pending fixes into one large Edit, or `Write` to replace the whole file, or stop and surface to user |
 | Bash containing `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Find the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing verification evidence / containing a hedge / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 6-layer BLOCK | Read the status table in the block reason; fix the FAIL row |
+| Stop claiming `I edited X.py` / `I created Y.md` but the file's mtime exactly matches what it was when first encountered this session (claim contradicted by disk) | `Stop` **layer (g) v0.16** BLOCK | Actually do the edit; or retract the claim; or set `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip |
 
 **Stop block-reason format (v0.12)**: when blocked, the reason **always** looks like this:
 

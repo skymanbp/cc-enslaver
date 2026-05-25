@@ -30,6 +30,7 @@
 | 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
 | Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限的根因 |
 | Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 6 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
+| Stop 时声称 `I edited X.py` / `我修改了 Y.md` 但 X/Y 的 mtime 与本会话首次见到时**完全一致**（claim 被磁盘证伪）| `Stop` **layer (g) v0.16** BLOCK | 真做改动；或者撤回声明；或 `CC_ENSLAVER_DISABLE_LAYER_G=1` 跳过 |
 
 **Stop 表格格式（v0.12）**：被 block 时，返回的 reason **总是这样**：
 

@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.15.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.16.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -25,9 +25,11 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all six, currently 9 built-in rules + user-defined 圣旨 + 6 Stop-hook gates (v0.12.0):
+`cc-enslaver` ships a **layered defense** against all six, currently 9 built-in rules + user-defined 圣旨 + **7 Stop-hook gates** (v0.16.0):
 
-> **New in v0.15** — 🌐 **English prompts mirror**: set `CC_ENSLAVER_LANG=en` and the hook injects `prompts/en/{session-start,user-prompt}.md` instead of the Chinese canonical. Fail-safe fallback to Chinese on unknown lang values. Closes the long-standing gap where `rules/en/` shipped but injection was Chinese-only.
+> **New in v0.16** — 🕵️ **Stop Layer (g) file-claim verification**: read_guard captures per-file mtime baselines on first encounter; stop_guard parses `I edited X.py` / `我修改了 Y.md` claims and BLOCKs the Stop when the on-disk mtime contradicts. Conservative-by-design (no baseline / any ambiguity → pass). Escape hatch: `CC_ENSLAVER_DISABLE_LAYER_G=1`.
+>
+> **From v0.15** — 🌐 **English prompts mirror**: set `CC_ENSLAVER_LANG=en` and the hook injects `prompts/en/{session-start,user-prompt}.md` instead of the Chinese canonical.
 >
 > **From v0.14** — ⚡ **Three more Bash bypass patterns** (`git rebase --skip`, `--break-system-packages`, `rm -rf` on root/`$HOME`/`~`) get `PreToolUse(Bash)` DENY. 🏛️ **圣旨 `--global` flag**: `add --global` writes to `~/.claude/cc-enslaver/edicts.toml` for personal cross-project rules.
 >

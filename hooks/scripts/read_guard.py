@@ -416,6 +416,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
         # not exist, and a phantom record of a non-existent path is
         # harmless (Edit's os.path.exists short-circuit covers it).
         state_lib.add_read(session_id, file_path)
+        # v0.16: also capture file-state baseline for Stop layer (g)
+        # (file-claim verification). Lazy, idempotent.
+        state_lib.record_baseline(session_id, file_path)
         return
 
     # Load edicts once per invocation (v0.12). Cheap (one disk read of a
@@ -468,6 +471,12 @@ def _handle_pre_tool_use(payload: dict) -> None:
         state_lib.record_small_edit(session_id, file_path)
 
     if tool == "Write":
+        # v0.16: capture baseline BEFORE the Write lands. For a brand-new
+        # file this captures None (file did not exist at baseline); for
+        # an existing file it captures the pre-Write mtime. Either way
+        # Stop layer (g) can later verify "created X" / "modified X"
+        # claims against this snapshot.
+        state_lib.record_baseline(session_id, file_path)
         target_exists = os.path.exists(file_path)
         # New file creation: nothing to gate on read-before-edit, and
         # no prior small-edit history to consider (it's a fresh file).
@@ -525,6 +534,11 @@ def _handle_pre_tool_use(payload: dict) -> None:
         # itself will reject; we don't second-guess.
         if not os.path.exists(file_path):
             return
+        # v0.16: capture baseline BEFORE Edit lands (idempotent — most of
+        # the time the Read recording already captured it on first
+        # access, but Edit-only flows that bypassed Read via the
+        # register_read escape hatch still need baseline capture).
+        state_lib.record_baseline(session_id, file_path)
         if not state_lib.has_read(session_id, file_path):
             _emit_deny(
                 UNREAD_DENY_TEMPLATE,

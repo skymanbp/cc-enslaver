@@ -11,12 +11,114 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Stop hook deep file-claim verification** — parse "I edited X" patterns
-  in the agent's last message and check `git diff` / mtime against a
-  session-start baseline. Catches the "claim edited but didn't" lying
-  pattern.
 - **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
   for one-shot prompts (currently 圣旨 is project-persistent only).
+- **Layer (g) git-aware verification** — currently uses `os.path.getmtime`
+  baseline diff; for cases where a same-mtime edit landed (rapid same-
+  second edit), could escalate to content hash. Defer until first real
+  false-negative is reported.
+
+---
+
+## [0.16.0] — 2026-05-25
+
+**Stop hook Layer (g): file-claim verification (rule 01 + 06).**
+
+Closes the largest remaining "honest claim" hole. The agent can pass
+layers (a)-(f) — show evidence, run convergence, surface fidelity,
+mark rule 08 + 09 triplets — and still ship a final message that says
+"I edited X.py" when X.py was never actually modified. Layers (a)-(f)
+all check the *shape* of the reply; none of them check whether
+specific file claims in the reply *are true*. Layer (g) closes that
+hole by lazily capturing per-file baselines on first
+Read/Edit/Write and verifying each file claim against the current
+on-disk state at Stop time.
+
+### Added — baseline capture (rule 01/06 plumbing)
+
+- **`hooks/scripts/lib/state.py`**:
+  - `record_baseline(session_id, file_path)` — lazy + idempotent;
+    first call captures current mtime (or None if file missing);
+    subsequent calls are no-ops so the snapshot survives later
+    modifications.
+  - `get_baseline(session_id, file_path) -> (have_baseline,
+    baseline_mtime_or_None)`.
+  - New JSON field: `baseline_mtimes: {normalized_path: float | None}`.
+- **`hooks/scripts/read_guard.py`** — wires `record_baseline` into
+  Read / Write / Edit branches BEFORE any DENY decision, so the
+  baseline reflects pre-action disk state even when the action gets
+  denied downstream.
+
+### Added — Layer (g) (rule 01 + 06 enforcement)
+
+- **`hooks/scripts/stop_guard.py`**:
+  - `_extract_file_claims(message)` — parses two regex families:
+    - English: `I (edited|modified|wrote|created|added to) [path]`
+      where `[path]` has a file extension.
+    - Chinese: `(修改|更新|创建|新增|新建|编辑|写入|添加|生成)了 [path]`.
+    - Negation guard: skips "I did NOT edit X" / "没修改 X".
+  - `_verify_claims(session_id, claims, cwd)` — for each claim, looks
+    up baseline, compares current mtime, returns contradictions only
+    for definitively contradicted claims.
+  - New Layer (g) wired after (f) in `main()`, fires only on
+    `edited_this_turn == True`.
+  - `LAYER_META` and `_LAYER_FAIL_NOTE` extended; the status table now
+    renders 7 rows; (g) is marked "— n/a" on non-edit turns, same
+    convention as (e)+(f).
+- **`_RECOVERY_G`** template explains the three plausible causes of a
+  contradicted claim (DENIED earlier, wrong file claimed, no-op edit)
+  and what to do in each.
+
+### Conservative-by-design contract
+
+Layer (g) prefers false-negatives (missed lies) over false-positives
+(blocking honest claims):
+
+| Condition | Behavior |
+|---|---|
+| No file claims in message | Pass silently |
+| Claim about file never tracked (no baseline) | Pass — can't verify |
+| Claim verb matches modification but mtime changed | Pass — verified |
+| Claim verb "edited" + baseline mtime + current mtime same | **BLOCK** |
+| Claim verb "created" + baseline=None + file still missing | **BLOCK** |
+| `CC_ENSLAVER_DISABLE_LAYER_G` env var set | Pass — user escape hatch |
+
+The escape-hatch env var exists because file-claim parsing is
+fundamentally fuzzy. Users who hit a false-positive in real workflow
+can disable just this layer without losing the other 6.
+
+### Tests: 158 → 169 (+11)
+
+`TestRule10FileClaimVerification` covers:
+- no claim → pass; unverifiable → pass
+- edit-claim with unchanged mtime → BLOCK
+- edit-claim with changed mtime → pass
+- create-claim with missing file → BLOCK
+- create-claim with existing file → pass
+- Chinese claim extraction works (`我修改了 \`x.py\``)
+- Negation guard works (`I did not edit X` → no claim)
+- Path without extension → not extracted
+- Escape-hatch env var disables the layer
+- Non-edit turn → layer (g) silent (n/a)
+
+Existing 43 stop_guard layer-logic tests + 8 v0.12 table-format tests
+pass unchanged; status table just gained a 7th row.
+
+### Why not a new rule file (rules/10-*.md)
+
+This layer is rule 01 (verify don't guess) + rule 06 (verify
+convergence) applied to the agent's own action claims. The roadmap
+entry called for "deep file-claim verification", not a new rule. The
+discipline already exists; v0.16 just adds the hook to enforce it.
+
+### Docs
+
+- `CLAUDE.md` — Stop layer list extended to 7 rows; state field list
+  notes `baseline_mtimes`.
+- `prompts/{session-start,user-prompt}.md` (+ English mirrors): new
+  physical-enforcement row for layer (g).
+- `README.md` + `plugin.json` + `marketplace.json`: version 0.15 → 0.16
+  with v0.16 banner.
 
 ---
 

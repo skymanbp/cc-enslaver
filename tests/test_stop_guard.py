@@ -495,6 +495,181 @@ class TestRule09Layer(_StopBase):
         self.assertIsNone(out)
 
 
+class TestRule10FileClaimVerification(_StopBase):
+    """v0.16 — Layer (g) file-claim verification.
+
+    The agent's done-claim message is parsed for "I edited X" / "我修改了 X"
+    style claims; each claimed path is verified against the baseline
+    captured by read_guard. Definitively contradicted claims → BLOCK.
+
+    Pass conditions for layer (g):
+      - no file claims in the message → pass silently
+      - file claim but no baseline for that file → pass (can't verify)
+      - file claim AND baseline AND on-disk state shows actual change →
+        pass (claim is true)
+      - CC_ENSLAVER_DISABLE_LAYER_G is set → pass (escape hatch)
+
+    Fail (BLOCK) condition:
+      - file claim with verb "edited" / "modified" AND baseline mtime
+        exists AND current mtime == baseline mtime, OR
+      - file claim with verb "created" AND baseline showed file didn't
+        exist AND file still doesn't exist.
+    """
+
+    def _seed_edit_turn_and_baseline(
+        self, turn_count: int, baselines: dict[str, float | None],
+    ) -> None:
+        """Plant `last_edit_turn` + `baseline_mtimes` in the session state.
+
+        baselines is {abs_path: mtime_or_None}.
+        """
+        import os
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        state_path = sessions / f"{self.sid}.json"
+        # normalize_path for the JSON keys (must match what read_guard
+        # would write).
+        normalised = {
+            os.path.normcase(os.path.realpath(p)): v for p, v in baselines.items()
+        }
+        state_path.write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": list(normalised.keys()),
+                "last_edit_turn": turn_count,
+                "baseline_mtimes": normalised,
+            }),
+            encoding="utf-8",
+        )
+
+    def _writable(self, name: str, content: str = "# initial\n") -> str:
+        f = self.tmpdir / name
+        f.write_text(content, encoding="utf-8")
+        return str(f)
+
+    def _full_compliance_message(self) -> str:
+        """A message that passes layers (a)-(f) so we test only (g)."""
+        return (
+            "已修复。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "rule 09: 系统式修改完成。"
+        )
+
+    def test_no_claim_passes_silently(self) -> None:
+        # All earlier-layer markers present but no "I edited X" claim.
+        self._seed_edit_turn_and_baseline(5, {})
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNone(out, msg=f"no claim should pass, got {out!r}")
+
+    def test_unverifiable_claim_passes(self) -> None:
+        # Claim about a file we never tracked → can't verify → pass.
+        self._seed_edit_turn_and_baseline(5, {})  # no baselines
+        msg = self._full_compliance_message() + "\nI edited unknown.py."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"unverifiable should pass, got {out!r}")
+
+    def test_edit_claim_with_unchanged_mtime_blocks(self) -> None:
+        # Baseline says file existed with mtime M; current mtime is M;
+        # claim says "I edited X" → contradicted → block.
+        import os
+        target = self._writable("x.py")
+        baseline_mtime = os.path.getmtime(target)
+        self._seed_edit_turn_and_baseline(5, {target: baseline_mtime})
+        msg = self._full_compliance_message() + f"\nI edited {target}."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="contradicted edit claim must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 01", out["reason"])
+        self.assertIn("file-claim", out["reason"])
+
+    def test_edit_claim_with_changed_mtime_passes(self) -> None:
+        # Baseline mtime != current mtime → claim verified → pass.
+        target = self._writable("x.py")
+        old_mtime = 0.0  # forced "different from current"
+        self._seed_edit_turn_and_baseline(5, {target: old_mtime})
+        msg = self._full_compliance_message() + f"\nI edited {target}."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"changed mtime should pass, got {out!r}")
+
+    def test_create_claim_when_file_missing_blocks(self) -> None:
+        # Baseline says file didn't exist; file still doesn't exist;
+        # claim says "I created Y" → contradicted → block.
+        missing_target = str(self.tmpdir / "never_created.py")
+        self._seed_edit_turn_and_baseline(5, {missing_target: None})
+        msg = self._full_compliance_message() + f"\nI created {missing_target}."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="phantom create must block")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("rule 01", out["reason"])
+
+    def test_create_claim_when_file_exists_passes(self) -> None:
+        # Baseline = None (file didn't exist), current = exists → pass.
+        target = self._writable("created.py")
+        self._seed_edit_turn_and_baseline(5, {target: None})
+        msg = self._full_compliance_message() + f"\nI created {target}."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"verified create should pass, got {out!r}")
+
+    def test_chinese_claim_extraction_blocks(self) -> None:
+        import os
+        target = self._writable("y.py")
+        baseline_mtime = os.path.getmtime(target)
+        self._seed_edit_turn_and_baseline(5, {target: baseline_mtime})
+        msg = self._full_compliance_message() + f"\n我修改了 `{target}`。"
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="Chinese claim must be parsed and blocked")
+        self.assertEqual(out["decision"], "block")
+
+    def test_negated_claim_does_not_extract(self) -> None:
+        # "I did not edit X" / "没修改 X" — negation guard must filter.
+        import os
+        target = self._writable("z.py")
+        baseline_mtime = os.path.getmtime(target)
+        self._seed_edit_turn_and_baseline(5, {target: baseline_mtime})
+        msg = self._full_compliance_message() + f"\nI did not edit {target}."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"negated claim must not block, got {out!r}")
+
+    def test_no_extension_in_path_not_extracted(self) -> None:
+        # "I edited the project" — no extension, not a file claim.
+        self._seed_edit_turn_and_baseline(5, {})
+        msg = self._full_compliance_message() + "\nI edited the project structure."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out)
+
+    def test_escape_hatch_disables_layer(self) -> None:
+        # Set CC_ENSLAVER_DISABLE_LAYER_G; even a contradicted claim
+        # should pass.
+        import os
+        target = self._writable("x.py")
+        baseline_mtime = os.path.getmtime(target)
+        self._seed_edit_turn_and_baseline(5, {target: baseline_mtime})
+        msg = self._full_compliance_message() + f"\nI edited {target}."
+        env = {**self.env, "CC_ENSLAVER_DISABLE_LAYER_G": "1"}
+        rc, out, _ = run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "Stop",
+                "cwd": str(self.tmpdir),
+                "turn_count": 5,
+                "assistant_message": msg,
+            },
+            env_overrides=env,
+        )
+        self.assertIsNone(out, msg=f"escape hatch must disable layer, got {out!r}")
+
+    def test_non_edit_turn_does_not_fire_g(self) -> None:
+        # No edit turn seeded → layer (g) must not fire (n/a).
+        msg = (
+            self._full_compliance_message() + "\nI edited /nonexistent/x.py."
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"non-edit turn must not trip (g), got {out!r}")
+
+
 class TestNoDoneClaim(_StopBase):
     def test_no_done_claim_allows(self) -> None:
         # Plain analysis with no completion claim.

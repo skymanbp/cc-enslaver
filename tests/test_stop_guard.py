@@ -695,6 +695,114 @@ class TestTranscriptFallback(_StopBase):
         self.assertEqual(out["decision"], "block")
 
 
+class TestV012StatusTableFormat(_StopBase):
+    """v0.12 — every block reason must render a uniform 6-row status table.
+
+    The table is what users (and the agent) see at a glance: which gate
+    failed, which gates passed, which were not evaluated. This format is
+    contractual; we test it explicitly so accidental refactors of the
+    builder don't silently revert to the v0.11 monolithic prose form.
+    """
+
+    def _seed_edit_turn(self, turn_count: int) -> None:
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        state_path = sessions / f"{self.sid}.json"
+        state_path.write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+            }),
+            encoding="utf-8",
+        )
+
+    def test_table_header_present_on_every_block(self) -> None:
+        # Layer (a) failure path: no evidence.
+        rc, out, _ = self._stop("已解决")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("| Layer | Rule | Status", out["reason"])
+        self.assertIn("|-------|------|", out["reason"])
+
+    def test_layer_a_failure_table_shape(self) -> None:
+        rc, out, _ = self._stop("已解决")
+        r = out["reason"]
+        # Headline names the failed layer and its rule.
+        self.assertIn("FAILED at Layer (a)", r)
+        self.assertIn("rule 06", r)
+        # (a) is the failing row; (b)-(f) are pending or n/a.
+        self.assertIn("| (a)   | 06   | ❌", r)
+        # Later layers must not be marked ✅ — they were never evaluated.
+        for later in ["(b)", "(c)", "(d)", "(e)", "(f)"]:
+            # Each later row should be either pending or n/a, never Pass.
+            row = [line for line in r.splitlines() if line.startswith(f"| {later}")]
+            self.assertEqual(len(row), 1, msg=f"missing row for {later}")
+            self.assertNotIn("✅", row[0])
+
+    def test_layer_c_failure_marks_earlier_layers_pass(self) -> None:
+        # Done + evidence but no quiz → (a)(b) pass, (c) FAIL.
+        rc, out, _ = self._stop("fixed. 22 passed, 0 failed.")
+        r = out["reason"]
+        self.assertIn("FAILED at Layer (c)", r)
+        # (a) and (b) must show Pass; (c) must show FAIL.
+        a_row = next(l for l in r.splitlines() if l.startswith("| (a)"))
+        b_row = next(l for l in r.splitlines() if l.startswith("| (b)"))
+        c_row = next(l for l in r.splitlines() if l.startswith("| (c)"))
+        self.assertIn("✅ Pass", a_row)
+        self.assertIn("✅ Pass", b_row)
+        self.assertIn("❌", c_row)
+        # `self-quiz` keyword preserved for downstream consumers.
+        self.assertIn("self-quiz", r)
+
+    def test_non_edit_turn_marks_ef_as_na(self) -> None:
+        # No edit turn seeded → (e) and (f) must render as "n/a", not pending.
+        rc, out, _ = self._stop("已解决")  # layer (a) fail, non-edit turn
+        r = out["reason"]
+        e_row = next(l for l in r.splitlines() if l.startswith("| (e)"))
+        f_row = next(l for l in r.splitlines() if l.startswith("| (f)"))
+        self.assertIn("n/a", e_row)
+        self.assertIn("n/a", f_row)
+        self.assertIn("non-edit", e_row)
+
+    def test_edit_turn_marks_ef_pending_on_earlier_fail(self) -> None:
+        # Edit turn + layer (a) fail → (e)(f) "pending", not "n/a".
+        self._seed_edit_turn(5)
+        rc, out, _ = self._stop("已解决", turn_count=5)
+        r = out["reason"]
+        e_row = next(l for l in r.splitlines() if l.startswith("| (e)"))
+        f_row = next(l for l in r.splitlines() if l.startswith("| (f)"))
+        self.assertIn("pending", e_row)
+        self.assertIn("pending", f_row)
+        # And NOT n/a — that would lie about applicability.
+        self.assertNotIn("n/a", e_row)
+
+    def test_recovery_section_present_and_named(self) -> None:
+        rc, out, _ = self._stop("fixed. 22 passed.")  # layer (c)
+        self.assertIn("[Recovery —", out["reason"])
+        self.assertIn("rule 06 self-quiz", out["reason"])
+
+    def test_one_shot_footer_present(self) -> None:
+        rc, out, _ = self._stop("已解决")
+        self.assertIn("One-shot guard", out["reason"])
+
+    def test_layer_e_failure_marks_d_pass_and_f_pending(self) -> None:
+        # Pass (a)(b)(c)(d), fail (e) — edit turn, missing rule-08 marker.
+        self._seed_edit_turn(5)
+        msg = (
+            "已修复。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\nrule 07: 无降级。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        r = out["reason"]
+        self.assertIn("FAILED at Layer (e)", r)
+        d_row = next(l for l in r.splitlines() if l.startswith("| (d)"))
+        e_row = next(l for l in r.splitlines() if l.startswith("| (e)"))
+        f_row = next(l for l in r.splitlines() if l.startswith("| (f)"))
+        self.assertIn("✅ Pass", d_row)
+        self.assertIn("❌", e_row)
+        self.assertIn("pending", f_row)
+
+
 class TestFailOpen(_StopBase):
     def test_malformed_stdin_does_not_block(self) -> None:
         proc = subprocess.run(

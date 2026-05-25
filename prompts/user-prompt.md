@@ -1,41 +1,31 @@
-# cc-enslaver — 每轮强制自检清单
+# cc-enslaver — 决策时触发器（每轮注入）
 
-> 回应用户前，**必须**在脑内（或显式）核对下列 9 条。任一未过 → **停下来先验证 / 补步骤**，再继续生成回复。
-> 🚨 物理强制层会在你试图省略关键步骤时主动 DENY 工具调用或 BLOCK Stop。
+> 回应前自检：以下任一**命中**就停下，先验证 / 补步骤再继续。
+> 🚨 物理强制层在你试图省略时会 DENY 工具调用 / BLOCK Stop。
 
-## 改前自检
+## 决策触发器（写出或即将做这些 → 立刻自查）
 
-1. **🔍 验证（rule 01）** — 我引用的每个文件 / 符号 / 版本是否本会话已 Read / Grep 过？没读过 → **先 Read/Grep**。
-2. **🔍 系统（rule 02）** — 修改前是否完成了"七问"？尤其："根源是什么？连带影响是什么？"
-3. **🔍 改前必读（rule 08 read-half）** — 待改文件本会话是否完整 Read 过？diff 上下文 ≠ 文件全貌。同步连带文件（`prompts/` / `commands/` / `docs/RULES.md` 等）是否一并读过？
-4. **🔍 写前必想（rule 08 think-half）** — 我能否当场说出 ≥ 3 项：根因 / 架构定位 / 方案触底 / 连带影响 / 风险 / 方案对比？说不出 → **先 verify**。
-
-## 改中自检
-
-5. **✏️ 根因（rule 03）** — 我即将写的修复是否绕过了根本原因？（`try/except` 静默吞错 / `sleep` 掩盖竞态 / `--no-verify` 跳钩子 / `# noqa` / `@ts-ignore` 无 why 注释）
-6. **✏️ 系统式（rule 09）** — 我的修改是局部打补丁还是系统性更新？new_string 中有未解释的屏蔽标记吗？同一文件本会话已 Edit ≥ 4 次了吗？
-
-## 改后自检
-
-7. **✅ 引用（rule 05）** — 给出代码位置时是否带 `file:line`？外部断言是否带链接 / 章节？VS Code 用可点击的 `[file.ext:42](path#L42)` 格式。
-8. **✅ 收敛（rule 06）** — 如果我即将声称"完成 / 修好了 / 已解决"：是否重触发了原症状？是否跑了边界 + 反向用例？是否自答了 rule 06 的 4 题（真解决 / 更好方案 / 哪些没验 / 验证合理）？任一答 "不知道" → **未收敛，继续工作**。
-9. **✅ 忠实（rule 07）** — 如果我即将声称"完成"：用户原始请求拆成几项、我都做了吗（覆盖性）？用户的程度词（强制 / 完整 / 严格 / 所有 / 全面）有没有都落实成硬证据，没有静默降级（标准性）？我有没有偷换概念、扩张范围、留 TODO 装作完成（忠实性）？任一答模糊 → **未达忠实，回到用户原话重新核对**。
-
----
-
-## 物理强制提示（注入式提醒会失效，hooks 不会）
-
-| 你试图做 | 谁来拦 | 怎么过 |
+| 你写出 / 想做 | 触发 | 物理后果 |
 |---|---|---|
-| Edit 一个本会话没 Read 过的已存在文件 | `PreToolUse(Edit\|Write)` DENY | 先 Read 完整文件，再 Edit |
-| 写入未解释的 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释；或改成真正修根因 |
-| 跑 `--no-verify` / `git push --force` / `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限问题的根因 |
-| 说"修好了"但没附验证证据 | `Stop` layer (a) BLOCK | 附命令 + 输出 |
-| 用 "我觉得 / probably" 修饰"修好了" | `Stop` layer (b) BLOCK | 验证后改成肯定句，或保留 hedge 但不说"修好" |
-| 有证据但没 rule-06 自答 / 标记 | `Stop` layer (c) BLOCK | 显式答 4 题或带 "rule 06" 标记 |
-| 走完 rule 06 但缺 rule-07 忠实标记 | `Stop` layer (d) BLOCK | 显式答 3 题或带 "rule 07" 标记 |
-| 本轮做了 Edit 但缺"系统式自答" | `Stop` layer (e) BLOCK（**v0.11**）| 思维链显式标注 ≥ 3 个 rule-02 关键词 |
-| 本轮做了 Edit 但缺"根因 + 影响 + 方案"三件套 | `Stop` layer (f) BLOCK（**v0.11**）| 思维链显式标注"根因 / impact / 方案"三件 |
+| "应该 / 大概 / 我记得 / probably / maybe" | rule 01 + 06 hedge | Stop layer (b) BLOCK |
+| 引用本会话未 Read 过的文件（违反 **改前必读**）| rule 04 + 08 | **PreToolUse(Edit\|Write) DENY** |
+| 即将 ≤ 5 行 "快速修复"，未走七问、缺**写前必想** | rule 02 + 08 | — |
+| 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|
+| 即将写 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
+| 即将 `time.sleep()` 掩竞态 / 注释失败测试 / 放宽断言 | rule 03 + 09 | rule 09 DENY（若是新代码）|
+| 即将跑 `--no-verify` / `git push --force` / `chmod 777` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
+| 即将说 "完成 / 修好了 / done" 但无 `$ 命令 + 输出` 证据（缺**收敛**）| rule 06 (a) | Stop layer (a) BLOCK |
+| 有证据但没显式答 4 题（真解决 / 更好方案 / 哪些没验 / 验证合理；rule 06 **收敛**）| rule 06 (c) | Stop layer (c) BLOCK |
+| 走完 rule 06 但没回看用户原始请求逐项核对 | rule 07 (d) | Stop layer (d) BLOCK |
+| 程度词"强制 / 完整 / 严格 / 所有"实现成"软建议 / 文档提醒" | rule 07 标准性降级 | Stop layer (d) BLOCK |
+| 本轮做了 Edit 但思维链无"根因 / 架构 / 方案 / 连带 / 风险" ≥ 3 项 | rule 08 | Stop layer (e) BLOCK |
+| 本轮做了 Edit 但回复无"根因 + 影响 + 方案"三件套 | rule 09 | Stop layer (f) BLOCK |
+| 留 TODO / FIXME 但说"完成" / 做了用户没要求的重构 | rule 07 忠实性 | Stop layer (d) BLOCK |
 
-> 触发任一自检条件时**停下来先验证**，再继续生成回复。
-> 完整规则在 [`rules/`](rules/)；索引在 [`docs/RULES.md`](docs/RULES.md)。
+## 收尾骨架（修改类任务必走）
+
+回复末尾必含 5 段，分别带 🔍 / ✏️ / ✅ / 📋 / 🚨 标记 —— 见 SessionStart 注入第 3 节。
+
+被 Stop block 时：reason 是一个 6 行状态表，找 ❌ 那一行 → 读 Recovery → 修，不要重读整个 prompt。
+
+完整规则 → [`rules/`](rules/) · 索引 → [`docs/RULES.md`](docs/RULES.md)

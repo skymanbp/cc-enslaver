@@ -56,6 +56,33 @@ When any of (a)-(f) hold, the hook returns
 `{"decision": "block", "reason": <appropriate reminder>}`. The agent
 gets one corrective turn.
 
+# v0.12 block-reason format
+
+Every block reason has the same four-part shape:
+
+    cc-enslaver · Stop check FAILED at Layer (X) [rule NN — short label]
+
+    | Layer | Rule | Status      | Note                              |
+    |-------|------|-------------|-----------------------------------|
+    | (a)   | 06   | ✅ Pass      |                                   |
+    | (b)   | 01   | ✅ Pass      |                                   |
+    | (c)   | 06   | ❌ FAIL     | self-quiz / marker absent         |
+    | (d)   | 07   | ⏸  pending  | (gated by earlier fail)           |
+    | (e)   | 08   | —  n/a      | (non-edit turn)                   |
+    | (f)   | 09   | —  n/a      | (non-edit turn)                   |
+
+    Done-claim matched: '...'
+
+    [Recovery — rule 06 self-quiz]
+    <short, actionable recovery instructions>
+
+    (One-shot guard: ...)
+
+The status table is built by `_render_status_table(fail_layer_id,
+edit_turn)`; the body is composed by `_build_block_reason(...)`. This
+replaces the v0.6-v0.11 monolithic 50-line REASON templates with a
+uniform compact format.
+
 # One-shot guard — why we never block twice in a row
 
 A Stop hook that always blocks would loop forever: block → continue →
@@ -445,202 +472,255 @@ def _has_rule09_marker_or_triplet(text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Block reason templates.
+# Layer metadata & status-table rendering (v0.12).
 #
-# Three distinct templates so the agent sees exactly which discipline
-# layer failed:
-#   NO_EVIDENCE:    rule 06 base layer (v0.6.0).
-#   HEDGED_DONE:    rule 01 cross-enforcement at Stop (v0.7.0).
-#   MISSING_QUIZ:   rule 06 deep layer — 4-question self-quiz (v0.7.0).
+# The block reason text used to be six ~50-line monolithic templates. v0.12
+# regularises the output so every block reason has the same shape:
+#
+#   1. A single-line headline naming the failed layer and the rule it
+#      enforces. Tests assert on the keywords here (`rule 06`, `rule 01`,
+#      `self-quiz`, `hedge`, `rule 07`, `rule 08`, `rule 09`).
+#   2. A status table listing all six layers (a)-(f) with a Pass / FAIL /
+#      pending / n/a marker. The agent (and the human reading over its
+#      shoulder) can see at a glance what passed and what didn't.
+#   3. A short recovery block specific to the failing layer.
+#   4. A common one-shot-guard footer.
+#
+# The six layers are ordered (a) → (f). When layer N fails, layers < N are
+# Pass (we got past them), layer N is FAIL, layers > N are "pending" (never
+# evaluated). When the failure occurs on a non-edit turn, layers (e)+(f)
+# show "n/a (non-edit turn)" instead of pending — they would not have
+# fired anyway. On an edit turn they show "pending".
 # --------------------------------------------------------------------------- #
-NO_EVIDENCE_REASON = """cc-enslaver · rule 06 enforcement (Stop hook)
+LAYER_META: list[dict[str, str]] = [
+    {
+        "id": "(a)",
+        "rule": "06",
+        "label": "rule 06 — no evidence",
+        "recovery_keyword": "rule 06",
+    },
+    {
+        "id": "(b)",
+        "rule": "01",
+        "label": "rule 01 — hedge near done-claim",
+        "recovery_keyword": "rule 01 + hedge",
+    },
+    {
+        "id": "(c)",
+        "rule": "06",
+        "label": "rule 06 — self-quiz missing",
+        "recovery_keyword": "rule 06 self-quiz",
+    },
+    {
+        "id": "(d)",
+        "rule": "07",
+        "label": "rule 07 — task fidelity missing",
+        "recovery_keyword": "rule 07 fidelity",
+    },
+    {
+        "id": "(e)",
+        "rule": "08",
+        "label": "rule 08 — read-before-edit / think-before-write",
+        "recovery_keyword": "rule 08",
+    },
+    {
+        "id": "(f)",
+        "rule": "09",
+        "label": "rule 09 — systematic-modification triplet",
+        "recovery_keyword": "rule 09",
+    },
+]
 
-You appear to be claiming completion ({matched_phrase!r}) but your
-message contains no convergence evidence — no shell command output,
-no test results, no "重触发原症状" demonstration, no quantitative
-comparison.
+# Per-layer short "note" rendered in the status table when that layer is
+# the FAIL row. Keep these to a single short line each.
+_LAYER_FAIL_NOTE = {
+    "(a)": "no convergence evidence",
+    "(b)": "hedge near done-claim",
+    "(c)": "self-quiz / marker absent",
+    "(d)": "fidelity marker / quiz absent",
+    "(e)": "rule-08 marker / 3+ keywords absent",
+    "(f)": "rule-09 marker / triplet incomplete",
+}
 
-Per rule 06 (rules/06-verify-convergence.md), before declaring done
-you must:
 
-  1. 重触发原症状 — Re-run the exact failing input and show output.
-  2. 边界 + 反向用例 — Cover at least 1 edge + 1 negative case.
-  3. 连带不破坏 — Run the relevant test/lint/typecheck pass.
-  4. 自答 4 题 — Is it really solved? Is there a better solution?
-                 Which changes are unverified? Is the verification
-                 actually meaningful?
-  5. 量化优于定性 — For perf/race/compat: numbers, repeat counts,
-                    matrix outputs.
+def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
+    """Render the 6-row status table as a markdown table string.
 
-Continue your response with the actual verification evidence. If you
-have already done the verification mentally but did not include it in
-the message, repeat with the concrete commands and outputs.
+    fail_layer_id is one of "(a)" .. "(f)" — the layer that just failed.
+    edit_turn is True iff the agent actually ran Edit/Write this turn:
+        - False → layers (e) and (f) display "— n/a (non-edit turn)"
+        - True  → layers > fail_layer_id display "⏸  pending"
+    """
+    # Build rows. Layer order is fixed (a)-(f).
+    fail_idx = next(
+        i for i, meta in enumerate(LAYER_META) if meta["id"] == fail_layer_id
+    )
+    rows = []
+    for i, meta in enumerate(LAYER_META):
+        lid = meta["id"]
+        rule = meta["rule"]
+        if i < fail_idx:
+            status = "✅ Pass"
+            note = ""
+        elif i == fail_idx:
+            status = "❌ **FAIL**"
+            note = _LAYER_FAIL_NOTE.get(lid, "")
+        else:
+            # Layer not evaluated yet (gated by earlier fail) OR not
+            # applicable (e/f on non-edit turn).
+            if lid in ("(e)", "(f)") and not edit_turn:
+                status = "—  n/a"
+                note = "(non-edit turn)"
+            else:
+                status = "⏸  pending"
+                note = "(gated by earlier fail)"
+        rows.append(
+            f"| {lid:5s} | {rule:4s} | {status:<11s} | {note:<33s} |"
+        )
+    header = (
+        "| Layer | Rule | Status      | Note                              |\n"
+        "|-------|------|-------------|-----------------------------------|"
+    )
+    return header + "\n" + "\n".join(rows)
 
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will be allowed even if evidence is still
-weak. Use the next turn well.)
-"""
 
-HEDGED_DONE_REASON = """cc-enslaver · rule 01 + 06 enforcement (Stop hook)
+_ONE_SHOT_FOOTER = (
+    "(One-shot guard: this is the only block in the current sequence — "
+    "the next Stop is allowed even if this layer still fails. Use the "
+    "next turn well.)"
+)
 
-Your message contains a completion claim ({done_phrase!r}) in
-proximity to a hedge ({hedge_phrase!r}). Per rule 01
-(rules/01-verify-dont-guess.md), confident verification cannot
-coexist with hedged language — pick one:
 
-  - If you have actual evidence: drop the hedge and state the result
-    directly with command output.
-  - If you are uncertain: drop the completion claim and say
-    explicitly "尚未确认 / not yet verified" so the user can decide
-    whether to ship as-is.
+def _build_block_reason(
+    fail_layer_id: str,
+    edit_turn: bool,
+    recovery: str,
+    *,
+    matched_phrase: str | None = None,
+    extra_kv: dict[str, str] | None = None,
+) -> str:
+    """Compose: headline + status table + recovery + one-shot footer.
 
-"我觉得修好了 / I think it's fixed / probably done / 应该是修好了"
-are not acceptable forms — either you verified it or you didn't.
+    The headline always names the failed layer's rule via the keyword
+    string `recovery_keyword` so downstream consumers (tests, agents
+    skimming the block reason) can locate the failed discipline gate.
+    """
+    meta = next(m for m in LAYER_META if m["id"] == fail_layer_id)
+    headline = (
+        f"cc-enslaver · Stop check FAILED at Layer {fail_layer_id} "
+        f"[{meta['label']}]"
+    )
+    table = _render_status_table(fail_layer_id, edit_turn)
+    parts: list[str] = [headline, "", table, ""]
+    if matched_phrase is not None:
+        parts.append(f"Done-claim matched: {matched_phrase!r}")
+    if extra_kv:
+        for k, v in extra_kv.items():
+            parts.append(f"{k}: {v}")
+    if matched_phrase is not None or extra_kv:
+        parts.append("")
+    parts.append(f"[Recovery — {meta['recovery_keyword']}]")
+    parts.append(recovery.rstrip())
+    parts.append("")
+    parts.append(_ONE_SHOT_FOOTER)
+    return "\n".join(parts) + "\n"
 
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will be allowed even if hedging persists.)
-"""
 
-MISSING_QUIZ_REASON = """cc-enslaver · rule 06 deep enforcement (Stop hook v0.7)
+# --------------------------------------------------------------------------- #
+# Per-layer recovery blurbs. Short, actionable; the long-form rule docs
+# live in rules/*.md (and the headline + status table link the agent there
+# implicitly via the rule number).
+# --------------------------------------------------------------------------- #
+_RECOVERY_A = """Your reply claims completion but the message contains no
+convergence evidence — no `$ ` shell prompt, no test counts, no
+"重触发原症状" demonstration, no fenced output block.
 
-Your message claims completion ({matched_phrase!r}) and shows some
-evidence, but it does not surface either:
+Per rule 06 (rules/06-verify-convergence.md), surface either:
+  • The original failing command + its now-passing output, or
+  • A `pytest` / `unittest` / `npm test` run with counts, or
+  • An explicit 重触发 / boundary / negative-case write-up.
 
-  (a) an explicit rule-06 marker (`rule 06`, `自答`, `收敛`,
-      `重触发`, `边界用例`, `反向用例`, `convergence`, `self-quiz`), or
-  (b) at least 2 of the 4 self-quiz questions:
-        1. **真解决?** Is it really solved? (specific evidence,
-           ruling out coincidence/cache/environment).
-        2. **更好方案?** Is there a better approach? (compared on
-           simplicity / performance / maintainability / fit).
-        3. **哪些没验?** Which changes are unverified? Why don't
-           they need to be?
-        4. **验证合理?** Does the verification actually exercise
-           the failure mechanism / cover the root-cause causal chain?
+If you actually verified mentally but skipped writing it down, write
+it down now with the concrete commands + outputs."""
 
-Tests passing alone is not convergence — the test inputs may not match
-the user's input, and coverage gaps are common. Surface the self-quiz
-explicitly. If you genuinely went through it but did not write it down,
-write it down now.
+_RECOVERY_B = """Your reply pairs a completion claim with hedged language
+within ~50 characters. Per rule 01 (rules/01-verify-dont-guess.md),
+confident verification cannot coexist with "我觉得 / I think /
+probably / maybe / 应该是" near the done-claim.
 
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will allow even with weak quiz coverage. Use
-this turn well.)
-"""
+Pick one:
+  • Drop the hedge and state the result with concrete output, or
+  • Drop the done-claim and say explicitly "尚未确认 / not yet
+    verified" so the user decides whether to ship.
 
-MISSING_RULE08_REASON = """cc-enslaver · rule 08 enforcement (Stop hook v0.11)
+A hedge marker is not a rhetorical flourish — it signals you are not
+sure. If you are sure, write so; if you are not, say so."""
 
-You modified a file this turn (Edit / Write was actually executed) and
-are now claiming completion ({matched_phrase!r}). But your message did
-not surface the rule-08 "read-before-edit / think-before-write"
-closing markers.
+_RECOVERY_C = """Your reply has evidence but does not surface the rule-06
+self-quiz. Pass condition is either:
 
-Rule 08 collapses rule 04 (read fully) and rule 02 (seven questions)
-into one pre-action hard discipline. The closing check is light: it
-expects you to record, in chain-of-thought or final reply, **either**
+  (a) an explicit marker — `rule 06`, `自答`, `收敛`, `重触发`,
+      `边界用例`, `反向用例`, `convergence`, `self-quiz`; OR
+  (b) ≥ 2 of the 4 self-quiz questions:
+        1. 真解决?  Specific evidence, not just "no error"
+        2. 更好方案?  Compared with alternatives
+        3. 哪些没验?  Explicitly enumerate what wasn't tested
+        4. 验证合理?  Verification exercises the root-cause chain
 
-  (a) an explicit rule-08 marker (`rule 08`, `改前必读`, `写前必想`,
-      `read-before-edit`, `think-before-write`, `系统式自答`), or
+Tests passing alone is not convergence. Surface the self-quiz now."""
 
-  (b) at least 3 of the six rule-02 systematic-thinking keywords:
+_RECOVERY_D = """You passed rule-06 convergence on the part you edited, but
+your reply does not surface rule-07 task fidelity (a different axis:
+"did I deliver everything the user asked for, at the standard
+requested?").
+
+Pass condition is either:
+  (a) an explicit marker — `rule 07`, `任务忠实`, `请求覆盖`,
+      `原始请求`, `无降级`, `无遗漏`, `task fidelity`,
+      `request coverage`, `no degradation`, `no omission`,
+      `no scope creep`, `covered all`, `all requested`; OR
+  (b) ≥ 2 of 3 fidelity questions:
+        1. 覆盖性 — decompose original request, list which sub-items
+           you did vs. didn't and why
+        2. 标准性 — for each modifier word (强制 / 必须 / 完整 /
+           严格 / 所有 / mandatory / strict / all): did it land
+           as a hard action or stay soft doc?
+        3. 忠实性 — any concept swap / scope creep / buried TODO?
+
+Re-read the user's *original* message, not your in-flight restatement."""
+
+_RECOVERY_E = """You modified a file this turn but did not surface the
+rule-08 (read-before-edit / think-before-write) closing markers.
+
+Pass condition is either:
+  (a) an explicit marker — `rule 08`, `改前必读`, `写前必想`,
+      `read-before-edit`, `think-before-write`, `系统式自答`; OR
+  (b) ≥ 3 of 6 rule-02 keywords:
         架构 / architecture
         职责 / responsibility
-        根源 / root cause
-        方案 / solution
-        连带 / impact / downstream
-        风险 / invariant / risk
-
-If you actually did the rule-08 work but did not write it down,
-write it down now. If you skipped rule-08 (jumped to Edit without
-Reading the call sites, or wrote new code without considering root
-cause / impact / risk), surface what you skipped and either run the
-missing pre-action step or alert the user.
-
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will be allowed even if the rule-08 marker
-is still missing. Use this turn well.)
-"""
-
-MISSING_RULE09_REASON = """cc-enslaver · rule 09 enforcement (Stop hook v0.11)
-
-You modified a file this turn and are now claiming completion
-({matched_phrase!r}). But your message did not surface the rule-09
-"systematic modification, no patch-style" triplet markers.
-
-Rule 09 demands that the modification be **systematic, not a local
-patch**. The closing check is light: it expects, in chain-of-thought
-or final reply, **either**
-
-  (a) an explicit rule-09 marker (`rule 09`, `系统式修改`, `打补丁`,
-      `systematic modification`, `patch-style`, `非补丁`, `反补丁`,
-      `root cause`), or
-
-  (b) **all three** of the triplet keywords:
         根源 / 根因 / root cause
-        连带 / 影响范围 / impact / blast radius / downstream
-        方案 / solution / approach / alternative
+        方案 / solution
+        连带 / 影响 / downstream / impact
+        风险 / 不变量 / invariant / risk
 
-If you did the rule-09 work (rooted the cause, mapped impact,
-compared at least 2 fix strategies), write the triplet down now.
-If you didn't, your edit is likely patch-style; surface what is
-incomplete and either redo the modification systematically or flag
-the half-finish to the user.
+If you did the rule-08 work in chain-of-thought but didn't surface it
+in the final reply, surface it now."""
 
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will be allowed even if the rule-09 triplet
-is still missing.)
-"""
+_RECOVERY_F = """You modified a file this turn but did not surface the
+rule-09 systematic-modification triplet (root cause + impact + solution).
 
-MISSING_FIDELITY_REASON = """cc-enslaver · rule 07 enforcement (Stop hook v0.8)
+Pass condition is either:
+  (a) an explicit marker — `rule 09`, `系统式修改`, `打补丁`,
+      `systematic modification`, `patch-style`, `反补丁`,
+      `non-patch`, `root cause`; OR
+  (b) **all three** of the triplet keywords in the same reply:
+        • 根源 / 根因 / root cause
+        • 连带 / 影响范围 / impact / blast radius / downstream
+        • 方案 / solution / approach / alternative
 
-Your message claims completion ({matched_phrase!r}) and you have
-already shown rule-06 convergence on the part you edited. But rule
-07 covers a *different* axis — and your message did not surface it.
-
-Rule 06 asks: "did the fix actually converge on what I edited?"
-Rule 07 asks: "did I deliver everything the user asked for, at the
-standard they requested, without scope creep or buried TODOs?"
-
-A test suite cannot answer rule 07. Tests cover the code that exists;
-they do not know about the sub-task you forgot to write, the
-"mandatory" requirement you silently downgraded to a "soft suggestion"
-in the docs, or the TODO you buried in line 200.
-
-Surface either:
-
-  (a) an explicit rule-07 marker (`rule 07`, `任务忠实`, `请求覆盖`,
-      `原始请求`, `无降级`, `无遗漏`, `无超范围`, `task fidelity`,
-      `request coverage`, `no degradation`, `no omission`,
-      `no scope creep`, `covered all`, `all requested`), or
-
-  (b) at least 2 of the 3 fidelity self-questions:
-
-        1. **覆盖性 (coverage)** — Decompose the user's *original*
-           message. How many sub-items? Which did you do? Which
-           did you not do, and why?
-
-        2. **标准性 (standard)** — Which modifier words did the user
-           use ("强制 / 必须 / 完整 / 严格 / 所有 / 立即 / 全面",
-           "mandatory / strict / comprehensive / all / every /
-           immediate")? Did each one land as a verifiable hard action
-           (hook / assertion / test) or did some end up as soft
-           documentation only?
-
-        3. **忠实性 (fidelity)** — Concept swap? (Did you ship a
-           subset / approximation / something related to A but not
-           A?) Scope creep? (Did you do refactors / abstractions
-           the user did not ask for?) Buried TODOs / FIXMEs / "for
-           now" / commented-out tests left while you said "done"?
-
-Go back to the user's *original* message — not your in-flight
-restatement of it — and reconcile what you shipped against what was
-asked. If anything was omitted, downgraded, swapped, or buried,
-surface it explicitly so the user can decide whether to ship.
-
-(One-shot guard: this is the only time you'll be blocked for this
-sequence. The next Stop will allow even with weak fidelity coverage.
-Use this turn well.)
-"""
+If the edit was actually patch-style (one local suppression, no impact
+analysis, no alternative considered), redo it systematically or flag
+the half-finish to the user."""
 
 
 def _emit_block(reason_text: str) -> None:
@@ -753,32 +833,51 @@ def main() -> int:
         if matched is None:
             return 0  # no done-claim → don't block
 
+        # Compute edit-turn status up front: layer (e)/(f) applicability
+        # AND the status-table rendering both need it. Cheap (one disk
+        # read) and avoids drift between "did this layer fire?" and "did
+        # the table render it as n/a?".
+        edited_this_turn = state_lib.did_edit_this_turn(
+            session_id, turn_count,
+        )
+
         # v0.7.0 layered check (b): hedged completion (rule 01).
         # Even if evidence is present, hedging undermines the claim — block.
         hedge_pair = _has_hedge_near_done(message)
         if hedge_pair is not None:
             state_lib.record_stop_block(session_id, turn_count)
-            _emit_block(HEDGED_DONE_REASON.format(
-                done_phrase=matched,
-                hedge_phrase=(
-                    hedge_pair[0]
-                    if hedge_pair[1] == matched or matched in hedge_pair[1]
-                    else hedge_pair[1]
-                ),
+            hedge_phrase = (
+                hedge_pair[0]
+                if hedge_pair[1] == matched or matched in hedge_pair[1]
+                else hedge_pair[1]
+            )
+            _emit_block(_build_block_reason(
+                "(b)", edited_this_turn,
+                _RECOVERY_B,
+                matched_phrase=matched,
+                extra_kv={"Hedge matched": repr(hedge_phrase)},
             ))
             return 0
 
         # v0.6.0 base layer (a): no evidence at all.
         if not _has_evidence(message):
             state_lib.record_stop_block(session_id, turn_count)
-            _emit_block(NO_EVIDENCE_REASON.format(matched_phrase=matched))
+            _emit_block(_build_block_reason(
+                "(a)", edited_this_turn,
+                _RECOVERY_A,
+                matched_phrase=matched,
+            ))
             return 0
 
         # v0.7.0 deep layer (c): evidence present but rule-06 self-quiz
         # neither named nor answered (>=2 of 4 questions).
         if not _has_self_quiz_or_marker(message):
             state_lib.record_stop_block(session_id, turn_count)
-            _emit_block(MISSING_QUIZ_REASON.format(matched_phrase=matched))
+            _emit_block(_build_block_reason(
+                "(c)", edited_this_turn,
+                _RECOVERY_C,
+                matched_phrase=matched,
+            ))
             return 0
 
         # v0.8.0 fidelity layer (d): rule-06 convergence shown, but the
@@ -787,7 +886,11 @@ def main() -> int:
         # versus root-cause / re-trigger / boundary.
         if not _has_fidelity_marker_or_quiz(message):
             state_lib.record_stop_block(session_id, turn_count)
-            _emit_block(MISSING_FIDELITY_REASON.format(matched_phrase=matched))
+            _emit_block(_build_block_reason(
+                "(d)", edited_this_turn,
+                _RECOVERY_D,
+                matched_phrase=matched,
+            ))
             return 0
 
         # v0.11.0 layers (e) + (f): rule-08 / rule-09 closing checks
@@ -795,16 +898,17 @@ def main() -> int:
         # analysis / answer turn shouldn't be forced to surface
         # think-before-write or root-cause/impact/solution markers —
         # there was nothing modified for those to apply to.
-        edited_this_turn = state_lib.did_edit_this_turn(
-            session_id, turn_count,
-        )
         if edited_this_turn:
             # Layer (e): rule 08 — read-before-edit / think-before-write
             # closing marker. Pass if either an explicit rule-08 marker
             # OR ≥ 3 of six rule-02 keywords are present.
             if not _has_rule08_marker_or_keywords(message):
                 state_lib.record_stop_block(session_id, turn_count)
-                _emit_block(MISSING_RULE08_REASON.format(matched_phrase=matched))
+                _emit_block(_build_block_reason(
+                    "(e)", edited_this_turn,
+                    _RECOVERY_E,
+                    matched_phrase=matched,
+                ))
                 return 0
 
             # Layer (f): rule 09 — systematic-modification triplet.
@@ -812,7 +916,11 @@ def main() -> int:
             # (root-cause + impact + solution) keywords are present.
             if not _has_rule09_marker_or_triplet(message):
                 state_lib.record_stop_block(session_id, turn_count)
-                _emit_block(MISSING_RULE09_REASON.format(matched_phrase=matched))
+                _emit_block(_build_block_reason(
+                    "(f)", edited_this_turn,
+                    _RECOVERY_F,
+                    matched_phrase=matched,
+                ))
                 return 0
 
         # All six gates passed — allow.

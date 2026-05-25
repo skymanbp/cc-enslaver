@@ -41,6 +41,7 @@ from pathlib import Path
 # the same state files. `lib/` is alongside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+from lib import edicts as edicts_lib  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -136,23 +137,28 @@ Command: {command}
 """
 
 
-def _emit_deny(command: str, pattern_name: str, rule: str, explanation: str) -> None:
-    """Write the deny JSON to stdout as UTF-8 bytes (Windows-safe)."""
+def _emit_raw_deny(reason: str) -> None:
+    """Write a structured deny response (with a pre-built reason)."""
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": DENY_TEMPLATE.format(
-                rule=rule,
-                name=pattern_name,
-                command=command,
-                explanation=explanation,
-            ),
+            "permissionDecisionReason": reason,
         }
     }
     encoded = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
     sys.stdout.buffer.write(encoded)
     sys.stdout.buffer.flush()
+
+
+def _emit_deny(command: str, pattern_name: str, rule: str, explanation: str) -> None:
+    """Write a built-in-pattern deny (rule 03 / 09 templated)."""
+    _emit_raw_deny(DENY_TEMPLATE.format(
+        rule=rule,
+        name=pattern_name,
+        command=command,
+        explanation=explanation,
+    ))
 
 
 # --------------------------------------------------------------------------- #
@@ -327,6 +333,20 @@ def main() -> int:
         if fp:
             _emit_deny(command, fp["name"], fp["rule"], fp["explanation"])
             return 0
+
+        # 圣旨 (user-defined hard edicts, v0.12). Run after the built-in
+        # static + compound checks so a project edict can never accidentally
+        # whitelist `--no-verify` & co. (it would have to write a pattern
+        # that NOT-matches such a command, which is fine — but the order
+        # makes "built-in disciplines always run first" the design contract).
+        loaded_edicts = edicts_lib.load()
+        if loaded_edicts:
+            hit = edicts_lib.find_bash_violation(loaded_edicts, command)
+            if hit is not None:
+                _emit_raw_deny(edicts_lib.deny_reason(
+                    hit, kind="Bash", tool_or_cmd=command,
+                ))
+                return 0
 
         # No bypass detected; allow by exiting silently.
     except Exception:

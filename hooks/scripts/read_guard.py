@@ -76,6 +76,7 @@ from pathlib import Path
 # Make `lib/` importable when run directly as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+from lib import edicts as edicts_lib  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Tools this guard handles (PreToolUse matcher must include all of them).
@@ -162,6 +163,11 @@ def _emit_deny(template: str, **fields: object) -> None:
     and would mangle non-ASCII characters in the reason text.
     """
     reason = template.format(**fields)
+    _emit_raw_deny(reason)
+
+
+def _emit_raw_deny(reason: str) -> None:
+    """Write a structured deny response (with a pre-built reason) and exit 0."""
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -313,6 +319,22 @@ def _handle_pre_tool_use(payload: dict) -> None:
         state_lib.add_read(session_id, file_path)
         return
 
+    # Load edicts once per invocation (v0.12). Cheap (one disk read of a
+    # small TOML file) and avoids stale state between Edits in the same
+    # session if the user is iterating on edicts.toml.
+    loaded_edicts = edicts_lib.load()
+
+    def _check_edicts(content: str) -> None:
+        """Scan content against all must edicts; DENY on first hit."""
+        if not loaded_edicts:
+            return
+        hit = edicts_lib.find_edit_violation(loaded_edicts, content)
+        if hit is not None:
+            _emit_raw_deny(edicts_lib.deny_reason(
+                hit, kind=tool, tool_or_cmd=file_path,
+            ))
+            return  # unreachable; _emit_raw_deny exits
+
     if tool == "Write":
         target_exists = os.path.exists(file_path)
         # New file creation: nothing to gate on read-before-edit.
@@ -331,6 +353,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
                     snippet=hit[1],
                 )
                 return  # unreachable; _emit_deny exits
+            # 圣旨 check (v0.12) — applies to new files too.
+            _check_edicts(content)
             state_lib.record_edit_turn(session_id, turn_count)
             return
         # Existing file: agent must have seen it before (Read or Write).
@@ -353,6 +377,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 snippet=hit[1],
             )
             return
+        # 圣旨 check (v0.12).
+        _check_edicts(content)
         state_lib.add_read(session_id, file_path)
         state_lib.record_edit_turn(session_id, turn_count)
         return
@@ -383,6 +409,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 snippet=hit[1],
             )
             return  # unreachable; _emit_deny exits
+        # 圣旨 check (v0.12) — scan the incoming new_string.
+        _check_edicts(new_string)
         # Edit allowed — stamp the edit-turn for Stop layers (e)+(f).
         # We do NOT add_read here because Edit is downstream of a prior
         # Read/Write that already recorded.

@@ -37,6 +37,10 @@ import json
 import sys
 from pathlib import Path
 
+# Make `lib/` importable when run directly as a script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import edicts as edicts_lib  # noqa: E402
+
 # --------------------------------------------------------------------------- #
 # Event → prompt file mapping.
 # Update both this map AND `hooks/hooks.json` when adding a new event.
@@ -113,6 +117,21 @@ def main() -> int:
 
     prompt_filename = EVENT_TO_PROMPT[args.event]
     additional_context = load_prompt(prompt_filename)
+
+    # Append 圣旨 (user-defined edicts) to BOTH SessionStart and
+    # UserPromptSubmit injections. SessionStart establishes the edicts at
+    # boot; UserPromptSubmit re-injects them every turn so they survive
+    # context compaction (the very failure mode that motivated v0.12's
+    # prompt thinning + edict system).
+    try:
+        loaded = edicts_lib.load()
+        block = edicts_lib.render_injection(loaded)
+        if block:
+            additional_context = additional_context.rstrip() + "\n" + block
+    except Exception as e:
+        # Never let an edicts bug brick the injection.
+        sys.stderr.write(f"[cc-enslaver] edicts injection failed: {e}\n")
+
     emit(args.event, additional_context)
     return 0
 

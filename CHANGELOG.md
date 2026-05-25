@@ -11,6 +11,175 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
+- **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
+  for one-shot prompts. Currently 圣旨 lives in `.claude/cc-enslaver/edicts.toml`;
+  team-shared but not transient.
+
+---
+
+## [0.12.0] — 2026-05-25
+
+**Stop-hook 输出表格化 + prompts 瘦身 54% + 圣旨（用户自定义硬规则）。**
+
+Responds to three concrete usability problems uncovered during real
+session use of v0.11:
+
+1. *"软提醒强度不够 — context 一挤就被忽视。"*
+2. *"Stop 收尾杂乱，6 个 layer 各说一大段；希望一眼看到 Pass/FAIL 表。"*
+3. *"想要一个'圣旨'功能 — 用户能为本项目自定义硬规则，从启动起强制。"*
+
+Each lands as a verifiable hard action, not a soft documentation
+gesture: (1) prompts reduced from 260 → 120 lines of dense
+keyword-driven tables, (2) every Stop block reason now renders a
+uniform 6-row status table with FAIL row highlighted, (3) the 圣旨
+TOML file + 3 hook integrations + slash command + CRUD CLI is shipped
+behind 23 new tests.
+
+### Added — 圣旨 (Imperial Edicts) system
+
+- **`hooks/scripts/lib/edicts.py`** — TOML loader + soft-layer renderer
+  + hard-layer matchers. Stdlib-only (`tomllib` since Python 3.11).
+- **File location**: `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
+  (project-level, team-shareable). Falls back to `~/.claude/cc-enslaver/
+  edicts.toml` for personal global. Both empty/missing → empty edict
+  list, no behavior change (failing-open).
+- **Schema** (array of tables, `[[edicts]]`):
+  - `id` (required, string) — unique short id.
+  - `text` (required, string) — imperative one-liner shown to the agent.
+  - `severity` — `"must"` (default, physical DENY on match) | `"should"`
+    (soft reminder only).
+  - `deny_edit` — list of regexes matched against `Edit`/`Write`
+    `new_string`/`content`.
+  - `deny_bash` — list of regexes matched against `Bash` `command`.
+  - `note` — optional rationale shown in the deny reason.
+- **Injection** — `inject_context.py` appends the rendered edict table
+  to both `SessionStart` and `UserPromptSubmit` injections. Survives
+  context compaction via per-turn re-injection.
+- **PreToolUse(Edit|Write) integration** — `read_guard.py` calls
+  `edicts_lib.find_edit_violation` after the rule-09 patch-style check.
+  First matching `must` edict → DENY with `cc-enslaver · 圣旨 <id>
+  violation` reason naming the edict + matched pattern + snippet.
+- **PreToolUse(Bash) integration** — `bash_guard.py` calls
+  `edicts_lib.find_bash_violation` after the built-in static patterns
+  (`--no-verify` / `--no-gpg-sign` / force-push / `chmod 777`) so 圣旨
+  cannot accidentally whitelist a built-in bypass.
+- **`hooks/scripts/manage_edicts.py`** — CRUD helper:
+  `list / add / remove / reload / path`. Used by the slash command and
+  directly from the shell.
+- **`commands/edict.md`** — `/cc-enslaver:edict` slash command wrapping
+  the manage script.
+- **`docs/EDICTS.md`** — user guide with format, enforcement contract,
+  3 worked examples, limitations.
+
+#### Why TOML and not YAML
+
+Python's stdlib has `tomllib` (3.11+) but no YAML parser. cc-enslaver's
+no-third-party-deps contract holds since v0.1. Rolling a YAML subset
+adds parser-bug risk; TOML's array-of-tables shape is verbose but
+unambiguous, which suits a hand-edited config.
+
+#### Order in the hook pipeline (security-relevant)
+
+```
+PreToolUse(Edit|Write):
+  1. read-before-edit guard (rule 04 + 08)
+  2. patch-style marker guard (rule 09)
+  3. 圣旨 scan ← new in v0.12
+
+PreToolUse(Bash):
+  1. --no-verify / --no-gpg-sign / force-push / chmod 777 (rule 03 + 09)
+  2. register_read.py escape hatch (v0.4.0)
+  3. 圣旨 scan ← new in v0.12
+```
+
+Built-in disciplines always run first. An edict cannot whitelist
+`--no-verify`; the built-in hook denies before reaching the edict
+layer. A test (`test_builtin_no_verify_still_denies_when_edicts_loaded`)
+encodes this contract.
+
+### Changed — Stop hook block reason format (v0.12)
+
+- **Uniform 4-part shape** for every block reason (layers a → f):
+  ```
+  cc-enslaver · Stop check FAILED at Layer (X) [rule NN — short label]
+
+  | Layer | Rule | Status      | Note                              |
+  |-------|------|-------------|-----------------------------------|
+  | (a)   | 06   | ✅ Pass      |                                   |
+  | (b)   | 01   | ✅ Pass      |                                   |
+  | (c)   | 06   | ❌ FAIL     | self-quiz / marker absent         |
+  | (d)   | 07   | ⏸  pending  | (gated by earlier fail)           |
+  | (e)   | 08   | —  n/a      | (non-edit turn)                   |
+  | (f)   | 09   | —  n/a      | (non-edit turn)                   |
+
+  Done-claim matched: '...'
+
+  [Recovery — rule 06 self-quiz]
+  <short, 5-10 line actionable instructions>
+
+  (One-shot guard: ...)
+  ```
+- **`stop_guard.py`**: 6 former monolithic ~50-line REASON templates
+  replaced by `LAYER_META` + `_render_status_table(fail_layer_id,
+  edit_turn)` + `_build_block_reason(...)` + 6 short `_RECOVERY_*`
+  blurbs. ~120 lines removed, format made uniform.
+- **`tests/test_stop_guard.py`**: 8 new tests in
+  `TestV012StatusTableFormat` lock in the table format (header rows,
+  earlier-layers-pass, edit-vs-non-edit n/a marking, recovery section,
+  one-shot footer). Existing 43 layer-logic tests pass unchanged.
+
+#### Why the table format
+
+v0.11's prose-style block reasons were each 30-50 lines. When multiple
+layers could plausibly fail in a row, the agent saw 200+ lines of
+discipline text without a quick way to locate "what specifically went
+wrong this time". The status table renders the verdict at a glance:
+which gates passed (✅), which failed (❌), which never evaluated (⏸),
+which were not applicable (—). Recovery instructions appear only for
+the actual failing layer.
+
+### Changed — prompts 瘦身 (260 → 120 lines, 54% reduction)
+
+- **`prompts/session-start.md`**: 219 → 89 lines. 9 rules rendered as
+  a compact one-line-per-rule table; physical-enforcement triggers as
+  a 4-row trigger table; standard response skeleton as a 5-row stage
+  table; decision-time self-check triggers as a flat list. All
+  test-contract keywords preserved (验证收敛 / 重触发原症状 / 是不是真的
+  解决了问题 / 任务忠实 / 改前必读 / 写前必想 / rule 08 / layer (e) /
+  系统式修改 / 禁止打补丁 / rule 09 / layer (f), etc.).
+- **`prompts/user-prompt.md`**: 41 → 31 lines. Refactored to a single
+  13-row "决策触发器 → 触发规则 → 物理后果" table.
+- **Why**: SessionStart injection lives at the top of the context
+  window and is among the first content to be compressed by auto-compact
+  in long sessions. Higher information density per line increases the
+  odds that critical signal survives compression.
+
+### Changed — `read_guard.py` / `bash_guard.py` plumbing
+
+- New `_emit_raw_deny(reason)` helper exposed so圣旨 (and any future
+  per-rule plugin) can emit a deny with a pre-built reason text without
+  going through the legacy template-string interface.
+- Each guard now loads edicts once per invocation (cheap disk read of a
+  small TOML file). Live-editing the edicts file takes effect on the
+  next tool call.
+
+### Tests
+
+- **+23 new tests** in `tests/test_edicts.py` covering: loader (no file,
+  empty file, malformed TOML, missing fields, bad regex, duplicate id,
+  unknown severity), soft injection rendering (presence on session-start
+  + user-prompt, id labels, severity badges), hard layer Bash deny,
+  hard layer Edit/Write deny on existing + new files, severity gating
+  (`should` does not DENY), built-in patterns precedence (no edict
+  whitelist of `--no-verify`), multi-edict first-match-wins.
+- **+8 new tests** in `tests/test_stop_guard.py::TestV012StatusTableFormat`
+  covering the new block-reason shape.
+- **Suite total**: 104 → 135 (+31 net).
+
+---
+
+## [0.11.0] — 2026-05-19
+
 - **Additional bypass patterns**
   - Evaluate adding `git reset --hard` (if uncommitted changes), `git rebase
     --skip`, `pip install --break-system-packages`, etc. — currently held back

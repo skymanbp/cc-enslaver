@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.11 adds rule 08 (read-before-edit / think-before-write) + rule 09 (systematic modification, no patch-style) with physical enforcement: PreToolUse(Edit|Write) now intercepts unjustified patch markers (try/except: pass, # noqa, @ts-ignore, eslint-disable, time.sleep over a race) in new_string content; Stop hook gains two layers (e + f) scoped to turns that actually edited files. Includes a full prompts/commands regularization pass (standard response skeleton, 9-question per-turn self-check checklist).",
-  "version": "0.11.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.12 introduces 圣旨 (Imperial Edicts) — user-defined per-project hard rules loaded from .claude/cc-enslaver/edicts.toml with PreToolUse(Edit|Write|Bash) DENY enforcement and slash-command CRUD. Stop hook block reasons reformatted as uniform 6-row status tables (✅ Pass / ❌ FAIL / ⏸ pending / — n/a) with focused recovery sections. Soft-layer prompts thinned 54% (260 → 120 lines) into high-density keyword tables.",
+  "version": "0.12.0",
   "author": {
     "name": "skymanbp"
   },

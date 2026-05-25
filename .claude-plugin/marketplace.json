@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.16.0"
+    "version": "0.17.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.16 adds Stop Layer (g) file-claim verification: stop_guard parses `I edited X.py` claims and blocks Stop when disk state contradicts. Conservative — no baseline / any ambiguity → pass; CC_ENSLAVER_DISABLE_LAYER_G escape hatch.",
-      "version": "0.16.0",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.17 extends CC_ENSLAVER_LANG=en to Imperial Edicts (圣旨) injection + DENY reason for full bilingual closure, fixes Windows portability (drive-letter path regex + UTF-8 stdout), and refreshes the comprehensive README to v0.17 (6→7 Stop gates, Layer (g) bullet, /cc-enslaver:edict, repo tree, env-vars table).",
+      "version": "0.17.0",
       "author": {
         "name": "skymanbp"
       },

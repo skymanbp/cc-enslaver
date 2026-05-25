@@ -82,6 +82,21 @@ severity = "should"                         # soft layer only: injected as remin
 | Hard (`PreToolUse(Edit\|Write)`) | When agent calls Edit / Write | For each `must` edict with `deny_edit`: scan `new_string` / `content`. First match → DENY with reason naming the edict id. |
 | Hard (`PreToolUse(Bash)`) | When agent calls Bash | For each `must` edict with `deny_bash`: scan `command`. First match → DENY. |
 
+### Bilingual rendering (v0.17)
+
+Both the soft-layer injection block and the hard-layer DENY reason
+honor the `CC_ENSLAVER_LANG` env var that v0.15 introduced for the
+base prompts:
+
+| `CC_ENSLAVER_LANG` | Injection banner | DENY headline |
+|---|---|---|
+| unset / `zh` / unknown | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 9 条）` | `cc-enslaver · 圣旨 E01 violation` |
+| `en` | `🏛️ Imperial Edicts (project hard rules; priority > builtin 9)` | `cc-enslaver · Imperial Edict E01 violation` |
+
+The edict `text` / `note` strings themselves are passed through
+verbatim — they're whatever you wrote in `edicts.toml`. Only the
+framing language switches.
+
 **Built-in rules always run first.** The order in `read_guard.py` is:
 
 1. read-before-edit guard (rule 04 + 08)

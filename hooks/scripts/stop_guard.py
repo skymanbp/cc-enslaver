@@ -498,11 +498,16 @@ def _has_rule09_marker_or_triplet(text: str) -> bool:
 # real workflow we don't yet know how to handle.
 # --------------------------------------------------------------------------- #
 
-# Match a file-path token: at least one alnum char + extension + total
-# length > 3. Allows /, \, ., -, _ as path chars. Excludes whitespace,
-# quotes, brackets, parens. The extension restriction is what keeps
-# casual phrases ("I think it's done") from looking like file paths.
-_PATH_TOKEN = r"[\w./\\-]+\.[A-Za-z][A-Za-z0-9_]{0,15}"
+# Match a file-path token: optional Windows drive letter (C:) + at
+# least one alnum char + extension. Allows /, \, ., -, _ as path
+# chars. Excludes whitespace, quotes, brackets, parens. The extension
+# restriction is what keeps casual phrases ("I think it's done") from
+# looking like file paths.
+#
+# v0.17: drive-letter prefix added so Windows absolute paths
+# (C:\Users\...\x.py, D:/Projects/foo.md) match. Linux/macOS paths
+# (/tmp/foo.py, ./bar.py) still match because the prefix is optional.
+_PATH_TOKEN = r"(?:[A-Za-z]:)?[\w./\\-]+\.[A-Za-z][A-Za-z0-9_]{0,15}"
 
 # English claim verbs. Restricted to verbs that unambiguously assert
 # the agent did the action: created / wrote / edited / modified. "updated"

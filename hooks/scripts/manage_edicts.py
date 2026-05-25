@@ -229,6 +229,21 @@ def cmd_path(_: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    # v0.17 — Force stdout to UTF-8 so non-ASCII characters (× in the
+    # list output, Chinese edict text, etc.) survive on Windows where
+    # the default stdout encoding is the system code page (cp1252 /
+    # cp936) which mangles UTF-8 bytes. Rationale: reconfigure() exists
+    # since Python 3.7 and we require 3.11+; the try/except is purely
+    # defensive in case stdout has been replaced by a non-TextIOWrapper
+    # in some unusual harness (e.g. captured by a test runner that
+    # wraps it).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        # Defensive — reason given in the block comment above.
+        pass
+
     parser = argparse.ArgumentParser(
         description="cc-enslaver 圣旨 (Imperial Edicts) CRUD helper",
     )

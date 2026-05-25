@@ -11,12 +11,136 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Planned (roadmap)
 
-- **Per-session ephemeral 圣旨** — `/cc-enslaver:edict add --session ...`
-  for one-shot prompts (currently 圣旨 is project-persistent only).
-- **Layer (g) git-aware verification** — currently uses `os.path.getmtime`
-  baseline diff; for cases where a same-mtime edit landed (rapid same-
-  second edit), could escalate to content hash. Defer until first real
-  false-negative is reported.
+- **Per-session ephemeral 圣旨 / Imperial Edicts** — `/cc-enslaver:edict
+  add --session ...` for one-shot prompts (currently project-persistent
+  only).
+- **Layer (g) content-hash escalation** — currently uses
+  `os.path.getmtime` baseline diff; same-second back-to-back edits can
+  produce identical mtimes (rare). Escalate to SHA-256 only when the
+  first real false-negative surfaces.
+- **Auto-GC on SessionStart** — v0.6.1 only ships manual `/cc-enslaver:gc`.
+
+---
+
+## [0.17.0] — 2026-05-25
+
+**Imperial Edicts (圣旨) bilingual adaptation + Windows portability fixes
++ comprehensive README refresh.**
+
+Two concrete user-reported gaps closed:
+
+1. **"README 严重过期"** — v0.16 added Layer (g) but the README §3 still
+   said "**six** layered checks", the repo tree was last updated at
+   v0.11, `/cc-enslaver:edict` was missing from every slash-command
+   list, and the roadmap entries had ALL been delivered. v0.17 does a
+   full content sweep: 9 rules + Imperial Edicts + **7** Stop-hook
+   gates (with Layer (g) bullet), updated repo tree (matches actual
+   layout: `lib/edicts.py`, `manage_edicts.py`, `prompts/en/`, etc.),
+   8-script enumeration, current environment switches table.
+2. **"圣旨 should have an English adaptation"** — v0.15 added
+   `CC_ENSLAVER_LANG=en` for the base prompts, but `edicts.py`
+   hardcoded Chinese banner + Chinese DENY headline so English users
+   got mixed-language output. v0.17 extends the same switch to cover
+   Imperial Edicts.
+
+### Added — bilingual Imperial Edicts rendering
+
+- **`hooks/scripts/lib/edicts.py`**:
+  - `_resolved_lang(explicit=None)` — language resolution helper
+    matching `inject_context.py`'s convention.
+  - `_INJECT_STRINGS` — Chinese / English translation table for the
+    soft-layer injection block (title, intro, footer, severity
+    badges, units).
+  - `_DENY_REASON_TEMPLATES` — Chinese / English templates for the
+    PreToolUse DENY reason.
+  - `render_injection(edicts, *, lang=None)` — lang param (defaults
+    to env). Chinese default keeps `🏛️ 圣旨...` banner; English emits
+    `🏛️ Imperial Edicts (project hard rules; priority > builtin 9)`.
+  - `deny_reason(hit, *, kind, tool_or_cmd, lang=None)` — same. Chinese
+    keeps `cc-enslaver · 圣旨 E01 violation` headline (preserves
+    keyword-contract tests); English emits `cc-enslaver · Imperial Edict
+    E01 violation`.
+- **`hooks/scripts/inject_context.py`** — passes its already-resolved
+  `_resolved_lang()` to `render_injection()` so the base prompt
+  language and the edict block language always match (single env-var
+  switch flips both).
+- **+5 tests** in `TestBilingualRendering`:
+  - Default (no env) → Chinese banner in injection
+  - `CC_ENSLAVER_LANG=en` → English banner + "User-defined,
+    hot-reloadable" English intro + no Chinese 圣旨 banner bleed-through
+  - Unknown lang (`fr`) → fail-safe back to Chinese
+  - Default → Chinese `圣旨 E01 violation` headline in Bash DENY
+  - `CC_ENSLAVER_LANG=en` → English `Imperial Edict E01 violation`
+    headline in Bash DENY (no Chinese 圣旨 anywhere in reason)
+
+### Fixed — Windows portability
+
+Two pre-existing bugs surfaced when first running the full suite on
+Windows (v0.13–v0.16 were tested only in Linux sandbox):
+
+- **Stop Layer (g) regex missed drive-letter paths.** `_PATH_TOKEN`
+  in `stop_guard.py` was `[\w./\\-]+\.[A-Za-z][...]` which did NOT
+  include `:`, so `C:\Users\...\x.py` failed to match starting at `C:`.
+  Three Layer (g) tests (`test_edit_claim_with_unchanged_mtime_blocks`,
+  `test_create_claim_when_file_missing_blocks`,
+  `test_chinese_claim_extraction_blocks`) were dormant failures on
+  Windows. Fix: prepend optional `(?:[A-Za-z]:)?` — Linux/macOS paths
+  still match because the prefix is optional.
+- **`manage_edicts.py` print() used cp1252 on Windows.** The `×`
+  character in `list` output (`deny_bash × 1`) and any Chinese in
+  edict text mangled to mojibake when the parent console wasn't UTF-8.
+  Fix: `sys.stdout.reconfigure(encoding="utf-8")` + same for stderr
+  at the top of `main()`, guarded by try/except with rationale comment.
+
+### Changed — README.md (comprehensive)
+
+- Banner badges + "New in v0.17" section.
+- Header line: "9 built-in rules + Imperial Edicts (圣旨) + **7
+  Stop-hook gates** (v0.17.0)" — was "6 Stop-hook gates (v0.16.0)".
+- §3 Stop-hook list now seven bullets with Layer (g) description.
+- §4 Slash command list: four items (`/cc-enslaver:edict` added).
+- §7 LLM-agnostic core: mentions `prompts/en/` v0.15 + v0.17
+  bilingual edicts.
+- Roadmap line: stale items (deep file-claim verification, rolling-
+  patch hard interception, English prompts) removed (all delivered);
+  new entries: ephemeral edicts, Layer (g) content-hash, auto-GC.
+- Repository structure tree: full rewrite, matches v0.17 actual
+  layout including `lib/`, `tests/`, `prompts/en/`, `docs/EDICTS.md`,
+  `commands/edict.md`.
+- Hooks table: 7-layer Stop description; edicts mentioned on Edit/
+  Write/Bash rows.
+- "Five scripts" enumeration → 8 scripts (added `gc_state.py`,
+  `manage_edicts.py`, `lib/` package).
+- New "Environment switches" table documenting `CC_ENSLAVER_LANG`,
+  `CC_ENSLAVER_DISABLE_LAYER_G`, `CLAUDE_PLUGIN_DATA`,
+  `CLAUDE_PROJECT_DIR`.
+- 中文说明 section mirrored: 6 → 7 层 Stop description, layer (g) line,
+  4 个 slash 命令, 当前路线图 refresh, 环境变量表.
+
+### Changed — docs/EDICTS.md
+
+- New "Bilingual rendering (v0.17)" subsection in §3 with two-row
+  table showing the zh vs en banner / DENY headline.
+
+### Tests: 169 → 174 (+5)
+
+`TestBilingualRendering` in `tests/test_edicts.py`:
+  - 3 injection tests (default zh / explicit en / unknown lang fallback)
+  - 2 deny-reason tests (default zh keeps `圣旨` / `en` flips to
+    `Imperial Edict`)
+
+All 169 pre-existing tests pass unchanged (Chinese is the default; no
+env var = no behavior change).
+
+### Why "圣旨" is preserved in Chinese mode (not translated to
+"Imperial Edict" everywhere)
+
+The Chinese term is the original project nomenclature and appears in
+existing CHANGELOG entries, slash-command help text, and contract
+tests. Replacing it would create translation drift. The cleaner
+solution is `CC_ENSLAVER_LANG=en` opt-in, just as v0.15 chose for
+prompts. Default behavior is identical to v0.16 — users only see
+"Imperial Edicts" when they explicitly ask for English.
 
 ---
 

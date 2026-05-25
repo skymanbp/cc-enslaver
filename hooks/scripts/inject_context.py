@@ -151,14 +151,19 @@ def main() -> int:
     prompt_filename = EVENT_TO_PROMPT[args.event]
     additional_context = load_prompt(prompt_filename)
 
-    # Append 圣旨 (user-defined edicts) to BOTH SessionStart and
-    # UserPromptSubmit injections. SessionStart establishes the edicts at
-    # boot; UserPromptSubmit re-injects them every turn so they survive
-    # context compaction (the very failure mode that motivated v0.12's
-    # prompt thinning + edict system).
+    # Append 圣旨 / Imperial Edicts (user-defined edicts) to BOTH
+    # SessionStart and UserPromptSubmit injections. SessionStart
+    # establishes the edicts at boot; UserPromptSubmit re-injects them
+    # every turn so they survive context compaction (the failure mode
+    # that motivated v0.12's prompt thinning + edict system).
+    #
+    # v0.17: pass the already-resolved language so the edict block and
+    # the base prompt always speak the same language (CC_ENSLAVER_LANG
+    # is the single switch the user toggles — base prompts/en/*.md and
+    # the edict block flip together).
     try:
         loaded = edicts_lib.load()
-        block = edicts_lib.render_injection(loaded)
+        block = edicts_lib.render_injection(loaded, lang=_resolved_lang())
         if block:
             additional_context = additional_context.rstrip() + "\n" + block
     except Exception as e:

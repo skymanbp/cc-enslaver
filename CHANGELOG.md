@@ -18,7 +18,96 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `os.path.getmtime` baseline diff; same-second back-to-back edits can
   produce identical mtimes (rare). Escalate to SHA-256 only when the
   first real false-negative surfaces.
-- **Auto-GC on SessionStart** — v0.6.1 only ships manual `/cc-enslaver:gc`.
+
+---
+
+## [0.18.0] — 2026-05-25
+
+**Auto-GC on SessionStart (opt-in via `CC_ENSLAVER_AUTO_GC_DAYS`).**
+
+Closes the v0.6.1 roadmap entry. The original v0.6.1 GC was manual-only
+(via `/cc-enslaver:gc`) with the explicit note that auto-GC was
+deferred on three grounds: SessionStart latency, critical-path risk,
+debuggability. v0.18 ships auto-GC behind an **opt-in env var** and
+addresses each concern:
+
+  - **Latency**: lazy import of `gc_state` (only when the env var is
+    set AND rate-limit allows); empty state_dir scan is < 1 ms.
+  - **Critical-path risk**: failing-open at every step (env parse,
+    state_dir resolution, marker read, GC call, marker write); all
+    failures route to stderr and the injection still emits normally.
+  - **Debuggability**: shares the exact same `prune_old_sessions()`
+    routine as `/cc-enslaver:gc`, so any bug surfaces in the manual
+    path too (where it's much easier to diagnose).
+
+### Added — opt-in auto-GC
+
+- **`hooks/scripts/gc_state.py`**:
+  - New `prune_old_sessions(threshold_days, *, dry_run=False,
+    exclude_session=None) -> dict` — the shared deletion routine,
+    extracted from `main()`. Returns a structured summary
+    (`scanned / eligible / deleted / bytes_freed / failures / items`).
+  - `_GC_INTERNAL_FILES = {"_auto_gc.json"}` — explicit allowlist of
+    files in `state_dir` that GC must NEVER delete regardless of age.
+  - Manual CLI `main()` refactored to call `prune_old_sessions()` so
+    both entry points share identical semantics.
+- **`hooks/scripts/inject_context.py`**:
+  - `_maybe_auto_gc()` runs only on `SessionStart` events, only when
+    `CC_ENSLAVER_AUTO_GC_DAYS=N` (positive int) is set, only if the
+    rate-limit marker is older than 24h.
+  - Marker file: `<state_dir>/_auto_gc.json` carries `{ts: float,
+    deleted: int}`. Rewritten after every real GC attempt (even when
+    0 files were eligible) so the 24h window is anchored to "tried"
+    not "found something".
+  - Lazy import of `gc_state` (only paid by opted-in users).
+  - Failing-open: env-parse / state_dir / marker-IO / GC call /
+    marker-write all wrapped; stderr only.
+
+### Rate-limit design
+
+The 24h gate prevents the GC from re-scanning on rapid session
+restarts (IDE crash recovery, Claude Code restart loops). Without it,
+a developer who restarts Claude Code 20 times in an hour would pay
+20 × O(state_dir size) glob walks. With the gate, they pay it once.
+
+The marker file is intentionally inside `state_dir` (not somewhere
+else) so it co-locates with what it tracks — and it's protected by
+`_GC_INTERNAL_FILES` from being GC'd by itself when old.
+
+### Tests: 174 → 184 (+10)
+
+`TestAutoGCOnSessionStart` (8 tests) drives `inject_context.py` as a
+subprocess with `CC_ENSLAVER_AUTO_GC_DAYS` in the env:
+  - env unset → no GC, no marker
+  - env set + old files → files deleted, marker written with `deleted` count
+  - rate-limit: fresh marker (< 24h) → no deletion
+  - rate-limit: stale marker (> 24h) → deletion proceeds
+  - marker file itself never GC'd even when backdated
+  - bad env value (non-numeric) → silent skip, no marker, stderr diagnostic
+  - zero / negative threshold → disabled
+  - UserPromptSubmit event → auto-GC must NOT run (SessionStart-only)
+
+`TestPruneFunctionDirect` (2 tests) covers `prune_old_sessions()`
+directly:
+  - `exclude_session` spares the named file even when it's old
+  - `threshold_days < 1` raises `ValueError`
+
+### Why opt-in (not opt-out)
+
+State files are small (KB-sized) and accumulate slowly. Aggressively
+auto-deleting on every install would be a silent behavior change that
+could surprise users debugging long-tail issues ("why did my session
+state for that bug-repro vanish?"). Opt-in via env var matches the
+v0.15 `CC_ENSLAVER_LANG` and v0.16 `CC_ENSLAVER_DISABLE_LAYER_G`
+convention — explicit, scriptable, no install-time prompts.
+
+### Changed — docs
+
+- `commands/gc.md`: new section documenting `CC_ENSLAVER_AUTO_GC_DAYS`
+  with both Bash and PowerShell setup snippets.
+- `README.md`: "New in v0.18" banner; Environment switches table
+  (both English and Chinese) gains the auto-GC row; roadmap line
+  removes auto-GC and adds completion note.
 
 ---
 

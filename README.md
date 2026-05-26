@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.17.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -25,9 +25,11 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 7 Stop-hook gates** (v0.17.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 7 Stop-hook gates** (v0.18.0):
 
-> **New in v0.17** — 🌐 **Imperial Edicts go bilingual**: with `CC_ENSLAVER_LANG=en`, the soft-layer injection and the PreToolUse DENY reason both flip to English ("Imperial Edicts" / "Imperial Edict E01 violation"). Default Chinese ("圣旨") preserved. Plus two Windows portability fixes: the file-claim regex now matches drive-letter paths (`C:\Users\...\x.py`), and `manage_edicts.py` forces UTF-8 stdout (no more mojibake on Windows console).
+> **New in v0.18** — 🧹 **Opt-in auto-GC on SessionStart**: set `CC_ENSLAVER_AUTO_GC_DAYS=30` and the SessionStart hook automatically prunes session-state files older than N days. Rate-limited to once per 24h via a marker file so rapid session restarts don't re-scan. Default off (backward-compatible); the manual `/cc-enslaver:gc` slash command still works and shares the same `prune_old_sessions()` deletion routine.
+>
+> **From v0.17** — 🌐 **Imperial Edicts go bilingual**: with `CC_ENSLAVER_LANG=en`, the soft-layer injection and the PreToolUse DENY reason both flip to English ("Imperial Edicts" / "Imperial Edict E01 violation"). Default Chinese ("圣旨") preserved. Plus Windows portability fixes: file-claim regex now matches drive-letter paths (`C:\Users\...\x.py`), and `manage_edicts.py` forces UTF-8 stdout.
 >
 > **From v0.16** — 🕵️ **Stop Layer (g) file-claim verification**: read_guard captures per-file mtime baselines on first encounter; stop_guard parses `I edited X.py` / `我修改了 Y.md` claims and BLOCKs the Stop when the on-disk mtime contradicts. Conservative-by-design (no baseline / any ambiguity → pass). Escape hatch: `CC_ENSLAVER_DISABLE_LAYER_G=1`.
 >
@@ -66,7 +68,7 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed (v0.10 adds Step 0 = build a reproducible feedback loop with 10 concrete loop patterns).
 7. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/) (Chinese canonical) and [`rules/en/`](rules/en/) (English mirror, synced through rule 09). v0.15 added matching [`prompts/en/`](prompts/en/) so the soft-layer injection itself can run in English (`CC_ENSLAVER_LANG=en`); v0.17 extended the same switch to cover Imperial Edicts injection + deny reasons. The discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
 
-> **Future (roadmap):** Per-session ephemeral edicts (`/cc-enslaver:edict add --session ...`); Layer (g) content-hash escalation for same-second mtime edge cases; auto-GC on SessionStart.
+> **Future (roadmap):** Per-session ephemeral edicts (`/cc-enslaver:edict add --session ...`); Layer (g) content-hash escalation for same-second mtime edge cases. (Auto-GC on SessionStart — delivered in v0.18.)
 
 ---
 
@@ -199,6 +201,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output 
 |---|---|
 | `CC_ENSLAVER_LANG=en` | Switch SessionStart / UserPromptSubmit injections AND Imperial Edicts injection + deny reason to English. Default (unset / `zh` / unknown) = Chinese canonical. |
 | `CC_ENSLAVER_DISABLE_LAYER_G=1` | Disable Stop layer (g) file-claim verification (escape hatch for false positives in unusual workflows; the other 6 layers still apply). |
+| `CC_ENSLAVER_AUTO_GC_DAYS=N` | **v0.18 opt-in.** Auto-prune session-state files older than N days on SessionStart. Rate-limited to once per 24h via a marker file. Unset / `0` / non-numeric → disabled. |
 | `CLAUDE_PLUGIN_DATA` | Session-state base dir. Set by Claude Code; falls back to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/` then `~/.claude/local/cc-enslaver/`. |
 | `CLAUDE_PROJECT_DIR` | Project root. Used to resolve project-level edicts at `.claude/cc-enslaver/edicts.toml`. |
 
@@ -256,7 +259,7 @@ MIT — see [`LICENSE`](LICENSE).
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程（v0.10 加 Step 0 = build feedback loop）。
 6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)（中文 canonical）/ [`rules/en/`](rules/en/)（英文镜像）/ [`prompts/en/`](prompts/en/)（v0.15 英文注入），可作为任意 LLM 的 system prompt 片段使用。
 
-> **当前路线图**：会话级临时圣旨（`--session`）、Layer (g) 的 content-hash 同秒精度升级、SessionStart 上的自动 GC。
+> **当前路线图**：会话级临时圣旨（`--session`）、Layer (g) 的 content-hash 同秒精度升级。（SessionStart 自动 GC 已在 v0.18 交付。）
 
 ### 安装
 
@@ -300,3 +303,4 @@ cat rules/en/*.md > cc-enslaver-rules-en.txt
 |---|---|
 | `CC_ENSLAVER_LANG=en` | 切换 SessionStart / UserPromptSubmit 注入 + 圣旨注入 + DENY reason 为英文（默认/未知值/`zh` → 中文 canonical） |
 | `CC_ENSLAVER_DISABLE_LAYER_G=1` | 禁用 Stop layer (g) 文件声明验证（false-positive 时的 escape hatch；其余 6 层仍有效） |
+| `CC_ENSLAVER_AUTO_GC_DAYS=N` | **v0.18 opt-in**：SessionStart 时自动清理 ≥ N 天未触碰的 state 文件。24h 速率限制。未设置 / `0` / 非数字 → 关闭。 |

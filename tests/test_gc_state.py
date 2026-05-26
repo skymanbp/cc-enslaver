@@ -148,5 +148,182 @@ class TestThresholdBoundary(_GcBase):
         self.assertIn("eligible:  0", out)
 
 
+class TestAutoGCOnSessionStart(_GcBase):
+    """v0.18 — opt-in auto-GC at SessionStart via CC_ENSLAVER_AUTO_GC_DAYS.
+
+    The auto-GC entry lives in `inject_context.py`'s SessionStart code
+    path. These tests drive inject_context as a subprocess (same
+    surface Claude Code uses) and verify the marker / deletion /
+    rate-limit semantics.
+    """
+
+    INJECT = str(SCRIPTS_DIR / "inject_context.py")
+
+    def _run_inject_session_start(self, env_extra: dict):
+        env = {**self.env, **env_extra}
+        import json as _json
+        proc = subprocess.run(
+            [sys.executable, self.INJECT, "--event", "SessionStart"],
+            input=_json.dumps({
+                "session_id": "auto-gc-test",
+                "hook_event_name": "SessionStart",
+            }).encode("utf-8"),
+            capture_output=True,
+            env=env,
+        )
+        return proc
+
+    def test_env_unset_does_not_run_gc(self) -> None:
+        # Old file present; no env → file remains.
+        self._make_session_file("old", age_days=60)
+        proc = self._run_inject_session_start({})
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue((self.sessions_dir / "old.json").exists())
+        # No marker should be written either.
+        self.assertFalse((self.sessions_dir / "_auto_gc.json").exists())
+
+    def test_env_set_deletes_old_and_writes_marker(self) -> None:
+        self._make_session_file("old1", age_days=60)
+        self._make_session_file("old2", age_days=40)
+        self._make_session_file("fresh", age_days=1)
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+        })
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse((self.sessions_dir / "old1.json").exists())
+        self.assertFalse((self.sessions_dir / "old2.json").exists())
+        self.assertTrue((self.sessions_dir / "fresh.json").exists())
+        marker = self.sessions_dir / "_auto_gc.json"
+        self.assertTrue(marker.is_file())
+        import json as _json
+        data = _json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(data["deleted"], 2)
+        self.assertGreater(data["ts"], 0)
+
+    def test_rate_limit_skips_within_24h(self) -> None:
+        # Plant a fresh marker (ran < 24h ago).
+        import json as _json
+        marker = self.sessions_dir / "_auto_gc.json"
+        marker.write_text(_json.dumps({"ts": time.time(), "deleted": 0}))
+
+        self._make_session_file("old", age_days=60)
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+        })
+        self.assertEqual(proc.returncode, 0)
+        # Old file should still exist because rate limit kicked in.
+        self.assertTrue((self.sessions_dir / "old.json").exists())
+
+    def test_rate_limit_passes_after_25h(self) -> None:
+        # Plant a stale marker (ran > 24h ago).
+        import json as _json
+        marker = self.sessions_dir / "_auto_gc.json"
+        marker.write_text(
+            _json.dumps({"ts": time.time() - 25 * 3600, "deleted": 0})
+        )
+
+        self._make_session_file("old", age_days=60)
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+        })
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse((self.sessions_dir / "old.json").exists())
+
+    def test_marker_file_itself_never_gc_d(self) -> None:
+        # The marker is in state_dir alongside session files. The auto-GC
+        # must never delete it even if it's older than the threshold.
+        import json as _json
+        marker = self.sessions_dir / "_auto_gc.json"
+        marker.write_text(_json.dumps({"ts": 0, "deleted": 0}))
+        # Backdate the marker so it would be eligible if it were a session.
+        old_time = time.time() - 90 * 86400
+        os.utime(marker, (old_time, old_time))
+
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+        })
+        self.assertEqual(proc.returncode, 0)
+        # Marker still exists (was rewritten by the GC pass with fresh ts).
+        self.assertTrue(marker.is_file())
+        # And its content reflects the new run.
+        data = _json.loads(marker.read_text(encoding="utf-8"))
+        self.assertGreater(data["ts"], time.time() - 60)
+
+    def test_bad_env_value_is_skipped_silently(self) -> None:
+        self._make_session_file("old", age_days=60)
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "not-a-number",
+        })
+        self.assertEqual(proc.returncode, 0)
+        # Old file remains; no marker written.
+        self.assertTrue((self.sessions_dir / "old.json").exists())
+        self.assertFalse((self.sessions_dir / "_auto_gc.json").exists())
+        # Stderr should mention the bad value.
+        self.assertIn(b"not an integer", proc.stderr)
+
+    def test_zero_or_negative_threshold_disables(self) -> None:
+        self._make_session_file("old", age_days=60)
+        proc = self._run_inject_session_start({
+            "CC_ENSLAVER_AUTO_GC_DAYS": "0",
+        })
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue((self.sessions_dir / "old.json").exists())
+
+    def test_user_prompt_submit_does_not_trigger_gc(self) -> None:
+        # Auto-GC must only run on SessionStart, not every UserPromptSubmit.
+        self._make_session_file("old", age_days=60)
+        import json as _json
+        proc = subprocess.run(
+            [sys.executable, self.INJECT, "--event", "UserPromptSubmit"],
+            input=_json.dumps({
+                "session_id": "x",
+                "hook_event_name": "UserPromptSubmit",
+            }).encode("utf-8"),
+            capture_output=True,
+            env={**self.env, "CC_ENSLAVER_AUTO_GC_DAYS": "30"},
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue((self.sessions_dir / "old.json").exists())
+
+
+class TestPruneFunctionDirect(_GcBase):
+    """v0.18 — direct unit tests for prune_old_sessions() (the shared
+    function used by both manual CLI and auto-GC entry points)."""
+
+    def test_exclude_session_spares_named_file(self) -> None:
+        # Force gc_state importable.
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import os as _os
+        old_data = _os.environ.get("CLAUDE_PLUGIN_DATA")
+        _os.environ["CLAUDE_PLUGIN_DATA"] = str(self.tmpdir)
+        try:
+            # gc_state.py imports lib/ via sys.path insert at module
+            # level. Reload defensively.
+            import importlib
+            import gc_state
+            importlib.reload(gc_state)
+            self._make_session_file("live", age_days=60)
+            self._make_session_file("dead", age_days=60)
+            summary = gc_state.prune_old_sessions(
+                threshold_days=30,
+                dry_run=False,
+                exclude_session="live",
+            )
+            self.assertTrue((self.sessions_dir / "live.json").exists())
+            self.assertFalse((self.sessions_dir / "dead.json").exists())
+            self.assertEqual(summary["deleted"], 1)
+        finally:
+            if old_data is None:
+                _os.environ.pop("CLAUDE_PLUGIN_DATA", None)
+            else:
+                _os.environ["CLAUDE_PLUGIN_DATA"] = old_data
+
+    def test_threshold_less_than_one_raises(self) -> None:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import gc_state
+        with self.assertRaises(ValueError):
+            gc_state.prune_old_sessions(threshold_days=0)
+
+
 if __name__ == "__main__":
     unittest.main()

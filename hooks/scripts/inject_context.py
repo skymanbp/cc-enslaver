@@ -40,7 +40,14 @@ from pathlib import Path
 
 # Make `lib/` importable when run directly as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import edicts as edicts_lib  # noqa: E402
+from lib import edicts as edicts_lib  # noqa: E402 — sys.path mutated above
+from lib import state as state_lib  # noqa: E402 — sys.path mutated above
+
+# v0.18: lazy import only when auto-GC actually triggers (kept None
+# until first use). Reason: SessionStart latency matters; the import
+# tree pulls in `time` which is cheap, but the lookup itself only
+# pays for users who opted into CC_ENSLAVER_AUTO_GC_DAYS.
+_gc_state_mod = None
 
 # --------------------------------------------------------------------------- #
 # Event → prompt file mapping.
@@ -170,8 +177,128 @@ def main() -> int:
         # Never let an edicts bug brick the injection.
         sys.stderr.write(f"[cc-enslaver] edicts injection failed: {e}\n")
 
+    # v0.18 auto-GC on SessionStart (opt-in via CC_ENSLAVER_AUTO_GC_DAYS).
+    # Runs after the main injection so even if GC blows up, the prompt
+    # injection already landed. Rate-limited by a marker file so we don't
+    # re-scan on every rapid session restart.
+    if args.event == "SessionStart":
+        _maybe_auto_gc()
+
     emit(args.event, additional_context)
     return 0
+
+
+# --------------------------------------------------------------------------- #
+# v0.18 — opt-in auto-GC on SessionStart.
+#
+# Trigger: env var CC_ENSLAVER_AUTO_GC_DAYS=N (positive int, default
+# disabled). When set, on every SessionStart we prune session-state
+# files older than N days. Rate-limited via a marker file at
+# state_dir / _auto_gc.json so we run at most once per 24h regardless
+# of how many sessions open. Failures are silent stderr — never block
+# the injection.
+# --------------------------------------------------------------------------- #
+_AUTO_GC_MARKER = "_auto_gc.json"
+_AUTO_GC_MIN_INTERVAL_SECONDS = 86400  # once per day
+
+
+def _maybe_auto_gc() -> None:
+    """Run garbage collection if the user opted in and we're not rate-limited.
+
+    All failure modes log to stderr and return silently — auto-GC must
+    never affect the injection payload or block session startup.
+    """
+    raw = os.environ.get("CC_ENSLAVER_AUTO_GC_DAYS", "").strip()
+    if not raw:
+        return  # default off
+
+    try:
+        threshold_days = int(raw)
+    except ValueError:
+        sys.stderr.write(
+            f"[cc-enslaver] CC_ENSLAVER_AUTO_GC_DAYS={raw!r} is not an "
+            f"integer; auto-GC skipped.\n"
+        )
+        return
+
+    if threshold_days < 1:
+        return  # 0 or negative explicitly disables
+
+    # Rate limit: skip if we ran within the last 24h.
+    import json as _json
+    import time as _time
+    try:
+        marker_path = state_lib.state_dir() / _AUTO_GC_MARKER
+    except Exception as exc:
+        sys.stderr.write(
+            f"[cc-enslaver] auto-GC could not resolve state_dir: {exc}\n"
+        )
+        return
+
+    now = _time.time()
+    if marker_path.is_file():
+        try:
+            last_ts = _json.loads(marker_path.read_text(encoding="utf-8")).get("ts", 0)
+        except Exception:
+            # Rationale: a corrupt marker file shouldn't prevent GC;
+            # treat as "never ran" and proceed (the GC itself will
+            # rewrite the marker on success below).
+            last_ts = 0
+        if now - last_ts < _AUTO_GC_MIN_INTERVAL_SECONDS:
+            return  # rate-limited
+
+    # Lazy import gc_state on first real GC pass.
+    global _gc_state_mod
+    if _gc_state_mod is None:
+        try:
+            from . import gc_state as _gc  # type: ignore[import-not-found]  # because relative import inside script; falls through
+        except Exception:
+            try:
+                import gc_state as _gc  # because we sys.path.inserted scripts dir
+            except Exception as exc:
+                sys.stderr.write(
+                    f"[cc-enslaver] auto-GC could not import gc_state: {exc}\n"
+                )
+                return
+        _gc_state_mod = _gc
+
+    # Exclude the current session's own state file (defensive: usually
+    # doesn't exist yet at SessionStart, but cheap safety).
+    session_id: str | None = None
+    # session_id is in the hook payload that we drained earlier. The
+    # injection hook does not currently parse it; auto-GC works fine
+    # without exclusion since the live session's file should be too
+    # new to cross threshold anyway. Leaving exclude_session=None.
+
+    try:
+        summary = _gc_state_mod.prune_old_sessions(
+            threshold_days=threshold_days,
+            dry_run=False,
+            exclude_session=session_id,
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[cc-enslaver] auto-GC failed: {exc}\n")
+        return
+
+    # Always update the marker after a real attempt — even if 0 files
+    # were eligible. This is what makes the 24h rate limit work.
+    try:
+        marker_path.write_text(
+            _json.dumps({"ts": now, "deleted": summary["deleted"]}),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        sys.stderr.write(
+            f"[cc-enslaver] auto-GC could not update marker: {exc}\n"
+        )
+
+    if summary["deleted"] > 0 or summary["failures"]:
+        sys.stderr.write(
+            f"[cc-enslaver] auto-GC: deleted {summary['deleted']} "
+            f"session(s) older than {threshold_days}d "
+            f"({summary['bytes_freed']} bytes freed)"
+            f"{'; failures: ' + str(summary['failures']) if summary['failures'] else ''}\n"
+        )
 
 
 if __name__ == "__main__":

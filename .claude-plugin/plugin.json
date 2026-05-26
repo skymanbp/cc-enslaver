@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.17 extends CC_ENSLAVER_LANG=en to Imperial Edicts (圣旨) injection + DENY reason (full bilingual closure of v0.15's switch), fixes two Windows portability bugs (Layer (g) drive-letter regex; manage_edicts UTF-8 stdout), and does a comprehensive README refresh — 6→7 Stop-hook gates, Layer (g) bullet, /cc-enslaver:edict in command lists, repo tree matches actual layout, environment switches table.",
-  "version": "0.17.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.18 adds opt-in auto-GC on SessionStart via CC_ENSLAVER_AUTO_GC_DAYS=N: prunes session-state files older than N days, 24h rate-limited via marker file. Shares prune_old_sessions() with the manual /cc-enslaver:gc command; failing-open everywhere; marker file itself protected from GC.",
+  "version": "0.18.0",
   "author": {
     "name": "skymanbp"
   },

@@ -64,3 +64,22 @@ bytes_freed: <B> |   would free: <B>B
 - ❌ 不传任何参数就直接 `--apply` —— 始终先 dry-run 让用户看清楚再问。
 - ❌ 删除 `${CLAUDE_PLUGIN_DATA}/sessions/` 之外的任何文件 —— 脚本本身有
   这道防线（只 glob `<state_dir>/*.json`），不要绕过它。
+
+## 自动 GC（v0.18 · opt-in）
+
+设置环境变量 `CC_ENSLAVER_AUTO_GC_DAYS=N`（正整数）即可让 SessionStart
+钩子在每次开会话时自动删除 ≥ N 天未触碰的 state 文件。受 24h 速率限制
+（marker 文件 `<state_dir>/_auto_gc.json`），不会每次开会话都重扫。
+
+```bash
+# Bash / Linux / macOS
+export CC_ENSLAVER_AUTO_GC_DAYS=30
+
+# PowerShell
+$env:CC_ENSLAVER_AUTO_GC_DAYS = "30"
+[Environment]::SetEnvironmentVariable("CC_ENSLAVER_AUTO_GC_DAYS", "30", "User")  # 持久化
+```
+
+未设置 / 设为 `0` / 设为非数字 → 自动 GC 完全禁用（默认）。失败 →
+silent stderr，永不阻塞 SessionStart 注入。`/cc-enslaver:gc` 手动命令
+仍然完全可用，两个入口共用同一份 `prune_old_sessions()`。

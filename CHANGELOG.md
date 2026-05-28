@@ -14,6 +14,76 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Per-session ephemeral 圣旨 / Imperial Edicts** — `/cc-enslaver:edict
   add --session ...` for one-shot prompts (currently project-persistent
   only).
+
+---
+
+## [0.18.1] — 2026-05-28
+
+**Hotfix: catastrophic ReDoS in PATCH_MARKERS[0] (bare try/except/pass).**
+
+The "Python: bare try / except: pass" patch-marker detector
+([`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py)) used a
+multi-line regex of the form
+
+```
+(^|\n)[ \t]*try[ \t]*:[ \t]*\n
+(?:[ \t]+[^\n]*\n)+?
+[ \t]*except\b[^:\n]*:[ \t]*\n
+[ \t]*pass[ \t]*(?:\n|$)
+```
+
+The non-greedy line-repeater `(?:[ \t]+[^\n]*\n)+?` combined with the
+later anchor caused **catastrophic backtracking** on healthy Python
+source that contained a `try:` block without a matching bare-pass
+closure — essentially all real-world Python code. Measured locally:
+
+| `try:` body lines, no matching `except:/pass` | Wall time |
+| ---: | ---: |
+|  10 | 0.07 s |
+|  20 | > 60 s (timed out) |
+|  ≥ 50 | > 10 minutes (user-reported) |
+| ≥ 100 | hours / indefinite hang |
+
+User-visible symptom: every `Edit` / `Write` against a non-trivial
+`.py` file froze Claude Code for 10 minutes to over an hour, because
+the `PreToolUse(Edit|Write)` hook ran `read_guard.py`, which spawned
+this regex on the new content, and there is no Claude Code hook
+timeout configured for `read_guard` so the host waited indefinitely.
+
+### Fixed
+
+- **`read_guard.py`**: dropped the multi-line bare-try-except-pass
+  regex; added `_scan_bare_try_except_pass()`, an O(N) linear,
+  regex-free line scanner that detects the same pattern without
+  backtracking. The detection contract is preserved:
+  - same DENY message (`PATCH_DENY_TEMPLATE` with
+    `BARE_TRY_EXCEPT_PASS_LABEL`),
+  - same ±1-line rationale window (`_line_window` + `_has_rationale`)
+    suppresses the DENY when an adjacent `because` / `原因` / `why`
+    comment is present,
+  - first-match-wins ordering with the remaining single-line
+    `PATCH_MARKERS` entries.
+- **Pre-filter fast path**: the scanner exits in O(1) when
+  `"try:" not in text`, making the check effectively free for the
+  overwhelming majority of edits.
+
+### Verified
+
+- New regression test `test_redos_pathological_input_completes_fast`
+  pins the worst case (`try:` + 100 indented body lines, no closure)
+  at under 5 s wall time. Pre-fix this input ran for over 60 s on
+  N=20 and exceeded 10 minutes on N=100.
+- New test `test_bare_try_except_pass_with_rationale_is_allowed`
+  pins the rationale-window semantics against the new code path.
+- The existing `test_bare_try_except_pass_is_denied` still passes,
+  confirming that real bare-pass laziness is still caught.
+- Full test suite (186 tests) passes.
+
+### Why `0.18.1` (not 0.19)
+
+This is a fix to a single regex in a single file with no surface-area
+change to the hook contract, the deny message, or the rationale
+allowance semantics. Per SemVer this is a patch release.
 - **Layer (g) content-hash escalation** — currently uses
   `os.path.getmtime` baseline diff; same-second back-to-back edits can
   produce identical mtimes (rare). Escalate to SHA-256 only when the

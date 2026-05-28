@@ -277,8 +277,8 @@ class TestPatchStyleEdit(_GuardTestBase):
 
     def test_bare_try_except_pass_is_denied(self) -> None:
         # try/except: pass is unambiguous at the source level; no need
-        # for runtime concatenation here — the detector regex is multi-
-        # line and won't match this single-string-literal in source.
+        # for runtime concatenation here — the detector is line-scan
+        # based and won't match this single-string-literal in source.
         target = self._existing_file()
         self._pre("Read", target)
         new_string = (
@@ -293,6 +293,89 @@ class TestPatchStyleEdit(_GuardTestBase):
         spec = out["hookSpecificOutput"]
         self.assertEqual(spec["permissionDecision"], "deny")
         self.assertIn("rule 09", spec["permissionDecisionReason"])
+
+    def test_bare_try_except_pass_with_rationale_is_allowed(self) -> None:
+        """Adjacent 'because ...' rationale must suppress the DENY.
+
+        Same allowance contract the noqa / ts-ignore branches use: the
+        ±1-line window around the offending span is checked for
+        RATIONALE_TOKENS. v0.18.1 routes the bare-pass check through a
+        new linear scanner, so this test pins the rationale-window
+        behaviour against the new code path.
+        """
+        target = self._existing_file()
+        self._pre("Read", target)
+        new_string = (
+            "try:\n"
+            "    risky()\n"
+            "except Exception:\n"
+            "    pass  # because upstream guarantees idempotency\n"
+        )
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertEqual(rc, 0)
+        self.assertIsNone(
+            out,
+            msg=f"try/except/pass with adjacent rationale must allow, got {out!r}",
+        )
+
+    def test_redos_pathological_input_completes_fast(self) -> None:
+        """Regression test for the v0.18.1 ReDoS fix.
+
+        Before v0.18.1 the bare ``try/except/pass`` detector was a
+        multi-line regex with non-greedy line repetition
+        (``(?:[ \\t]+[^\\n]*\\n)+?``) followed by a later anchor. On a
+        ``try:`` block that lacks the matching ``except:\\n    pass``
+        closure — i.e. ordinary, healthy Python code — that regex
+        exhibited catastrophic backtracking:
+
+            N=10 body lines: ~0.07 s
+            N=20 body lines: > 60 s (hung)
+            N=50+:           > 10 minutes (user-reported)
+
+        The whole hook process blocked, so every Edit/Write of a real
+        ``.py`` file containing ``try:`` froze Claude Code for minutes
+        to hours. The v0.18.1 linear scanner removes the regex; this
+        test pins the worst case at well under 1 second so any future
+        regression that re-introduces the regex fails loudly.
+
+        Wall time bound is generous (1 s on a slow CI runner) but
+        thousands of times faster than the broken version's runtime
+        on the same input.
+        """
+        import time
+
+        target = self._existing_file()
+        self._pre("Read", target)
+
+        # The pathological input: a ``try:`` header followed by 100
+        # indented body lines with no matching ``except:\\n    pass``
+        # ending. The old regex spent its time exploring every possible
+        # backtracking assignment of body lines to the ``(?:...)+?``
+        # group before the engine could conclude "no match".
+        new_string = "try:\n" + ("    body_line = 1\n" * 100) + "y = 0\n"
+
+        t0 = time.perf_counter()
+        rc, out, _ = self._pre_edit_with_new_string(target, new_string)
+        dt = time.perf_counter() - t0
+
+        # Hook must complete promptly — generous 5 s cap on CI to
+        # absorb Python-subprocess cold-start variance on Windows; the
+        # actual scan is sub-millisecond. The broken version exceeded
+        # 60 s on N=20 and minutes on N=100.
+        self.assertLess(
+            dt,
+            5.0,
+            msg=(
+                f"read_guard took {dt:.3f}s on a 100-line try-without-except "
+                "input — likely a ReDoS regression in the bare-pass detector"
+            ),
+        )
+        # And the linear scanner must NOT raise a false-positive DENY
+        # on this clean (no ``except: pass``) input.
+        self.assertIsNone(
+            out,
+            msg=f"try block without bare-pass closure must allow, got {out!r}",
+        )
 
     def test_bare_noqa_is_denied(self) -> None:
         target = self._existing_file()

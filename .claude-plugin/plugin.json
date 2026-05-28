@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.18 adds opt-in auto-GC on SessionStart via CC_ENSLAVER_AUTO_GC_DAYS=N: prunes session-state files older than N days, 24h rate-limited via marker file. Shares prune_old_sessions() with the manual /cc-enslaver:gc command; failing-open everywhere; marker file itself protected from GC.",
-  "version": "0.18.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.18.1 hotfix: replaces the catastrophic-backtracking regex in read_guard's bare try/except/pass detector with an O(N) linear scanner; pre-fix this regex hung PreToolUse(Edit|Write) for 10 minutes to hours on healthy .py files containing try: blocks. v0.18 adds opt-in auto-GC on SessionStart via CC_ENSLAVER_AUTO_GC_DAYS=N.",
+  "version": "0.18.1",
   "author": {
     "name": "skymanbp"
   },

@@ -280,13 +280,124 @@ def _emit_raw_deny(reason: str) -> None:
     sys.exit(0)
 
 
+BARE_TRY_EXCEPT_PASS_LABEL = (
+    "Python: bare try / except: pass (silent exception swallow)"
+)
+
+
+def _scan_bare_try_except_pass(text: str) -> tuple[int, int] | None:
+    """Linear, regex-free scan for the bare ``try/except/pass`` antipattern.
+
+    Returns ``(char_start, char_end)`` of the offending ``pass`` line on
+    hit, matching the span contract that ``_line_window`` expects; ``None``
+    on clean.
+
+    Pattern detected (single-level — nested try blocks are not parsed;
+    the goal is to flag the laziness signature, not to be a Python
+    parser)::
+
+        <indent>try:
+        ... any body lines ...
+        <same indent>except[ ...]:
+        <deeper indent>pass        # alone on its line
+
+    Why this replaces a regex (root cause — fixed in v0.18.1):
+      The earlier ``PATCH_MARKERS[0]`` used a multi-line regex of the form
+      ``try:\\n(?:[ \\t]+[^\\n]*\\n)+?except...pass``. The ``(?:...)+?``
+      non-greedy line repeater combined with the later anchor caused
+      **catastrophic backtracking** (ReDoS) on any healthy Python source
+      that contained a ``try:`` block without the bare-pass closure ---
+      i.e. essentially all real code. Measured locally:
+
+        N=10 body lines, no matching except/pass: ~0.07 s
+        N=20 body lines, no matching except/pass: > 60 s (timed out)
+
+      The exponent factor (>1000× per 10 lines) explained user-reported
+      hangs of 10 minutes to 1 hour every time the agent tried to
+      ``Edit``/``Write`` a non-trivial ``.py`` file containing ``try:``.
+      A single-pass line scanner is O(N) lines, has no backtracking, and
+      preserves the existing detection semantics (same DENY message, same
+      rationale-window check via ``_line_window`` on the returned span).
+    """
+    if "try:" not in text and "try :" not in text:
+        # Fast path: no possible ``try:`` header. Cheap pre-filter that
+        # makes the scanner free on the overwhelming majority of edits.
+        return None
+
+    lines = text.split("\n")
+    # Cumulative line-start offsets so the returned span lines up with
+    # the original string indices that ``_line_window`` slices into.
+    starts = [0]
+    for ln in lines[:-1]:
+        starts.append(starts[-1] + len(ln) + 1)
+
+    pending_try_indent: str | None = None
+    n = len(lines)
+    i = 0
+    while i < n:
+        line = lines[i]
+        body = line.lstrip(" \t").rstrip()
+        if not body:
+            i += 1
+            continue
+        indent = line[: len(line) - len(line.lstrip(" \t"))]
+
+        if pending_try_indent is None:
+            # ``try:`` (allow trailing whitespace, no comment / no body
+            # on the same line; ``try: ... ; pass`` is one-liner and not
+            # the antipattern we target).
+            if body == "try:" or body == "try :":
+                pending_try_indent = indent
+            i += 1
+            continue
+
+        # Inside a pending try-block. Look for ``except`` at the same
+        # indent column.
+        if indent == pending_try_indent and (
+            body == "except:"
+            or body == "except"
+            or body.startswith("except ")
+            or body.startswith("except(")
+        ):
+            # ``except`` header at matching indent: check whether the
+            # next non-blank line is bare ``pass`` indented deeper.
+            j = i + 1
+            while j < n and lines[j].lstrip(" \t").rstrip() == "":
+                j += 1
+            if j < n:
+                nxt = lines[j]
+                nxt_body = nxt.lstrip(" \t").rstrip()
+                nxt_indent = nxt[: len(nxt) - len(nxt.lstrip(" \t"))]
+                if nxt_body == "pass" and len(nxt_indent) > len(indent):
+                    return starts[j], starts[j] + len(lines[j])
+            pending_try_indent = None
+            i += 1
+            continue
+
+        # Dedent to or below the ``try:`` indent without seeing an
+        # ``except`` header: the try block has been closed (or is
+        # malformed). Drop the watch and re-process this line in the
+        # outer state — it may itself open a new ``try:`` block.
+        if len(indent) <= len(pending_try_indent):
+            pending_try_indent = None
+            continue
+
+        # Still inside the try body at deeper indent: keep scanning.
+        i += 1
+
+    return None
+
+
 # --------------------------------------------------------------------------- #
-# Patch-style markers (rule 09, v0.11.0).
+# Patch-style markers (rule 09, v0.11.0; v0.18.1 dropped the multi-line
+# try/except/pass regex in favour of the linear scanner above — see
+# ``_scan_bare_try_except_pass`` for the ReDoS root cause).
 #
-# Each entry is (label, regex). The regex matches the *bare* marker form.
-# We then look at a small surrounding window (±1 line) for a "why" comment;
-# if one is present, the marker is considered justified and we let it
-# through. Otherwise → DENY.
+# Each entry is (label, regex). All remaining entries are **single-line,
+# anchored** patterns that are O(N) safe (no nested quantifiers, no
+# multi-line backtracking). They match the *bare* marker form; the caller
+# looks at a small surrounding window (±1 line) for a "why" comment and
+# allows the marker through when a rationale is present.
 #
 # Design notes:
 #   - Detection is intentionally conservative: only the well-known
@@ -294,20 +405,10 @@ def _emit_raw_deny(reason: str) -> None:
 #     match) cost a soft-layer reminder; false positives (denying a
 #     legitimate use) cost the agent a turn. Conservative regex set keeps
 #     false-positive rate low.
-#   - The "try: ... except: pass" detector spans newlines because the
-#     bare-pass idiom always does.
+#   - The ``try/except: pass`` detector lives outside this list because
+#     it is intrinsically multi-line and must remain backtrack-free.
 # --------------------------------------------------------------------------- #
 PATCH_MARKERS: list[tuple[str, re.Pattern[str]]] = [
-    (
-        "Python: bare try / except: pass (silent exception swallow)",
-        re.compile(
-            r"(^|\n)[ \t]*try[ \t]*:[ \t]*\n"
-            r"(?:[ \t]+[^\n]*\n)+?"
-            r"[ \t]*except\b[^:\n]*:[ \t]*\n"
-            r"[ \t]*pass[ \t]*(?:\n|$)",
-            re.MULTILINE,
-        ),
-    ),
     (
         "Python: # noqa without rationale",
         re.compile(r"#[ \t]*noqa(?::[ \t]*[A-Z]+\d+(?:[ \t]*,[ \t]*[A-Z]+\d+)*)?[ \t]*(?:\n|$)"),
@@ -383,9 +484,31 @@ def _find_unjustified_patch_marker(new_string: str) -> tuple[str, str] | None:
     """Scan `new_string` for the first unjustified patch marker.
 
     Returns (label, surrounding_snippet) on hit, or None on clean.
+
+    Order of checks:
+      1. Linear (regex-free) scan for bare ``try/except: pass``. Run
+         first because it is the only intrinsically multi-line pattern
+         and replaced a catastrophic-backtracking regex in v0.18.1.
+      2. Single-line, anchored regexes in ``PATCH_MARKERS``. All O(N)
+         safe by construction.
+
+    Both stages reuse the same ``_line_window`` + ``_has_rationale``
+    rationale-allowance check, so adjacent ``because`` / ``原因`` / etc.
+    comments suppress the DENY exactly as before the refactor.
     """
     if not new_string:
         return None
+
+    # Stage 1: bare try/except/pass via linear scan (no ReDoS).
+    bare_hit = _scan_bare_try_except_pass(new_string)
+    if bare_hit is not None:
+        start, end = bare_hit
+        window = _line_window(new_string, start, end)
+        if not _has_rationale(window):
+            short = window if len(window) <= 240 else window[:237] + "..."
+            return BARE_TRY_EXCEPT_PASS_LABEL, short
+
+    # Stage 2: single-line patch markers.
     for label, pat in PATCH_MARKERS:
         for m in pat.finditer(new_string):
             window = _line_window(new_string, m.start(), m.end())

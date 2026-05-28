@@ -714,5 +714,331 @@ class TestBilingualRendering(_EdictsBase):
         self.assertNotIn("圣旨", reason)
 
 
+# --------------------------------------------------------------------------- #
+# v0.19.0 — cwd fallback for edicts path resolution.
+#
+# When `CLAUDE_PROJECT_DIR` is unset (which happens on Windows when
+# Claude Code's Bash tool subprocess doesn't propagate the env var
+# to hook subprocesses), the loader / writer falls back to cwd if
+# cwd looks like a project root (has `.git/` or `.claude/`). Without
+# that fallback, the project-level edicts.toml was silently invisible
+# whenever the hook subprocess lost the env var, and edicts only
+# worked from `~/.claude` even when the user had a project-level
+# edicts.toml sitting right next to them.
+#
+# The tests below pin each surface area of the fallback:
+#   - `_looks_like_project_root` marker semantics (.git / .claude)
+#   - `edicts_path()` (loader) precedence ordering
+#   - `default_project_path()` (writer) precedence ordering
+#   - manage_edicts.py CLI subprocess uses cwd when env unset
+# --------------------------------------------------------------------------- #
+class TestCwdFallback(unittest.TestCase):
+    """v0.19.0 — cwd fallback semantics for edicts path resolution."""
+
+    def setUp(self) -> None:
+        self.proj = Path(tempfile.mkdtemp(prefix="ccens-cwd-proj-"))
+        self.fake_home = Path(tempfile.mkdtemp(prefix="ccens-cwd-home-"))
+        # Build minimal env that explicitly *omits* CLAUDE_PROJECT_DIR
+        # so the cwd fallback path is the one under test. HOME is
+        # redirected so the loader doesn't pick up the real user's
+        # ~/.claude during the personal-global fallback step.
+        self.env_no_proj = {
+            "HOME": str(self.fake_home),
+            "USERPROFILE": str(self.fake_home),
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.proj, ignore_errors=True)
+        shutil.rmtree(self.fake_home, ignore_errors=True)
+
+    def _mark_project_root(self, kind: str) -> None:
+        """Create the project-root marker on self.proj. `kind` is
+        "git", "claude", or "both"."""
+        if kind in ("git", "both"):
+            (self.proj / ".git").mkdir(exist_ok=True)
+        if kind in ("claude", "both"):
+            (self.proj / ".claude").mkdir(exist_ok=True)
+
+    def _write_edicts_in(self, root: Path, body: str) -> Path:
+        p = root / ".claude" / "cc-enslaver" / "edicts.toml"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(textwrap.dedent(body), encoding="utf-8")
+        return p
+
+    def _with_env_and_cwd(self, fn, *, cwd: Path, extra_env: dict | None = None):
+        """Call `fn` with self.env_no_proj applied (+ optional extras)
+        and the working dir temporarily set to `cwd`. Restores both
+        on exit. Necessary because the loader reads cwd via
+        `Path.cwd()` and the env via `os.environ` at call time.
+        """
+        import os
+        old_env = dict(os.environ)
+        old_cwd = os.getcwd()
+        env = dict(self.env_no_proj)
+        if extra_env:
+            env.update(extra_env)
+        try:
+            os.environ.clear()
+            os.environ.update(env)
+            os.chdir(cwd)
+            return fn()
+        finally:
+            os.chdir(old_cwd)
+            os.environ.clear()
+            os.environ.update(old_env)
+
+    # ---------------- marker semantics ---------------- #
+
+    def test_looks_like_project_root_with_git_marker(self) -> None:
+        self._mark_project_root("git")
+        self.assertTrue(edicts_lib._looks_like_project_root(self.proj))
+
+    def test_looks_like_project_root_with_claude_dir_marker(self) -> None:
+        self._mark_project_root("claude")
+        self.assertTrue(edicts_lib._looks_like_project_root(self.proj))
+
+    def test_looks_like_project_root_without_any_marker(self) -> None:
+        # Empty tmp dir — no .git, no .claude.
+        self.assertFalse(edicts_lib._looks_like_project_root(self.proj))
+
+    def test_looks_like_project_root_with_git_file_worktree(self) -> None:
+        # Git worktrees use a `.git` *file* (not directory). The
+        # marker check uses `.exists()` so this still counts.
+        (self.proj / ".git").write_text(
+            "gitdir: /elsewhere/.git/worktrees/x\n", encoding="utf-8",
+        )
+        self.assertTrue(edicts_lib._looks_like_project_root(self.proj))
+
+    # ---------------- loader (edicts_path) ---------------- #
+
+    def test_loader_uses_cwd_when_env_unset_and_marker_present(self) -> None:
+        self._mark_project_root("git")
+        wanted = self._write_edicts_in(self.proj, """
+            [[edicts]]
+            id = "E01"
+            text = "discovered via cwd fallback"
+        """)
+        found = self._with_env_and_cwd(edicts_lib.edicts_path, cwd=self.proj)
+        self.assertEqual(found, wanted)
+
+    def test_loader_uses_cwd_when_env_unset_and_dotclaude_alone_is_marker(self) -> None:
+        # The act of writing edicts.toml under .claude/ creates the
+        # .claude/ directory, which is itself a valid project-root
+        # marker. This is intentional: a project that has a
+        # cc-enslaver config dir is by definition a project Claude
+        # Code has touched, so cwd is a safe fallback even without .git.
+        wanted = self._write_edicts_in(self.proj, """
+            [[edicts]]
+            id = "E01"
+            text = "marker comes from .claude/ itself"
+        """)
+        found = self._with_env_and_cwd(edicts_lib.edicts_path, cwd=self.proj)
+        self.assertEqual(found, wanted)
+
+    def test_loader_returns_none_when_env_unset_and_no_marker(self) -> None:
+        # cwd is just a random tmp dir — no .git, no .claude. The
+        # loader must NOT silently start reading edicts.toml from
+        # cwd; the marker requirement is what prevents accidental
+        # discovery in `~/Downloads` etc.
+        # (No edicts written anywhere reachable.)
+        found = self._with_env_and_cwd(edicts_lib.edicts_path, cwd=self.proj)
+        self.assertIsNone(found)
+
+    def test_loader_env_var_takes_precedence_over_cwd(self) -> None:
+        # Put a different edicts.toml under CLAUDE_PROJECT_DIR vs the
+        # cwd; verify the env-var location wins.
+        env_proj = Path(tempfile.mkdtemp(prefix="ccens-cwd-env-"))
+        try:
+            (env_proj / ".git").mkdir()
+            env_file = self._write_edicts_in(env_proj, """
+                [[edicts]]
+                id = "ENV"
+                text = "env wins"
+            """)
+            self._mark_project_root("git")
+            self._write_edicts_in(self.proj, """
+                [[edicts]]
+                id = "CWD"
+                text = "cwd loses"
+            """)
+            found = self._with_env_and_cwd(
+                edicts_lib.edicts_path,
+                cwd=self.proj,
+                extra_env={"CLAUDE_PROJECT_DIR": str(env_proj)},
+            )
+            self.assertEqual(found, env_file)
+        finally:
+            shutil.rmtree(env_proj, ignore_errors=True)
+
+    def test_loader_falls_through_to_home_when_cwd_marker_present_but_no_file(self) -> None:
+        # cwd is a valid project root but has no edicts.toml; loader
+        # should continue to the personal-global fallback rather than
+        # synthesising a path that doesn't exist.
+        self._mark_project_root("git")
+        home_file = self._write_edicts_in(self.fake_home, """
+            [[edicts]]
+            id = "HOME"
+            text = "fallback hit"
+        """)
+        found = self._with_env_and_cwd(edicts_lib.edicts_path, cwd=self.proj)
+        self.assertEqual(found, home_file)
+
+    # ---------------- writer (default_project_path) ---------------- #
+
+    def test_writer_uses_cwd_when_env_unset_and_marker_present(self) -> None:
+        self._mark_project_root("claude")
+        wanted = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        got = self._with_env_and_cwd(
+            edicts_lib.default_project_path, cwd=self.proj,
+        )
+        self.assertEqual(got, wanted)
+
+    def test_writer_returns_none_when_env_unset_and_no_marker(self) -> None:
+        # Without env var AND without a cwd marker, the writer must
+        # return None so callers can surface an actionable error
+        # (manage_edicts.py exits 2 with a diagnostic).
+        got = self._with_env_and_cwd(
+            edicts_lib.default_project_path, cwd=self.proj,
+        )
+        self.assertIsNone(got)
+
+    def test_writer_env_var_takes_precedence_over_cwd(self) -> None:
+        env_proj = Path(tempfile.mkdtemp(prefix="ccens-cwd-env-"))
+        try:
+            self._mark_project_root("git")
+            got = self._with_env_and_cwd(
+                edicts_lib.default_project_path,
+                cwd=self.proj,
+                extra_env={"CLAUDE_PROJECT_DIR": str(env_proj)},
+            )
+            self.assertEqual(
+                got,
+                env_proj / ".claude" / "cc-enslaver" / "edicts.toml",
+            )
+        finally:
+            shutil.rmtree(env_proj, ignore_errors=True)
+
+
+class TestManageCLICwdFallback(unittest.TestCase):
+    """v0.19.0 — manage_edicts.py CLI honours cwd fallback when
+    `CLAUDE_PROJECT_DIR` is absent from the subprocess environment.
+
+    The CLI is the surface users hit via /cc-enslaver:edict or
+    direct invocation; the loader-level unit tests above pin the
+    library semantics, but only an actual subprocess exercise
+    catches argparse / env-propagation drift between the writer
+    and the loader.
+    """
+
+    def setUp(self) -> None:
+        self.proj = Path(tempfile.mkdtemp(prefix="ccens-cli-cwd-proj-"))
+        self.fake_home = Path(tempfile.mkdtemp(prefix="ccens-cli-cwd-home-"))
+        # Mark the tmp dir as a project root so cwd fallback elects it.
+        (self.proj / ".git").mkdir()
+        # Stripped-down env: deliberately omit CLAUDE_PROJECT_DIR. HOME
+        # is redirected so --global / fallback writes land in our sandbox.
+        self.env_no_proj = {
+            "HOME": str(self.fake_home),
+            "USERPROFILE": str(self.fake_home),
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", ""),
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.proj, ignore_errors=True)
+        shutil.rmtree(self.fake_home, ignore_errors=True)
+
+    def _run(self, *args: str, cwd: Path | None = None, with_env_var: bool = False):
+        """Invoke manage_edicts.py as a real subprocess.
+
+        cwd: passed verbatim to subprocess.run (this is the lever the
+             fallback tests use to control what `Path.cwd()` returns
+             inside the child).
+        with_env_var: when True, also injects CLAUDE_PROJECT_DIR=self.proj
+                      so the env-var path wins (used for precedence test).
+        """
+        import subprocess
+        env = dict(self.env_no_proj)
+        if with_env_var:
+            env["CLAUDE_PROJECT_DIR"] = str(self.proj)
+        proc = subprocess.run(
+            [sys.executable, MANAGE, *args],
+            capture_output=True,
+            env=env,
+            cwd=str(cwd) if cwd else None,
+        )
+        return (
+            proc.returncode,
+            proc.stdout.decode("utf-8", errors="replace"),
+            proc.stderr.decode("utf-8", errors="replace"),
+        )
+
+    def test_add_writes_to_cwd_when_env_unset_and_cwd_is_project_root(self) -> None:
+        rc, out, err = self._run(
+            "add", "E01", "via cwd fallback",
+            "--must", "--deny-bash", "x",
+            cwd=self.proj,
+        )
+        self.assertEqual(rc, 0, msg=f"stdout={out!r} stderr={err!r}")
+        # File materialised under cwd, not under HOME.
+        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        home_f = self.fake_home / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.assertTrue(proj_f.is_file(), msg="expected write at cwd path")
+        self.assertFalse(home_f.is_file(), msg="must not have leaked to HOME")
+        self.assertIn("E01", proj_f.read_text(encoding="utf-8"))
+
+    def test_add_exits_with_diagnostic_when_env_unset_and_cwd_not_project_root(self) -> None:
+        # Cwd lacks .git / .claude → writer cannot resolve a path →
+        # exit 2 with an actionable diagnostic listing every attempted
+        # fallback so the operator can fix it without guessing.
+        non_root = Path(tempfile.mkdtemp(prefix="ccens-not-proj-"))
+        try:
+            rc, out, err = self._run(
+                "add", "E01", "should fail",
+                "--must", "--deny-bash", "x",
+                cwd=non_root,
+            )
+            self.assertEqual(rc, 2, msg=f"stdout={out!r} stderr={err!r}")
+            self.assertIn("CLAUDE_PROJECT_DIR", err)
+            self.assertIn("cwd", err.lower())
+            self.assertIn("--global", err)
+        finally:
+            shutil.rmtree(non_root, ignore_errors=True)
+
+    def test_env_var_takes_precedence_over_cwd_in_cli(self) -> None:
+        # Both CLAUDE_PROJECT_DIR and a project-root cwd point to *the
+        # same* tmp dir here, which is fine for a precedence assertion:
+        # the file lands once at that location, and we just check the
+        # write succeeded without surprising errors.
+        rc, out, err = self._run(
+            "add", "E01", "env path takes precedence",
+            "--must", "--deny-bash", "x",
+            cwd=self.proj,
+            with_env_var=True,
+        )
+        self.assertEqual(rc, 0, msg=f"stdout={out!r} stderr={err!r}")
+        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.assertTrue(proj_f.is_file())
+
+    def test_list_via_cwd_after_cwd_add(self) -> None:
+        # Round-trip: add via cwd fallback, then list (also relying
+        # on cwd fallback) should see the new edict.
+        self._run("add", "E01", "round trip", "--must", "--deny-bash", "x",
+                  cwd=self.proj)
+        rc, out, _ = self._run("list", cwd=self.proj)
+        self.assertEqual(rc, 0)
+        self.assertIn("[E01]", out)
+        self.assertIn("round trip", out)
+
+    def test_path_subcommand_reports_cwd_location_when_env_unset(self) -> None:
+        # `path` with no existing file should point at the cwd-derived
+        # write target, not at $HOME, so the operator knows where the
+        # writer would land.
+        rc, out, _ = self._run("path", cwd=self.proj)
+        self.assertEqual(rc, 0)
+        self.assertIn("does not exist yet", out)
+        self.assertIn(str(self.proj), out)
+
+
 if __name__ == "__main__":
     unittest.main()

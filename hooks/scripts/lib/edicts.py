@@ -82,16 +82,75 @@ class Edict:
         )
 
 
-def edicts_path() -> Path | None:
-    """Resolve the edicts.toml location, or None if not found.
+def _looks_like_project_root(p: Path) -> bool:
+    """True if `p` has a marker that strongly suggests it's a project root.
 
-    Tries CLAUDE_PROJECT_DIR first (project-level, team-shareable) then
-    ~/.claude (personal fallback). Returns the first existing file.
+    Two markers are sufficient:
+      - `.git` exists (directory in a normal clone; FILE in a worktree
+        or submodule — `Path.exists()` covers both).
+      - `.claude/` exists as a directory (Claude Code per-project
+        config dir).
+
+    Either alone is enough; we don't require both because some
+    projects use one without the other (a fresh clone before
+    `.claude/` is created; a `.claude/`-only directory for
+    non-git-tracked workspaces).
     """
+    try:
+        if (p / ".git").exists():
+            return True
+        if (p / ".claude").is_dir():
+            return True
+    except OSError:
+        # Defensive: permission errors / network FS hiccups. Treat as
+        # "not a project root" rather than crashing path resolution.
+        return False
+    return False
+
+
+def _cwd_if_project_root() -> Path | None:
+    """Return cwd if it looks like a project root, else None.
+
+    Used as a fallback path source when `CLAUDE_PROJECT_DIR` is unset
+    (which happens when Claude Code's Bash tool subprocess doesn't
+    inherit the env var — verified to occur on Windows). See
+    `edicts_path()` / `default_project_path()` for the call sites.
+    """
+    try:
+        cwd = Path.cwd()
+    except OSError:
+        return None
+    return cwd if _looks_like_project_root(cwd) else None
+
+
+def edicts_path() -> Path | None:
+    """Resolve the edicts.toml location to READ, or None if not found.
+
+    Resolution order (first existing file wins):
+      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml``
+      2. ``$(cwd)/.claude/cc-enslaver/edicts.toml`` — only when cwd has
+         a project-root marker (``.git`` / ``.claude``). v0.18.1 added
+         this step.
+      3. ``${HOME}/.claude/cc-enslaver/edicts.toml`` — personal global.
+
+    Rationale for the cwd fallback (v0.18.1): Claude Code's Bash tool
+    does not reliably propagate ``CLAUDE_PROJECT_DIR`` to subprocesses
+    on Windows, so the loader (used by hooks) and the writer (used by
+    ``manage_edicts.py``) silently failed to see project-level edicts
+    even when run from the project root. cwd is reliable in that
+    context and `_looks_like_project_root` keeps the heuristic narrow
+    enough to avoid false positives in ``~/Downloads`` etc.
+    """
+    candidates: list[Path] = []
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
-    candidates = []
     if proj:
         candidates.append(Path(proj) / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME)
+    cwd_root = _cwd_if_project_root()
+    if cwd_root is not None:
+        cwd_candidate = cwd_root / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME
+        # Avoid duplicating step 1 if env var already pointed at cwd.
+        if not candidates or candidates[0] != cwd_candidate:
+            candidates.append(cwd_candidate)
     candidates.append(Path.home() / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME)
     for c in candidates:
         if c.is_file():
@@ -100,11 +159,25 @@ def edicts_path() -> Path | None:
 
 
 def default_project_path() -> Path | None:
-    """The recommended write-location for new edicts (project-level)."""
+    """The recommended location to WRITE a new project edict file.
+
+    Resolution order:
+      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml``
+      2. ``$(cwd)/.claude/cc-enslaver/edicts.toml`` — only when cwd
+         looks like a project root (v0.18.1).
+      3. ``None`` — caller must surface an error (e.g. require
+         ``--global`` or set the env var). ``manage_edicts.py``
+         exits 2 with an actionable diagnostic in that case.
+
+    Same rationale as `edicts_path()` for the cwd fallback step.
+    """
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
-    if not proj:
-        return None
-    return Path(proj) / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME
+    if proj:
+        return Path(proj) / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME
+    cwd_root = _cwd_if_project_root()
+    if cwd_root is not None:
+        return cwd_root / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME
+    return None
 
 
 def _warn(msg: str) -> None:

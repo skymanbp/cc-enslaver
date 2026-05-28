@@ -17,6 +17,79 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.19.0] — 2026-05-28
+
+**Edicts cwd fallback for Windows / env-var-stripped subprocesses.**
+
+Project-level `edicts.toml` was silently invisible to hook subprocesses
+and to `manage_edicts.py` whenever `CLAUDE_PROJECT_DIR` failed to
+propagate — verified to occur on Windows when Claude Code's Bash tool
+spawns child processes. Symptom: a user creates an edict via
+`/cc-enslaver:edict add ...`, it appears in the soft-layer injection
+(because `inject_context.py` had the env var), but the `PreToolUse`
+hooks miss it and the user gets no `must` enforcement. Or worse: the
+`add` command itself fails with "set CLAUDE_PROJECT_DIR" even though
+the user is sitting in the project root.
+
+### Added
+
+- `_looks_like_project_root(path)` in
+  [`hooks/scripts/lib/edicts.py`](hooks/scripts/lib/edicts.py): true
+  when `.git` exists (directory **or** file, so worktrees/submodules
+  count) or `.claude/` exists as a directory. Either marker alone is
+  sufficient — a brand-new clone with no `.claude/` yet still works,
+  and a `.claude/`-only workspace without git tracking also works.
+- `_cwd_if_project_root()`: returns `Path.cwd()` if it has a marker,
+  else `None`. Used by both the loader and the writer.
+- **Loader (`edicts_path`)** new resolution order:
+  1. `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
+  2. `$(cwd)/.claude/cc-enslaver/edicts.toml` — **new**, only when
+     cwd has a project-root marker
+  3. `${HOME}/.claude/cc-enslaver/edicts.toml` — personal global
+- **Writer (`default_project_path`)** falls back to cwd under the same
+  marker conditions; returns `None` only when neither env var nor cwd
+  marker is available.
+- **CLI (`manage_edicts.py`)** diagnostic at `_project_path()` now
+  enumerates every fallback that was tried and what would fix each,
+  rather than the previous "set `CLAUDE_PROJECT_DIR`" one-liner.
+
+### Why a narrow heuristic
+
+`_looks_like_project_root` checks two well-known markers and nothing
+else. This keeps the fallback safe in `~/Downloads`, `/tmp`, or other
+incidental working directories that don't carry a project marker.
+The trade-off — a user with no `.git` and no `.claude/` who still
+wants project-scoped edicts must `--global` or set the env var
+explicitly — is accepted: silent misclassification is worse than an
+actionable diagnostic.
+
+### Tests
+
+17 new tests in `tests/test_edicts.py`:
+
+- `TestCwdFallback` (12): marker semantics (`.git` dir / `.git` file
+  worktree / `.claude/` dir / neither), loader precedence ordering,
+  writer precedence ordering, fall-through to HOME when cwd marker
+  exists but no edicts file, env-var-vs-cwd precedence.
+- `TestManageCLICwdFallback` (5): subprocess-level coverage — `add`
+  writes to cwd when env unset, `add` exits 2 with diagnostic when
+  cwd lacks a marker, env-var precedence in the CLI, round-trip
+  `add` + `list` via cwd fallback, `path` subcommand reports cwd
+  location.
+
+Full test suite (203 tests, was 186) passes in 23.6 s.
+
+### Compatibility
+
+- Existing tests pre-set `CLAUDE_PROJECT_DIR`; their behaviour is
+  unchanged because the env var is step 1 in the resolution order.
+- Personal-global users (`~/.claude/cc-enslaver/edicts.toml` with no
+  project file) are unaffected — they hit step 3 either way.
+- The new fallback never overrides an explicit user choice; it only
+  fires when the env var is genuinely absent.
+
+---
+
 ## [0.18.1] — 2026-05-28
 
 **Hotfix: catastrophic ReDoS in PATCH_MARKERS[0] (bare try/except/pass).**

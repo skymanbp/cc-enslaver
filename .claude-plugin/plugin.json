@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.18.1 hotfix: replaces the catastrophic-backtracking regex in read_guard's bare try/except/pass detector with an O(N) linear scanner; pre-fix this regex hung PreToolUse(Edit|Write) for 10 minutes to hours on healthy .py files containing try: blocks. v0.18 adds opt-in auto-GC on SessionStart via CC_ENSLAVER_AUTO_GC_DAYS=N.",
-  "version": "0.18.1",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.19 adds cwd-fallback for project edicts path resolution: when CLAUDE_PROJECT_DIR fails to propagate (verified on Windows Bash subprocesses), the loader and manage_edicts CLI fall back to cwd if cwd has a .git or .claude/ marker, fixing silent project-edict invisibility. v0.18.1 hotfix: replaces catastrophic-backtracking regex in read_guard's bare try/except/pass detector with an O(N) linear scanner.",
+  "version": "0.19.0",
   "author": {
     "name": "skymanbp"
   },

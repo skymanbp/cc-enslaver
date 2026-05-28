@@ -62,9 +62,17 @@ _HEADER = """# cc-enslaver — 圣旨 (Imperial Edicts) file
 def _project_path() -> Path:
     p = edicts_lib.default_project_path()
     if p is None:
+        # v0.18.1 — diagnostic now lists every fallback that was tried
+        # so the operator can pick the right fix without guessing.
         sys.stderr.write(
-            "CLAUDE_PROJECT_DIR is not set; cannot resolve project edicts.toml. "
-            "Set CLAUDE_PROJECT_DIR or use --global.\n"
+            "Could not resolve project edicts.toml. Tried:\n"
+            "  1. $CLAUDE_PROJECT_DIR — not set\n"
+            "  2. cwd as project root — no .git/ or .claude/ marker here\n"
+            "\n"
+            "Fix one of:\n"
+            "  • cd into the project root (containing .git/ or .claude/), or\n"
+            "  • set CLAUDE_PROJECT_DIR=/path/to/project, or\n"
+            "  • pass --global to write to ~/.claude/cc-enslaver/edicts.toml.\n"
         )
         sys.exit(2)
     return p

@@ -21,12 +21,15 @@
 | 本轮做了 Edit 但思维链无"根因 / 架构 / 方案 / 连带 / 风险" ≥ 3 项 | rule 08 | Stop layer (e) BLOCK |
 | 本轮做了 Edit 但回复无"根因 + 影响 + 方案"三件套 | rule 09 | Stop layer (f) BLOCK |
 | 声明"I edited X.py / 我修改了 Y.md"但磁盘 mtime 未变 / 声明"created Z"但 Z 不存在 | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
+| 含 done-claim 的回复末尾缺 `tldr` / 大白话总结 | v0.20 回复 schema | **Stop layer (h) v0.20 BLOCK** |
 | 留 TODO / FIXME 但说"完成" / 做了用户没要求的重构 | rule 07 忠实性 | Stop layer (d) BLOCK |
 
-## 收尾骨架（修改类任务必走）
+## 收尾骨架（YAML schema · 必走）
 
-回复末尾必含 5 段，分别带 🔍 / ✏️ / ✅ / 📋 / 🚨 标记 —— 见 SessionStart 注入第 3 节。
+回复末尾输出一个 ```yaml `cc-enslaver:` 块 —— 固定 schema，见 SessionStart 注入第 3 节。
+修改类用全量（改前 / 改中 / 收敛 / 忠实 / 收尾），非修改类用精简形（收敛 / 忠实 / tldr）。
+**含 done-claim 的回复必含 `tldr` 字段（一句大白话），否则 Stop layer (h) BLOCK。**
 
-被 Stop block 时：reason 是一个 6 行状态表，找 ❌ 那一行 → 读 Recovery → 修，不要重读整个 prompt。
+被 Stop block 时：reason 是一个状态表 + 一行「大白话」，找 ❌ 那一行 → 读 Recovery → 修，不要重读整个 prompt。
 
 完整规则 → [`rules/`](rules/) · 索引 → [`docs/RULES.md`](docs/RULES.md)

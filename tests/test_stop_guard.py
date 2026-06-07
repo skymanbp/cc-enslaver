@@ -9,6 +9,12 @@ Covers:
   - Empty payload / missing message → ALLOW (fail open)
   - Malformed stdin           → ALLOW (fail open, log to stderr)
   - Transcript fallback       → reads last assistant message from JSONL
+  - Layer (h) TL;DR (v0.20)   → done-claim without 大白话 / tldr → BLOCK
+
+Note (v0.20): layer (h) requires every done-claim reply to surface a
+plain-language TL;DR marker (`tldr:` / `大白话` / `TL;DR`). Every
+"expects allow" fixture below therefore carries a tldr line; without it
+the reply would (correctly) block at (h).
 """
 
 from __future__ import annotations
@@ -85,13 +91,15 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
     def test_done_with_evidence_and_convergence_marker_allows(self) -> None:
         # 重触发 is both an evidence pattern AND a convergence marker.
         # v0.8.0: also needs rule-07 fidelity marker.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "已修复并验证：\n\n"
             "$ pytest tests/\n"
             "Ran 35 tests in 4.5s\n"
             "OK\n\n"
             "重触发原症状: 已通过。\n"
-            "任务忠实: 用户原始请求只有'修复 X'，已完成，无降级、无超范围。"
+            "任务忠实: 用户原始请求只有'修复 X'，已完成，无降级、无超范围。\n"
+            "tldr: 修了 X，测试全过，可直接 ship。"
         )
         rc, out, _ = self._stop(msg)
         self.assertEqual(rc, 0)
@@ -100,7 +108,11 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
     def test_done_with_re_triggered_keyword_allows(self) -> None:
         # 重触发 alone is a convergence marker.
         # v0.8.0: also needs rule-07 fidelity marker.
-        msg = "完成了。重触发原症状后异常消失。无遗漏。"
+        # v0.20: also needs a tldr (layer h).
+        msg = (
+            "完成了。重触发原症状后异常消失。无遗漏。\n"
+            "tldr: 改完了，异常没了。"
+        )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
 
@@ -117,13 +129,15 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
     def test_done_with_two_self_questions_allows(self) -> None:
         # Agent answered Q1 (真解决) + Q2 (更好方案) → quiz threshold met.
         # v0.8.0: also needs rule-07 fidelity coverage.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "fixed.\n\n"
             "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
             "**真的解决了吗?** Yes — the failing input now returns 200.\n"
             "**有没有更好的方案?** Considered using a thread lock instead, "
             "but the existing async lock is already part of the architecture.\n"
-            "Task fidelity: covered all requested items, no degradation."
+            "Task fidelity: covered all requested items, no degradation.\n"
+            "tldr: race fixed via the existing async lock, all green."
         )
         rc, out, _ = self._stop(msg)
         self.assertEqual(rc, 0)
@@ -132,10 +146,12 @@ class TestDoneClaimWithEvidenceAndQuiz(_StopBase):
     def test_done_with_explicit_rule06_mention_allows(self) -> None:
         # Explicit "rule 06" + evidence is enough (single marker hit).
         # v0.8.0: also needs rule-07 fidelity marker.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "Done.\n$ pytest passed (60/60)\n"
             "Ran rule 06 self-check; all 5 steps verified.\n"
-            "Rule 07 task fidelity: covered all requested items, no degradation."
+            "Rule 07 task fidelity: covered all requested items, no degradation.\n"
+            "tldr: all 60 tests pass, shipped."
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
@@ -174,13 +190,15 @@ class TestHedgedCompletion(_StopBase):
         # Hedge in unrelated paragraph, far from the done-claim, with proper
         # evidence + quiz markers nearby. Should not trip the proximity check.
         # v0.8.0: also needs rule-07 fidelity marker.
+        # v0.20: also needs a tldr (layer h), kept far from the hedge.
         msg = (
             "I think this race condition usually doesn't reproduce — "
             "hard to test in isolation.\n\n"
             "But anyway, $ pytest passed (35/35), 重触发原症状 confirms "
             "the lock fixes the race, **真解决** confirmed via the new "
             "concurrent test, and the existing tests still pass. "
-            "Task fidelity: covered all requested items. fixed."
+            "Task fidelity: covered all requested items. fixed.\n"
+            "tldr: lock fixes the race, all tests pass."
         )
         rc, out, _ = self._stop(msg)
         # The hedge "I think" is more than 50 chars away from "fixed".
@@ -213,39 +231,47 @@ class TestFidelityLayer(_StopBase):
 
     def test_explicit_rule07_marker_passes(self) -> None:
         # Single 'rule 07' mention is enough.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "Fixed.\n$ pytest passed.\n重触发: ok.\n"
-            "rule 07: covered all sub-items, no scope creep."
+            "rule 07: covered all sub-items, no scope creep.\n"
+            "tldr: all sub-items done, nothing extra."
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out, msg=f"single rule-07 marker must pass, got {out!r}")
 
     def test_chinese_task_fidelity_marker_passes(self) -> None:
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "已解决。\n$ pytest passed (35/35).\n重触发原症状: ok.\n"
-            "任务忠实自答: 用户原始请求只有'修 X'一项，已完成。"
+            "任务忠实自答: 用户原始请求只有'修 X'一项，已完成。\n"
+            "tldr: 修了 X，没别的。"
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
 
     def test_no_degradation_english_passes(self) -> None:
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "Done.\n$ pytest passed.\nRan rule 06 self-check.\n"
             "Reviewed against the original request: no degradation, "
-            "no omission, no scope creep."
+            "no omission, no scope creep.\n"
+            "tldr: did exactly what was asked, nothing degraded."
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out)
 
     def test_two_fidelity_questions_pass(self) -> None:
         # Coverage Q + standard Q answered → 2 of 3 quiz threshold met.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "Fixed.\n\n"
             "$ pytest -v\nRan 22 tests, 22 passed.\n\n"
             "重触发: ok。\n\n"
             "**覆盖性**: 用户原始请求拆成两项 (修 X / 加测试)，均完成。\n"
             "**标准性**: 用户用了'强制'一词，已落实为钩子拦截 (file:line)，"
-            "不是文档建议。"
+            "不是文档建议。\n"
+            "tldr: 两项都做了，'强制'落地为硬钩子。"
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out, msg="2 of 3 fidelity questions should pass Layer (d)")
@@ -269,11 +295,13 @@ class TestFidelityLayer(_StopBase):
     def test_checklist_emoji_form_passes(self) -> None:
         # The agent enumerated original-request items with ✅ check
         # marks — that's the per-item form rule 07 endorses.
+        # v0.20: also needs a tldr (layer h).
         msg = (
             "完成了。\n$ pytest passed.\n重触发: ok.\n\n"
             "原始请求逐项核对:\n"
             "- ✅ 完成: 修复 X (auth.py:42)\n"
-            "- ✅ 完成: 加测试 (test_auth.py)"
+            "- ✅ 完成: 加测试 (test_auth.py)\n"
+            "tldr: 两项都打勾完成。"
         )
         rc, out, _ = self._stop(msg)
         self.assertIsNone(out, msg=f"emoji checklist should pass, got {out!r}")
@@ -309,11 +337,13 @@ class TestRule08Layer(_StopBase):
         # No edit this turn — layer (e) MUST silently allow even if the
         # message would otherwise lack rule-08 markers. Message includes
         # rule 06 + 07 markers so it survives layers (a-d).
+        # v0.20: also needs a tldr (layer h, which is NOT edit-gated).
         msg = (
             "已修复并验证。\n"
             "$ pytest passed (35/35).\n"
             "重触发原症状: 已通过。\n"
-            "任务忠实: 用户原始请求只有一项，已完成，无降级、无超范围。"
+            "任务忠实: 用户原始请求只有一项，已完成，无降级、无超范围。\n"
+            "tldr: 一项需求修完了。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(
@@ -338,6 +368,7 @@ class TestRule08Layer(_StopBase):
         self.assertIn("rule 08", out["reason"])
 
     def test_edit_turn_with_explicit_rule08_marker_passes(self) -> None:
+        # v0.20: also needs a tldr (layer h).
         self._seed_edit_turn(turn_count=5)
         msg = (
             "已修复。\n"
@@ -347,7 +378,8 @@ class TestRule08Layer(_StopBase):
             "rule 08: 改前必读 (auth.py 第 3 次工具调用 Read 完整) + 写前必想 "
             "(根因 / 影响 / 方案 三件套见下).\n"
             "rule 09: 根因 = 缺锁 (auth.py:142); 影响 = routes/login.py:88 调用链; "
-            "方案 = 复用 session._pending_lock。"
+            "方案 = 复用 session._pending_lock。\n"
+            "tldr: 缺锁导致的并发 bug，复用现有锁修好了。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(out, msg=f"explicit rule-08 marker must pass, got {out!r}")
@@ -355,6 +387,7 @@ class TestRule08Layer(_StopBase):
     def test_edit_turn_with_three_rule02_keywords_passes(self) -> None:
         # 3 of 6 rule-02 keywords: 架构 + 根源 + 方案. Plus rule 09
         # triplet (because layer (f) also checks).
+        # v0.20: also needs a tldr (layer h).
         self._seed_edit_turn(turn_count=5)
         msg = (
             "已修复。\n"
@@ -363,7 +396,8 @@ class TestRule08Layer(_StopBase):
             "rule 07: 无降级。\n"
             "**架构定位**: auth.py 是登录链路第 3 步; "
             "**根源**: auth.py:142 缺锁; "
-            "**方案**: 复用 session._pending_lock (覆盖 connected impact)。"
+            "**方案**: 复用 session._pending_lock (覆盖 connected impact)。\n"
+            "tldr: 登录链路缺锁，复用现有锁修复。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(
@@ -429,6 +463,7 @@ class TestRule09Layer(_StopBase):
         self.assertIn("rule 09", out["reason"])
 
     def test_edit_turn_with_explicit_rule09_marker_passes(self) -> None:
+        # v0.20: also needs a tldr (layer h).
         self._seed_edit_turn(turn_count=5)
         msg = (
             "已修复。\n"
@@ -436,7 +471,8 @@ class TestRule09Layer(_StopBase):
             "重触发原症状: 已通过。\n"
             "rule 07: 无降级。\n"
             "rule 08: 改前必读完毕。\n"
-            "rule 09: 系统式修改完成。"
+            "rule 09: 系统式修改完成。\n"
+            "tldr: 系统式改完，测试全过。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(
@@ -447,6 +483,7 @@ class TestRule09Layer(_StopBase):
     def test_edit_turn_with_complete_triplet_passes(self) -> None:
         # All three triplet axes present without explicit rule 09 marker.
         # Also has rule 08 markers so layer (e) passes.
+        # v0.20: also needs a tldr (layer h).
         self._seed_edit_turn(turn_count=5)
         msg = (
             "已修复。\n"
@@ -456,7 +493,8 @@ class TestRule09Layer(_StopBase):
             "rule 08: 改前必读完毕。\n"
             "**根源**: auth.py:142 缺锁。\n"
             "**影响范围**: routes/login.py:88, tests/test_auth.py:55。\n"
-            "**方案**: 复用 session._pending_lock（与方案 B 锁全表对比，A 更轻量）。"
+            "**方案**: 复用 session._pending_lock（与方案 B 锁全表对比，A 更轻量）。\n"
+            "tldr: 缺锁的并发 bug，复用轻量锁修复。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(
@@ -485,11 +523,13 @@ class TestRule09Layer(_StopBase):
     def test_non_edit_turn_silently_passes_f(self) -> None:
         # No edit this turn — layer (f) must not fire even with no
         # rule-09 marker / no triplet.
+        # v0.20: also needs a tldr (layer h, which is NOT edit-gated).
         msg = (
             "已修复。\n"
             "$ pytest passed (35/35).\n"
             "重触发原症状: 已通过。\n"
-            "rule 07: 无降级、无遗漏。"
+            "rule 07: 无降级、无遗漏。\n"
+            "tldr: 修好了。"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(out)
@@ -514,6 +554,10 @@ class TestRule10FileClaimVerification(_StopBase):
         exists AND current mtime == baseline mtime, OR
       - file claim with verb "created" AND baseline showed file didn't
         exist AND file still doesn't exist.
+
+    v0.20: `_full_compliance_message()` now carries a tldr so the
+    pass-case tests reach (g)/allow rather than tripping layer (h). The
+    block-case tests still block at (g), which precedes (h).
     """
 
     def _seed_edit_turn_and_baseline(
@@ -548,13 +592,14 @@ class TestRule10FileClaimVerification(_StopBase):
         return str(f)
 
     def _full_compliance_message(self) -> str:
-        """A message that passes layers (a)-(f) so we test only (g)."""
+        """A message that passes layers (a)-(f) AND (h) so we test only (g)."""
         return (
             "已修复。\n$ pytest passed (35/35).\n"
             "重触发原症状: 已通过。\n"
             "rule 07: 无降级。\n"
             "rule 08: 改前必读完毕。\n"
-            "rule 09: 系统式修改完成。"
+            "rule 09: 系统式修改完成。\n"
+            "tldr: 改完了，测试全过。"
         )
 
     def test_no_claim_passes_silently(self) -> None:
@@ -668,6 +713,183 @@ class TestRule10FileClaimVerification(_StopBase):
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNone(out, msg=f"non-edit turn must not trip (g), got {out!r}")
+
+
+class TestTldrLayerH(_StopBase):
+    """v0.20 — Layer (h): plain-language TL;DR (大白话) closing requirement.
+
+    Fires on EVERY done-claim turn (edit or not), as the final gate after
+    all discipline checks pass. The reply must surface a tldr / 大白话 /
+    TL;DR marker, else block. Replies with no done-claim are untouched.
+    """
+
+    def _seed_edit_turn(self, turn_count: int) -> None:
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+            }),
+            encoding="utf-8",
+        )
+
+    def _compliant_non_edit(self) -> str:
+        # Passes layers (a)-(d) on a non-edit turn; (e)(f)(g) are n/a.
+        return (
+            "已修复并验证。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求一项，已完成，无降级、无遗漏。"
+        )
+
+    def test_done_compliant_but_no_tldr_blocks(self) -> None:
+        rc, out, _ = self._stop(self._compliant_non_edit(), turn_count=5)
+        self.assertIsNotNone(out, msg="missing tldr must block at (h)")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("(h)", out["reason"])
+        self.assertIn("tldr", out["reason"].lower())
+
+    def test_done_with_tldr_field_allows(self) -> None:
+        msg = self._compliant_non_edit() + '\ntldr: "修了 X，全绿，可 ship。"'
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"tldr field must pass (h), got {out!r}")
+
+    def test_dabaihua_marker_allows(self) -> None:
+        msg = self._compliant_non_edit() + "\n大白话: 修了 X，可以 ship。"
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"大白话 marker must pass (h), got {out!r}")
+
+    def test_tldr_caps_marker_allows(self) -> None:
+        msg = self._compliant_non_edit() + "\nTL;DR: fixed X, all green."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"TL;DR marker must pass (h), got {out!r}")
+
+    def test_non_edit_turn_still_requires_tldr(self) -> None:
+        # Explicit contrast with (e)(f)(g): layer (h) is NOT edit-gated.
+        rc, out, _ = self._stop(self._compliant_non_edit(), turn_count=5)
+        self.assertIsNotNone(out, msg="(h) must fire even on a non-edit turn")
+        self.assertIn("FAILED at Layer (h)", out["reason"])
+
+    def test_no_done_claim_does_not_require_tldr(self) -> None:
+        # No done-claim → the whole hook is a no-op, so (h) never fires.
+        msg = "Looking at auth.py:142, the lock is missing — needs a fix."
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg="no done-claim → (h) must not fire")
+
+    def test_block_reason_carries_plain_language_line(self) -> None:
+        # cc-enslaver's OWN block output also ends with a 大白话 line.
+        rc, out, _ = self._stop(self._compliant_non_edit(), turn_count=5)
+        self.assertIn("大白话:", out["reason"])
+
+    def test_edit_turn_missing_tldr_blocks_at_h(self) -> None:
+        # Full a-g compliance on an edit turn, but no tldr → (h) blocks.
+        self._seed_edit_turn(5)
+        msg = (
+            "已修复。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "rule 09: 系统式修改完成。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="edit turn missing tldr must block at (h)")
+        self.assertIn("FAILED at Layer (h)", out["reason"])
+
+
+class TestCanonicalYamlSchema(_StopBase):
+    """v0.20 — the canonical YAML reply schema must pass all layers a-h.
+
+    Locks the "field names ARE the markers" contract: the schema field
+    names (重触发 / 自答 / 请求覆盖 / 根因 / 影响范围 / 方案 / tldr ...) are
+    exactly the substrings the layer detectors match. If a future edit
+    renames a field, this test catches the drift before it ships.
+    """
+
+    def _seed_edit_turn(self, turn_count: int) -> None:
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+            }),
+            encoding="utf-8",
+        )
+
+    CANONICAL = (
+        "已修复。\n\n"
+        "```yaml\n"
+        "cc-enslaver:\n"
+        "  改前:\n"
+        "    架构定位: auth 链路第 3 步\n"
+        "    根因: auth.py:142 缺锁\n"
+        "    方案: 复用 session._pending_lock\n"
+        "  改中:\n"
+        '    - {file: "auth.py:142", what: "加锁"}\n'
+        "  收敛:\n"
+        '    重触发: "$ pytest -> 35 passed"\n'
+        "    边界用例: 并发 100 线程无重入\n"
+        "    连带不破: 既有测试全过\n"
+        "    自答: {真解决: 是, 更好方案: 已比较锁全表方案, 哪些没验: 无, 验证合理: 是}\n"
+        "  忠实:\n"
+        "    请求覆盖: [修 X: OK]\n"
+        "    标准性: '强制' -> 钩子拦截\n"
+        "    忠实性: 无降级 无遗漏 无范围溢出\n"
+        "  收尾:\n"
+        "    根因: 缺锁\n"
+        "    影响范围: routes/login.py:88\n"
+        "    方案: 复用现有锁\n"
+        '  tldr: "加锁修了并发 bug，测试全过，可直接 ship。"\n'
+        "```"
+    )
+
+    # English schema: YAML plain-scalar keys CAN contain spaces, so the
+    # field names match the space-separated English markers exactly
+    # (root cause / self-quiz / request coverage / no degradation / impact).
+    CANONICAL_EN = (
+        "Fixed.\n\n"
+        "```yaml\n"
+        "cc-enslaver:\n"
+        "  before:\n"
+        "    architecture: auth chain step 3\n"
+        "    root cause: auth.py:142 missing lock\n"
+        "    solution: reuse session._pending_lock\n"
+        "  edits:\n"
+        '    - {file: "auth.py:142", what: "add lock"}\n'
+        "  convergence:\n"
+        '    re-trigger: "$ pytest -> 35 passed"\n'
+        "    boundary case: 100 concurrent threads\n"
+        "    existing tests: all pass\n"
+        "    self-quiz: {really solved: yes, better solution: compared, "
+        "unverified: none, verification reasonable: yes}\n"
+        "  fidelity:\n"
+        "    request coverage: [fix X: OK]\n"
+        "    standard: mandatory -> hook\n"
+        "    no degradation: no omission / no scope creep\n"
+        "  closing:\n"
+        "    root cause: missing lock\n"
+        "    impact: routes/login.py:88\n"
+        "    solution: reuse lock\n"
+        '  tldr: "added a lock to fix the concurrency bug, all tests pass."\n'
+        "```"
+    )
+
+    def test_full_yaml_schema_reply_passes_all_layers(self) -> None:
+        # Strictest path: edit turn, so a-h are all active.
+        self._seed_edit_turn(5)
+        rc, out, _ = self._stop(self.CANONICAL, turn_count=5)
+        self.assertIsNone(
+            out, msg=f"canonical YAML schema must pass a-h, got {out!r}",
+        )
+
+    def test_full_english_yaml_schema_reply_passes_all_layers(self) -> None:
+        self._seed_edit_turn(5)
+        rc, out, _ = self._stop(self.CANONICAL_EN, turn_count=5)
+        self.assertIsNone(
+            out, msg=f"canonical EN YAML schema must pass a-h, got {out!r}",
+        )
 
 
 class TestNoDoneClaim(_StopBase):
@@ -871,12 +1093,13 @@ class TestTranscriptFallback(_StopBase):
 
 
 class TestV012StatusTableFormat(_StopBase):
-    """v0.12 — every block reason must render a uniform 6-row status table.
+    """v0.12 — every block reason must render a uniform status table.
 
     The table is what users (and the agent) see at a glance: which gate
     failed, which gates passed, which were not evaluated. This format is
     contractual; we test it explicitly so accidental refactors of the
     builder don't silently revert to the v0.11 monolithic prose form.
+    (v0.20 added an 8th row, layer (h).)
     """
 
     def _seed_edit_turn(self, turn_count: int) -> None:
@@ -905,10 +1128,10 @@ class TestV012StatusTableFormat(_StopBase):
         # Headline names the failed layer and its rule.
         self.assertIn("FAILED at Layer (a)", r)
         self.assertIn("rule 06", r)
-        # (a) is the failing row; (b)-(f) are pending or n/a.
+        # (a) is the failing row; later layers are pending or n/a.
         self.assertIn("| (a)   | 06   | ❌", r)
         # Later layers must not be marked ✅ — they were never evaluated.
-        for later in ["(b)", "(c)", "(d)", "(e)", "(f)"]:
+        for later in ["(b)", "(c)", "(d)", "(e)", "(f)", "(h)"]:
             # Each later row should be either pending or n/a, never Pass.
             row = [line for line in r.splitlines() if line.startswith(f"| {later}")]
             self.assertEqual(len(row), 1, msg=f"missing row for {later}")
@@ -976,6 +1199,13 @@ class TestV012StatusTableFormat(_StopBase):
         self.assertIn("✅ Pass", d_row)
         self.assertIn("❌", e_row)
         self.assertIn("pending", f_row)
+
+    def test_layer_h_row_present_and_is_final(self) -> None:
+        # v0.20: the status table must include an (h) row in every block.
+        rc, out, _ = self._stop("已解决")
+        r = out["reason"]
+        h_row = [l for l in r.splitlines() if l.startswith("| (h)")]
+        self.assertEqual(len(h_row), 1, msg="status table must have an (h) row")
 
 
 class TestFailOpen(_StopBase):

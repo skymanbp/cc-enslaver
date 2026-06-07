@@ -103,14 +103,14 @@
 
 | 组件 | 引用方式 |
 |------|---------|
-| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 9 条规则的浓缩版（v0.11 加入 rule 08 / 09 + 标准回答骨架） |
-| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 9 条规则的结构化每轮自检清单（v0.11 重构）|
-| [`../commands/checklist.md`](../commands/checklist.md) | 把 9 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实 / E 改前必读·写前必想 / F 系统式修改） |
+| [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 9 条规则的浓缩版（v0.11 加入 rule 08 / 09；v0.20 标准回答骨架改为 YAML 回复 schema + `tldr` 大白话收尾） |
+| [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 9 条规则的结构化每轮自检清单（v0.11 重构；v0.20 收尾骨架改 YAML schema）|
+| [`../commands/checklist.md`](../commands/checklist.md) | 把 9 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实 / E 改前必读·写前必想 / F 系统式修改 / G 大白话 TL;DR 收尾） |
 | [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证；同时尊重规则 07 + 08 |
 | [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 + 08 + 09 |
 | [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) | 规则 04 + 08（read-before-edit）+ 规则 09（new_string 补丁标记物理拦截）|
 | [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py) | 规则 03 + 09（bypass 模式拦截）|
-| [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) |
+| [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) + 规则 01+06 layer (g) + TL;DR 收尾约定 layer (h, v0.20) |
 
 ---
 

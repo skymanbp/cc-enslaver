@@ -24,11 +24,15 @@
 | This turn did Edit but reply lacks "root cause + impact + solution" triplet | rule 09 | Stop layer (f) BLOCK |
 | Claim "I edited X.py / created Y.md" but disk mtime unchanged / file does not exist | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | Left TODO / FIXME but said "done" / did refactors the user didn't ask for | rule 07 fidelity | Stop layer (d) BLOCK |
+| A done-claim reply with no `tldr` / plain-language summary at the end | v0.20 reply schema | **Stop layer (h) v0.20 BLOCK** |
 
-## Closing skeleton (mandatory for modification tasks)
+## Closing schema (YAML · mandatory)
 
-Reply must end with 5 sections marked 🔍 / ✏️ / ✅ / 📋 / 🚨 — see SessionStart injection §3.
+Reply must end with a ```yaml `cc-enslaver:` block — fixed schema, see SessionStart injection §3.
+Modification tasks use the full form (before / edits / convergence / fidelity / closing);
+non-modification tasks use the minimal form (convergence / fidelity / tldr).
+**Any reply with a done-claim must include the `tldr` field, else Stop layer (h) BLOCK.**
 
-When blocked at Stop: reason is a 6-row status table; find the ❌ row → read Recovery → fix, don't re-read the whole prompt.
+When blocked at Stop: reason is a status table + a plain-language line; find the ❌ row → read Recovery → fix, don't re-read the whole prompt.
 
 Full rules → [`rules/en/`](rules/en/) · Index → [`docs/RULES.md`](docs/RULES.md)

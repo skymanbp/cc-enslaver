@@ -154,6 +154,31 @@ class TestInjectContextSessionStart(unittest.TestCase):
         ):
             self.assertIn(needle, ctx, msg=f"user-prompt missing {needle!r}")
 
+    def test_content_references_yaml_schema_and_tldr(self) -> None:
+        # v0.20 — the session-start injection must teach the canonical
+        # YAML reply schema and the mandatory tldr / layer (h) closing.
+        _, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        for needle in (
+            "cc-enslaver:",   # the YAML block root key
+            "tldr",
+            "大白话",
+            "layer (h)",
+        ):
+            self.assertIn(needle, ctx, msg=f"session-start prompt missing {needle!r}")
+
+    def test_user_prompt_includes_tldr_reminder(self) -> None:
+        _, out, _ = run_hook(
+            [INJECT, "--event", "UserPromptSubmit"],
+            stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("tldr", ctx, msg="user-prompt missing tldr reminder")
+        self.assertIn("layer (h)", ctx, msg="user-prompt missing layer (h)")
+
     def test_content_is_utf8_intact(self) -> None:
         # Smoke test for the Windows cp936 stdout regression: the prompt
         # file is Chinese, and if we did not write sys.stdout.buffer as
@@ -200,6 +225,10 @@ class TestInjectContextEnglish(unittest.TestCase):
             "rule 09",
             "layer (e)",
             "layer (f)",
+            # v0.20 — YAML schema + tldr / layer (h) must surface too.
+            "cc-enslaver:",
+            "tldr",
+            "layer (h)",
         ):
             self.assertIn(needle, ctx, msg=f"english session-start missing {needle!r}")
         # And critically: the Chinese canonical headers should NOT bleed

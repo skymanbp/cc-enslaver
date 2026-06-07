@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""cc-enslaver — Stop hook enforcing rules 06 + 07 + 08 + 09.
+"""cc-enslaver — Stop hook enforcing rules 06 + 07 + 08 + 09 + TL;DR.
 
 At every Stop event, this hook inspects the agent's last assistant
-message and refuses to let the agent finish the turn when any of six
+message and refuses to let the agent finish the turn when any of eight
 laziness signals appear in proximity to a "done" claim:
 
   (a) [v0.6.0] No convergence evidence at all (no `$ ` shell prompt,
@@ -52,7 +52,19 @@ laziness signals appear in proximity to a "done" claim:
       根因 + 影响 + 方案). Without an actual edit this turn, layer
       (f) silently allows.
 
-When any of (a)-(f) hold, the hook returns
+  (g) [v0.16.0] File-claim verification (rule 01 + 06): parses
+      "I edited X" / "我修改了 Y" claims and blocks when the on-disk
+      mtime contradicts the claim. Edit-turn only.
+
+  (h) [v0.20.0 NEW] Plain-language TL;DR (大白话总结) closing
+      requirement. Fires on EVERY done-claim turn (not just edit turns):
+      the reply must surface a one-line takeaway via the canonical
+      schema's `tldr:` field or a 大白话 / TL;DR marker. This is the
+      final gate — reaching it means every discipline check passed; (h)
+      only asks for a readable summary. Enforced as a closing convention,
+      deliberately not promoted to a tenth numbered rule.
+
+When any of (a)-(h) hold, the hook returns
 `{"decision": "block", "reason": <appropriate reminder>}`. The agent
 gets one corrective turn.
 
@@ -473,6 +485,47 @@ def _has_rule09_marker_or_triplet(text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# v0.20.0 — Layer (h): plain-language TL;DR (大白话总结) closing requirement.
+#
+# Motivation: the conversation between the agent and the human reading over
+# its shoulder was "not standardised enough" — the reply skeleton drifts in
+# shape turn to turn. v0.20 introduces a canonical YAML reply schema whose
+# field names ARE the existing detection markers (so layers a-g need zero
+# regex changes), and adds this layer (h) to HARD-enforce the schema's final
+# `tldr:` field — one plain-language sentence summarising what happened.
+#
+# Unlike (e)/(f)/(g), layer (h) fires on EVERY done-claim turn (not just edit
+# turns): a status report or an answer that claims "done" benefits from a
+# one-line takeaway just as much as a code edit does. It is the last gate in
+# the sequence, so by the time we reach it the agent has already passed all
+# discipline checks — (h) is purely about leaving the reader a readable
+# summary.
+#
+# It is enforced as a closing *convention* (a Stop layer), deliberately NOT
+# promoted to a tenth numbered rule, to avoid the rules/*.md + rules/en/ +
+# 00-index + docs fan-out that a real rule would require.
+# --------------------------------------------------------------------------- #
+TLDR_MARKERS = [
+    re.compile(r"\btl;?dr\b", re.IGNORECASE),
+    re.compile(r"大白话"),
+    re.compile(r"一句话(?:总结|讲|说清|概括)"),
+    re.compile(r"一句总结"),
+    # The canonical YAML schema field key.
+    re.compile(r"\btldr\s*[:：]"),
+]
+
+
+def _has_tldr(text: str) -> bool:
+    """v0.20 — True if the reply surfaces a plain-language TL;DR.
+
+    Satisfied by the canonical YAML `tldr:` field, or any of the natural
+    markers (大白话 / 一句话总结 / TL;DR). Permissive on phrasing: the goal
+    is a readable one-line takeaway, not a specific keyword.
+    """
+    return any(p.search(text) for p in TLDR_MARKERS)
+
+
+# --------------------------------------------------------------------------- #
 # v0.16.0 — Layer (g): file-claim verification (rule 01 + 06).
 #
 # Detects "I edited X" / "I created Y" / "我修改了 Z" claims in the
@@ -693,6 +746,13 @@ LAYER_META: list[dict[str, str]] = [
         "label": "rule 01+06 — file-claim verification (v0.16)",
         "recovery_keyword": "rule 01 + 06 file-claim",
     },
+    {
+        "id": "(h)",
+        # Not a numbered rule — a closing readability convention (v0.20).
+        "rule": "—",
+        "label": "TL;DR — 大白话总结 missing",
+        "recovery_keyword": "TL;DR 大白话",
+    },
 ]
 
 # Per-layer short "note" rendered in the status table when that layer is
@@ -705,6 +765,21 @@ _LAYER_FAIL_NOTE = {
     "(e)": "rule-08 marker / 3+ keywords absent",
     "(f)": "rule-09 marker / triplet incomplete",
     "(g)": "file-edit claim contradicts disk state",
+    "(h)": "tldr / 大白话 absent",
+}
+
+# v0.20 — per-layer one-line plain-language takeaway ("大白话"). Appended to
+# every block reason so cc-enslaver's OWN output also ends with a readable
+# summary, symmetric with the layer-(h) requirement it imposes on the agent.
+_LAYER_TLDR = {
+    "(a)": "你说做完了但没贴证据——补一段「命令 + 输出」就放行。",
+    "(b)": "你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。",
+    "(c)": "有证据但没答收敛 4 题——把「真解决 / 更好方案 / 哪些没验 / 验证合理」写出来。",
+    "(d)": "没回看用户原始请求——逐项列「做了哪些 / 有没有降级或遗漏」。",
+    "(e)": "改了文件但没写「改前必读 / 写前必想」——补「根因 / 架构 / 方案」≥ 3 项。",
+    "(f)": "改了文件但缺「根因 + 影响 + 方案」三件套——补全再收尾。",
+    "(g)": "你说改了某文件但磁盘没变——要么真去改，要么撤回这句声明。",
+    "(h)": "结尾少了一句大白话——加一行 tldr: \"...\" 就放行。",
 }
 
 
@@ -724,22 +799,24 @@ def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
     for i, meta in enumerate(LAYER_META):
         lid = meta["id"]
         rule = meta["rule"]
-        if i < fail_idx:
+        # e/f/g only apply on edit turns — show n/a on non-edit turns
+        # regardless of position relative to the failing layer. (Needed
+        # since v0.20: layer (h) fires after the edit-only block, so on a
+        # non-edit (h) failure, e/f/g would otherwise be mislabelled "Pass"
+        # despite never being evaluated.)
+        if lid in ("(e)", "(f)", "(g)") and not edit_turn:
+            status = "—  n/a"
+            note = "(non-edit turn)"
+        elif i < fail_idx:
             status = "✅ Pass"
             note = ""
         elif i == fail_idx:
             status = "❌ **FAIL**"
             note = _LAYER_FAIL_NOTE.get(lid, "")
         else:
-            # Layer not evaluated yet (gated by earlier fail) OR not
-            # applicable (e/f/g on non-edit turn — they all reason about
-            # this turn's edits).
-            if lid in ("(e)", "(f)", "(g)") and not edit_turn:
-                status = "—  n/a"
-                note = "(non-edit turn)"
-            else:
-                status = "⏸  pending"
-                note = "(gated by earlier fail)"
+            # Layer not evaluated yet (gated by earlier fail).
+            status = "⏸  pending"
+            note = "(gated by earlier fail)"
         rows.append(
             f"| {lid:5s} | {rule:4s} | {status:<11s} | {note:<33s} |"
         )
@@ -788,6 +865,11 @@ def _build_block_reason(
     parts.append(f"[Recovery — {meta['recovery_keyword']}]")
     parts.append(recovery.rstrip())
     parts.append("")
+    # v0.20: one-line plain-language takeaway before the footer.
+    tldr_line = _LAYER_TLDR.get(fail_layer_id)
+    if tldr_line:
+        parts.append(f"大白话: {tldr_line}")
+        parts.append("")
     parts.append(_ONE_SHOT_FOOTER)
     return "\n".join(parts) + "\n"
 
@@ -920,6 +1002,23 @@ mention it, that's also fine — we only catch claimed-but-didn't.
 If this fires falsely (you DID edit the file via another tool /
 external editor / etc.), surface the discrepancy and let the user
 decide whether to override."""
+
+_RECOVERY_H = """Your reply claims completion but does not end with a
+plain-language TL;DR (大白话总结).
+
+Per the v0.20 canonical reply schema, every done-claim reply must close
+with a one-sentence takeaway the user can read at a glance. Add either:
+
+  • The schema's final field:  tldr: "<一句大白话>"
+  • A line starting with `大白话:` / `一句话总结:` / `TL;DR:`
+
+The sentence should say, in plain words: what you actually did, what the
+result was, and whether the user needs to do anything next. Not a restate
+of the rule checks — a human takeaway.
+
+Example:
+  tldr: "改完了 Stop hook 加了 tldr 强制层，203 个测试全绿，可以直接 ship。"
+"""
 
 
 def _emit_block(reason_text: str) -> None:
@@ -1144,7 +1243,20 @@ def main() -> int:
                         ))
                         return 0
 
-        # All seven gates passed — allow.
+        # v0.20 Layer (h): plain-language TL;DR (大白话总结) closing
+        # requirement. Fires on EVERY done-claim turn (edit or not) — the
+        # reader deserves a one-line takeaway regardless. This is the final
+        # gate; reaching it means all discipline checks already passed.
+        if not _has_tldr(message):
+            state_lib.record_stop_block(session_id, turn_count)
+            _emit_block(_build_block_reason(
+                "(h)", edited_this_turn,
+                _RECOVERY_H,
+                matched_phrase=matched,
+            ))
+            return 0
+
+        # All eight gates passed — allow.
     except Exception:
         # Failing open: log to stderr but never block by accident.
         sys.stderr.write("[cc-enslaver] stop_guard exception:\n")

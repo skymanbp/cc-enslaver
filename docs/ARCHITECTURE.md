@@ -140,7 +140,7 @@ Any unhandled exception in `read_guard.py` is caught, logged to stderr, and
 the script exits 0 (allow). A bug in the guard cannot be permitted to brick
 the agent — discipline enforcement must never become an obstacle to actual work.
 
-#### `Stop` guard (rule 06 + rule 07 enforcement, v0.6.0 → v0.7.0 → v0.8.0)
+#### `Stop` guard (rule 06 + 07 + 08 + 09 + TL;DR enforcement, v0.6.0 → v0.7.0 → v0.8.0 → v0.11.0 → v0.16.0 → v0.20.0)
 
 `stop_guard.py` (event `Stop`, no matcher — Stop fires unconditionally per
 Claude Code spec) inspects `payload.assistant_message` (or falls back to
@@ -156,9 +156,11 @@ the last assistant entry in `payload.transcript_path`).
 | 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
 | 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
 | 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
-| 6 | `last_edit_turn == turn_count` AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**) | **Block** (`MISSING_RULE08_REASON`) |
-| 7 | `last_edit_turn == turn_count` AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (`MISSING_RULE09_REASON`) |
-| 8 | All gates passed | Allow |
+| 6 | `last_edit_turn == turn_count` AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**) | **Block** (layer (e)) |
+| 7 | `last_edit_turn == turn_count` AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
+| 8 | `last_edit_turn == turn_count` AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
+| 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
+| 10 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
 `完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
@@ -242,6 +244,25 @@ three** must match):
 | 1 | 根源 / 根因 / root-cause |
 | 2 | 连带 / 影响范围 / impact / blast-radius / downstream |
 | 3 | 方案 / solution / approach / alternative |
+
+**v0.20.0 TL;DR markers** (layer (h); single match suffices to pass
+the gate): `tldr:` (the canonical YAML schema field) / `大白话` /
+`一句话总结` / `一句总结` / `TL;DR`. Unlike (e)/(f)/(g), layer (h)
+fires on **every** done-claim turn — a status report or an answer
+benefits from a one-line takeaway just as much as a code edit. It is the
+final gate (reached only after all discipline checks pass) and is
+enforced as a closing readability convention, deliberately **not**
+promoted to a tenth numbered rule (which would require the full
+`rules/*.md` + `rules/en/` + `00-index` + docs fan-out). The v0.20
+canonical reply schema is a YAML block whose field names (`改前 / 改中 /
+收敛 / 忠实 / 收尾 / tldr`, English: `before / edits / convergence /
+fidelity / closing / tldr`) ARE the layer markers above — so a
+schema-conformant reply passes (a)-(h) with no detector changes.
+
+**v0.20.0 block-reason 大白话 line**: every block reason now appends a
+one-line plain-language takeaway (`大白话: ...`) before the one-shot
+footer, so cc-enslaver's own output is symmetric with the layer-(h)
+requirement it imposes on the agent.
 
 **Why layers (e)+(f) are scoped to edit turns**: a pure analysis /
 answer turn should not be forced to surface think-before-write or

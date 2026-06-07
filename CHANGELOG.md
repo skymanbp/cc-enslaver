@@ -17,6 +17,65 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.20.0] — 2026-06-07
+
+**YAML reply schema + hard-enforced plain-language TL;DR (Stop layer (h)).**
+
+The agent's "standard reply skeleton" was free-form markdown (5 sections
+🔍✏️✅📋🚨) that drifted in shape every turn — hard for the user to scan.
+v0.20 collapses it into a **fixed YAML schema** and adds a hard-enforced
+one-sentence plain-language summary at the end of every done-claim reply.
+
+### Added
+
+- **Canonical YAML reply schema** taught in the soft-layer injection
+  ([`prompts/session-start.md`](prompts/session-start.md) §3 +
+  [`prompts/en/session-start.md`](prompts/en/session-start.md) §3):
+  a ```yaml `cc-enslaver:` block with fields `改前 / 改中 / 收敛 / 忠实 /
+  收尾 / tldr` (English mirror: `before / edits / convergence / fidelity
+  / closing / tldr`). Modification tasks use the full schema;
+  non-modification done-claim replies use the minimal form
+  (`收敛`/`忠实`/`tldr`).
+- **Stop layer (h)** in [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py):
+  a done-claim reply that lacks a TL;DR marker (`tldr:` / `大白话` /
+  `一句话总结` / `TL;DR`) is blocked. Unlike layers (e)/(f)/(g), (h)
+  fires on **every** done-claim turn, not just edit turns — it is the
+  final gate, reached only after all discipline checks pass.
+- Per-block **`大白话:` line** appended to every Stop block reason
+  (before the one-shot footer), so cc-enslaver's own output is symmetric
+  with the layer-(h) requirement it imposes.
+- New tests (full suite **203 → 216**): `TestTldrLayerH` ×8,
+  `TestCanonicalYamlSchema` ×2 (zh + en schemas pass layers a–h),
+  status-table (h)-row ×1, inject_context schema/tldr assertions ×2.
+
+### Design — "field names ARE the markers" (zero detector rewrite)
+
+The schema field names/values are exactly the substrings layers (a)-(g)
+already match (`重触发` / `收敛` / `自答` / `请求覆盖` / `根因` /
+`影响范围` / `方案` …), so **no detection regex changed**. Both the old
+emoji-markdown form and the new YAML form pass — graceful migration. The
+English schema exploits YAML plain-scalar keys allowing spaces
+(`root cause:` / `request coverage:` / `no degradation:`) to hit the
+space-separated English markers.
+
+### Not done (deliberate, minimum effective change)
+
+- The Stop **status table stays a markdown table** (already a fixed
+  schema; tables beat YAML for a status matrix) — only a `大白话` line
+  was added.
+- TL;DR is a **closing convention (layer (h))**, not a 10th numbered
+  rule — avoids the `rules/*.md` + `rules/en/` + `00-index` + docs
+  fan-out a real rule requires.
+
+### Fixed (doc drift)
+
+- [`CLAUDE.md`](CLAUDE.md) §6 was stuck at v0.18.0 with a stale
+  "未实现" list (auto-GC / rolling-patch / english-prompts /
+  deep-file-claim were all already shipped) and test count 135 →
+  updated to v0.20.0, 216 tests, accurate roadmap.
+
+---
+
 ## [0.19.0] — 2026-05-28
 
 **Edicts cwd fallback for Windows / env-var-stripped subprocesses.**

@@ -5,8 +5,8 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；�
 
 # /cc-enslaver:checklist
 
-> 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改" 六份清单；
-> 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` 则只输出对应一份。
+> 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改"、G "大白话 TL;DR 收尾" 七份清单；
+> 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` / `tldr` 则只输出对应一份。
 
 请你（receiving agent）**逐项核对**以下检查清单，并明确回答每一条 ✅ / ❌ / N/A。
 不要笼统地说"都做了"——每一条都要单独写明依据（`file:line` 或具体动作）。
@@ -126,6 +126,20 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；�
 
 > 任意 F 项答 "不知道 / 应该可以 / 大概 / 暂时" → **未达 rule 09**，回到 rule 02 + rule 03 + rule 08 重新分析。
 > 禁止：把"打补丁"包装成"最小有效更改"；用 `# noqa` 后**只写规则号不写原因**；用 sleep 让 flaky 测试"稳定"。
+
+---
+
+## G. 大白话 TL;DR 收尾（v0.20 回复 schema） —— **物理强制层** 🚨
+
+> v0.20：含 done-claim 的回复**末尾必含**一行大白话总结（YAML schema 的 `tldr` 字段）。
+> 物理强制：`Stop` layer (h) 在任何含 done-claim 的回复缺 `tldr` 时 BLOCK（edit / 非 edit 都查）。
+
+- [ ] **G1 · YAML schema 收尾** — 回复末尾是否输出了 ```yaml `cc-enslaver:` 块？修改类用全量（改前/改中/收敛/忠实/收尾），非修改类用精简形（收敛/忠实/tldr）。
+- [ ] **G2 · tldr 字段存在** — schema 末尾是否有 `tldr:` 字段（或 `大白话:` / `一句话总结:` / `TL;DR:` 行）？
+- [ ] **G3 · tldr 是人话** — 这句是否用大白话讲清「到底干了啥 / 结果如何 / 用户接下来要不要做什么」，而**不是**复述规则检查？
+
+> 任意 G 项 ❌ → **会被 Stop layer (h) BLOCK**。补一行 `tldr: "<一句大白话>"` 即可。
+> 禁止：把规则检查报告当 tldr；含 done-claim 却整段省略 schema。
 
 ---
 

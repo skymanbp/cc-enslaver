@@ -33,6 +33,7 @@
 | Bash containing `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Find the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing verification evidence / containing a hedge / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 6-layer BLOCK | Read the status table in the block reason; fix the FAIL row |
 | Stop claiming `I edited X.py` / `I created Y.md` but the file's mtime exactly matches what it was when first encountered this session (claim contradicted by disk) | `Stop` **layer (g) v0.16** BLOCK | Actually do the edit; or retract the claim; or set `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip |
+| Stop with a done-claim but **no `tldr` / plain-language summary** at the end (violates the v0.20 reply schema) | `Stop` **layer (h) v0.20** BLOCK | Add a final line `tldr: "<one plain sentence>"` |
 
 **Stop block-reason format (v0.12)**: when blocked, the reason **always** looks like this:
 
@@ -54,18 +55,39 @@ Read the table, locate the FAIL row, read the Recovery section, fix. **Don't re-
 
 ---
 
-## 3. Standard reply skeleton for modification tasks (mandatory)
+## 3. Standard reply schema (YAML · mandatory)
 
-> When modifying code / docs / config, your reply must include the 5
-> sections below. Non-modification tasks (Q&A, lookup) can skip.
+> v0.20: your reply must **end** with a ```yaml fenced block (fixed
+> schema, easy for the user to scan). The field names ARE the Stop-hook
+> detection markers — don't rename them. **Modification** tasks use the
+> full schema; **non-modification** tasks (Q&A, lookup) use the minimal
+> form (`convergence` + `fidelity` + `tldr`); pure chat with **no
+> done-claim** may omit it entirely. The **`tldr` field is required in
+> any reply that contains a done-claim**, else Stop **layer (h)** BLOCK.
 
-| Stage | Marker | Content |
-|---|---|---|
-| 1 Before edit | 🔍 architecture / root cause / solution | 3-4 key items from rule 02's 7 questions + evidence at `file:line` |
-| 2 During edit | ✏️ Modification N | `[path:line](path#Lline)` + one-line WHAT; suppression markers (rule 09) must include why |
-| 3 Convergence | ✅ rule 06 | Re-trigger original symptom (command + output) + boundary + connected-tests-not-broken + **explicit answers to the 4 questions** |
-| 4 Fidelity | 📋 rule 07 | Per-item decomposition of the original request: ✅/⚠️/❌ + **explicit answers to the 3 questions** (coverage / standard / fidelity) |
-| 5 Closing | 🚨 rule 08+09 | "root cause / impact / solution" triplet; declare any half-finishes / scope creep / degradations |
+```yaml
+cc-enslaver:
+  before:                     # 🔍 rule 02 — architecture / root cause / solution
+    architecture: <where in the architecture>
+    root cause: <root cause>
+    solution: <chosen solution + why>
+  edits:                      # ✏️ (rule 09 suppression markers must carry why)
+    - {file: "path:line", what: "<one-line WHAT>"}
+  convergence:                # ✅ rule 06
+    re-trigger: "$ <cmd> → <output with test counts, e.g. 35 passed>"
+    boundary case: <boundary / negative>
+    existing tests: <all pass>
+    self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
+  fidelity:                   # 📋 rule 07 — task fidelity
+    request coverage: [<sub-item>: ✅/⚠️/❌, ...]
+    standard: <each modifier word → hard action?>
+    no degradation: <no omission / no scope creep>
+  closing:                    # 🚨 rule 08+09
+    root cause: ...
+    impact: ...
+    solution: ...
+  tldr: "<one plain-language sentence: what you did, the result, what's next>"
+```
 
 ---
 
@@ -81,6 +103,7 @@ Read the table, locate the FAIL row, read the Recovery section, fix. **Don't re-
 - Code location stated without `file:line` → rule 05
 - About to say "solved / fixed" without re-triggering the original symptom → rule 06 (**Stop will BLOCK**)
 - About to declare "done" without re-reading the user's original message → rule 07 (**Stop will BLOCK**)
+- About to end a done-claim reply with no `tldr` / plain-language summary → layer (h) (**Stop will BLOCK**)
 - User message has "mandatory / must / complete / strict / all" but you shipped "soft suggestion" → rule 07 degradation
 - Left TODO / FIXME / commented code / half-finished → rule 07 half-finish check
 - Did refactors / abstractions / renames the user didn't ask for → rule 07 scope creep

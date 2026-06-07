@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.20.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -25,9 +25,11 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 7 Stop-hook gates** (v0.18.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 8 Stop-hook gates** (v0.20.0):
 
-> **New in v0.18** — 🧹 **Opt-in auto-GC on SessionStart**: set `CC_ENSLAVER_AUTO_GC_DAYS=30` and the SessionStart hook automatically prunes session-state files older than N days. Rate-limited to once per 24h via a marker file so rapid session restarts don't re-scan. Default off (backward-compatible); the manual `/cc-enslaver:gc` slash command still works and shares the same `prune_old_sessions()` deletion routine.
+> **New in v0.20** — 📋 **Structured YAML reporting + plain-language TL;DR**: every reply now ends with a fixed ```yaml `cc-enslaver:` block (`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`; English mirror `before / edits / convergence / fidelity / closing / tldr`) — the audit trail is **scannable at a glance** instead of drifting free-form prose. A new **Stop layer (h)** hard-enforces a one-sentence `tldr` (大白话总结) on every done-claim reply, and every block reason now carries a `大白话:` takeaway. The schema's field names ARE the existing Stop-hook detection markers, so no detector changed — old emoji-markdown and new YAML reply forms both pass.
+>
+> **From v0.18** — 🧹 **Opt-in auto-GC on SessionStart**: set `CC_ENSLAVER_AUTO_GC_DAYS=30` and the SessionStart hook automatically prunes session-state files older than N days. Rate-limited to once per 24h via a marker file so rapid session restarts don't re-scan. Default off (backward-compatible); the manual `/cc-enslaver:gc` slash command still works and shares the same `prune_old_sessions()` deletion routine.
 >
 > **From v0.17** — 🌐 **Imperial Edicts go bilingual**: with `CC_ENSLAVER_LANG=en`, the soft-layer injection and the PreToolUse DENY reason both flip to English ("Imperial Edicts" / "Imperial Edict E01 violation"). Default Chinese ("圣旨") preserved. Plus Windows portability fixes: file-claim regex now matches drive-letter paths (`C:\Users\...\x.py`), and `manage_edicts.py` forces UTF-8 stdout.
 >
@@ -168,7 +170,7 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 | `UserPromptSubmit` | — | Re-inject per-turn decision triggers + Imperial Edicts (defends against context compaction) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; capture mtime baseline (v0.16); deny Edit/Write of unread existing file (rule 04+08); deny patch-style `new_string` (rule 09 v0.11); deny 4th small Edit without systematic rewrite (rule 09 v0.13); deny on Imperial Edict `deny_edit` regex hit (v0.12); stamp `last_edit_turn` | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns (rule 03+09: `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` root paths); process `register_read.py`; deny on Imperial Edict `deny_bash` regex hit | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
-| `Stop` | — | **Seven-layer decision** (v0.16): (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking / (f) missing rule-09 triplet / (g) file-claim contradicted by disk. Block reason renders as a uniform **7-row status table**. | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
+| `Stop` | — | **Eight-layer decision** (v0.20): (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking / (f) missing rule-09 triplet / (g) file-claim contradicted by disk / (h) missing plain-language TL;DR. Block reason renders as a uniform status table + a `大白话:` line. | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
 
 Hook scripts (8 total under [`hooks/scripts/`](hooks/scripts/)):
 
@@ -242,9 +244,11 @@ MIT — see [`LICENSE`](LICENSE).
 | 根因绕过 | 用 `sleep` 掩盖竞态、用 `--no-verify` 跳过钩子 |
 | 半成品 | 写到"应该能工作"就停手，留 TODO，不验证整条链路 |
 
-### 防御分层（**v0.17.0**：9 内置规则 + 用户自定义圣旨 + Stop 钩子 7 层闸门）
+### 防御分层（**v0.20.0**：9 内置规则 + 用户自定义圣旨 + Stop 钩子 8 层闸门）
 
-1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则 + 圣旨注入 agent 上下文。**v0.15 起**默认中文；设 `CC_ENSLAVER_LANG=en` 切到英文（注入主体 + 圣旨 deny reason 同步切换，v0.17 闭环）。
+> **v0.20 新增** — 📋 **结构化 YAML 汇报 + 大白话总结**：每次回复末尾输出固定的 ```yaml `cc-enslaver:` 块（`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`），把审计轨迹从飘忽的自由文本变成**一眼可扫的固定 schema**。新增 **Stop layer (h)** 硬强制每条 done-claim 回复必含一句 `tldr`（大白话总结），每条拦截理由也附一行 `大白话:`。schema 的字段名**本身就是**现有 Stop 检测 marker，所以检测层一行未改——新旧两种回复格式都通过。
+
+1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则 + 圣旨注入 agent 上下文。**v0.15 起**默认中文；设 `CC_ENSLAVER_LANG=en` 切到英文（注入主体 + 圣旨 deny reason 同步切换，v0.17 闭环）。**v0.20** 把"标准回复骨架"改为上面的 YAML schema。
 2. **硬拦截层**：agent 调用 `Edit` / `Write` / `Bash` 或 Stop 时，插件在工具/回合边界做拦截：
    - **Edit/Write 改前必读**（v0.2 + v0.11 rule 08）：目标文件已存在但本会话未 `Read` 过 → DENY。新文件创建放行。
    - **Edit/Write 反补丁内容**（**v0.11 rule 09**）：new_string 含未带 why 注释的 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `// eslint-disable` / `time.sleep(...) # race` → DENY。
@@ -254,7 +258,7 @@ MIT — see [`LICENSE`](LICENSE).
    - **Bash 圣旨**（v0.12）：命令命中 `must` 圣旨的 `deny_bash` 正则 → DENY。内置先跑、圣旨后跑（圣旨不能 whitelist `--no-verify`）。
    - **Read 缓存逃生口**（v0.4）：`register_read.py` + bash_guard 重算 SHA-256 闸门。
    - **基线 + Edit-turn 标记**（v0.11 + **v0.16**）：每次成功 Read/Edit/Write 捕获 mtime 基线（v0.16）并标 `last_edit_turn`（v0.11），给 Stop 各层提供判定依据。
-   - **Stop 钩子**（v0.6 → v0.7 → v0.8 → v0.11 → **v0.16**）：每次 Stop **七层**决策，输出**统一 7 行状态表**（✅ Pass / ❌ FAIL / ⏸ pending / — n/a）：(a) done 但无 evidence；(b) done 附近 50 字内含 hedge（rule 01 投影）；(c) 有 evidence 但缺 rule-06 收敛标记 + 4 题命中 < 2；(d) 通过 (a-c) 但缺 rule-07 忠实标记 + 3 题命中 < 2；(e) 本轮做了 Edit 但缺 rule-08 标记 + rule-02 关键词命中 < 3；(f) 本轮做了 Edit 但缺 rule-09 "根因+影响+方案" 三件套；**(g) v0.16** —— 本轮做了 Edit 且解析出 `I edited X.py` / `我修改了 Y.md` 类声明，但磁盘 mtime 与基线一致（claim 被证伪）→ 拒。一次性守卫 + 3-turn 宽限窗口避免死循环。`CC_ENSLAVER_DISABLE_LAYER_G=1` 可禁用 (g)。
+   - **Stop 钩子**（v0.6 → v0.7 → v0.8 → v0.11 → v0.16 → **v0.20**）：每次 Stop **八层**决策，输出**统一状态表**（✅ Pass / ❌ FAIL / ⏸ pending / — n/a）+ 一行 `大白话:`：(a) done 但无 evidence；(b) done 附近 50 字内含 hedge（rule 01 投影）；(c) 有 evidence 但缺 rule-06 收敛标记 + 4 题命中 < 2；(d) 通过 (a-c) 但缺 rule-07 忠实标记 + 3 题命中 < 2；(e) 本轮做了 Edit 但缺 rule-08 标记 + rule-02 关键词命中 < 3；(f) 本轮做了 Edit 但缺 rule-09 "根因+影响+方案" 三件套；**(g) v0.16** —— 本轮做了 Edit 且解析出 `I edited X.py` / `我修改了 Y.md` 类声明，但磁盘 mtime 与基线一致（claim 被证伪）→ 拒；**(h) v0.20** —— 含 done-claim 的回复缺 `tldr` / `大白话` / `TL;DR` → 拒（在**所有 done-claim 轮**触发，非 edit-only；收尾约定而非第 10 条规则）。一次性守卫 + 3-turn 宽限窗口避免死循环。`CC_ENSLAVER_DISABLE_LAYER_G=1` 可禁用 (g)。
 3. **主动调用层**：4 个 slash 命令 —— `/cc-enslaver:checklist`、`/cc-enslaver:verify`、`/cc-enslaver:gc`（v0.6.1）、`/cc-enslaver:edict`（**v0.12** CRUD；**v0.14** 加 `--global` 写到 `~/.claude`）。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程（v0.10 加 Step 0 = build feedback loop）。

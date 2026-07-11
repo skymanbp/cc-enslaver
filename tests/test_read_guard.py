@@ -751,5 +751,175 @@ class TestPathNormalization(_GuardTestBase):
             )
 
 
+class _ContentDetectorBase(_GuardTestBase):
+    """Shared fixtures for the rule 10 / 11 content detectors (v0.22).
+
+    Dogfooding: read_guard.py is a .py file, so once the new detectors
+    ship, editing *this* test file re-runs them on the new source. Every
+    offending secret / path fixture below is therefore assembled via
+    runtime string concatenation so no literal match ever appears in this
+    file's own source (mirrors the TestPatchStyleEdit note above).
+    """
+
+    Q = '"'
+    BS = chr(92)  # backslash
+
+    # -- offending "code" lines, built so the source never matches -------- #
+    def _secret_assign_line(self) -> str:
+        # <keyword> = "<10-char non-placeholder value>"
+        return ("api" + "_key") + " = " + self.Q + ("Zx9Q" + "7Lm2Kp") + self.Q
+
+    def _aws_key_line(self) -> str:
+        return "cred = " + self.Q + "AKIA" + ("Q" * 16) + self.Q
+
+    def _pem_header_line(self) -> str:
+        return "-----BEGIN " + "DSA " + "PRIVATE KEY-----"
+
+    def _url_creds_line(self) -> str:
+        return "dsn = " + self.Q + "mysql:" + "//" + "u:" + "p@" + "host/db" + self.Q
+
+    def _placeholder_secret_line(self) -> str:
+        # Real keyword+assignment, but a placeholder value → not flagged.
+        return ("api" + "_key") + " = " + self.Q + "your-" + "key-here" + self.Q
+
+    def _win_path_line(self) -> str:
+        return "p = " + self.Q + "C:" + self.BS + "Users" + self.BS + "bob" + self.BS + "x.csv" + self.Q
+
+    def _posix_path_line(self) -> str:
+        return "p = " + self.Q + "/" + "home/" + "bob/proj/" + self.Q
+
+    def _home_var_line(self) -> str:
+        return "p = join(" + "$" + "HOME" + ", 'x')"
+
+    def _userprofile_line(self) -> str:
+        return "p = " + "%USER" + "PROFILE%" + self.BS + "x"
+
+    def _tilde_line(self) -> str:
+        return "p = " + self.Q + "~" + "/" + "proj/data" + self.Q
+
+    def _read_py_target(self) -> str:
+        target = self._existing_file()  # this test file, a .py → scannable
+        self._pre("Read", target)
+        return target
+
+    def _assert_deny(self, out, rule_substr: str) -> None:
+        self.assertIsNotNone(out, msg=f"expected DENY mentioning {rule_substr}")
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        self.assertIn(rule_substr, spec["permissionDecisionReason"])
+
+
+class TestHardcodedSecretEdit(_ContentDetectorBase):
+    """v0.22 — rule 10 hardcoded-secret content detector."""
+
+    def test_secret_named_assignment_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._secret_assign_line() + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_aws_key_literal_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._aws_key_line() + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_private_key_header_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._pem_header_line() + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_url_credentials_are_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._url_creds_line() + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_placeholder_value_is_allowed(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._placeholder_secret_line() + "\n")
+        self.assertIsNone(out, msg=f"placeholder value must allow, got {out!r}")
+
+    def test_env_read_is_allowed(self) -> None:
+        target = self._read_py_target()
+        # api_key = os.environ["API_KEY"] — RHS is not a quoted literal.
+        new_string = ("api" + "_key") + " = os.environ[" + self.Q + "API_KEY" + self.Q + "]\n"
+        _, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg=f"env-read must allow, got {out!r}")
+
+    def test_secret_with_adjacent_rationale_is_allowed(self) -> None:
+        target = self._read_py_target()
+        # Same offending value, but an adjacent 'because' rationale in the
+        # ±1-line window suppresses the DENY (the escape hatch operating
+        # the user's "*非必须*" scoping).
+        new_string = self._secret_assign_line() + "  # because documented test vector\n"
+        _, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg=f"rationale must allow, got {out!r}")
+
+    def test_clean_code_is_allowed(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, "total = price * qty  # arithmetic\n")
+        self.assertIsNone(out, msg=f"clean code must allow, got {out!r}")
+
+    def test_new_file_write_with_secret_is_denied(self) -> None:
+        target = str(self.tmpdir / "leak.py")
+        _, out, _ = self._pre_write_with_content(target, self._aws_key_line() + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_prose_doc_is_exempt(self) -> None:
+        # A .md target legitimately carries example credentials → exempt.
+        target = str(self.tmpdir / "notes.md")
+        _, out, _ = self._pre_write_with_content(target, self._aws_key_line() + "\n")
+        self.assertIsNone(out, msg=f".md must be exempt from rule 10, got {out!r}")
+
+
+class TestPathDependencyEdit(_ContentDetectorBase):
+    """v0.22 — rule 11 machine-specific path-dependency content detector."""
+
+    def test_windows_user_home_path_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._win_path_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_posix_user_home_path_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._posix_path_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_shell_home_variable_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._home_var_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_userprofile_variable_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._userprofile_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_tilde_path_literal_is_denied(self) -> None:
+        target = self._read_py_target()
+        _, out, _ = self._pre_edit_with_new_string(target, self._tilde_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_path_with_adjacent_rationale_is_allowed(self) -> None:
+        target = self._read_py_target()
+        new_string = self._win_path_line() + "  # essential: fixed OS location\n"
+        _, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg=f"path rationale must allow, got {out!r}")
+
+    def test_relative_path_is_allowed(self) -> None:
+        target = self._read_py_target()
+        new_string = "p = base / " + self.Q + "sub" + self.Q + " / " + self.Q + "file.csv" + self.Q + "\n"
+        _, out, _ = self._pre_edit_with_new_string(target, new_string)
+        self.assertIsNone(out, msg=f"relative path must allow, got {out!r}")
+
+    def test_new_file_write_with_path_is_denied(self) -> None:
+        target = str(self.tmpdir / "cfg.py")
+        _, out, _ = self._pre_write_with_content(target, self._posix_path_line() + "\n")
+        self._assert_deny(out, "rule 11")
+
+    def test_prose_doc_is_exempt(self) -> None:
+        target = str(self.tmpdir / "README.md")
+        _, out, _ = self._pre_write_with_content(target, self._win_path_line() + "\n")
+        self.assertIsNone(out, msg=f".md must be exempt from rule 11, got {out!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

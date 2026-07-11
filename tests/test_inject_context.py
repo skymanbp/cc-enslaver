@@ -38,7 +38,7 @@ class TestInjectContextDefault(unittest.TestCase):
     """No CC_ENSLAVER_LANG → the English skeleton (``prompts/*.md``).
 
     English is the source-of-truth 'skeleton' language (v0.21). These
-    cover the JSON hook shape, the language-neutral 01-09 structural
+    cover the JSON hook shape, the language-neutral 01-11 structural
     contract, and that the *default* (no env var) resolves to English.
     """
 
@@ -62,11 +62,12 @@ class TestInjectContextDefault(unittest.TestCase):
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        # v0.11: 9 numbered rules now, all must appear in the session-
+        # v0.22: 11 numbered rules now, all must appear in the session-
         # start injection. These tokens are language-neutral (rule
         # numbers + the rules/ path), so they hold for the English
         # skeleton default and every translation alike.
-        for label in ("01", "02", "03", "04", "05", "06", "07", "08", "09", "rules/"):
+        for label in ("01", "02", "03", "04", "05", "06", "07", "08", "09",
+                      "10", "11", "rules/"):
             self.assertIn(label, ctx, msg=f"context missing {label!r}")
 
     def test_no_lang_env_var_uses_english(self) -> None:

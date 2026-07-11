@@ -5,7 +5,7 @@
 
 ---
 
-## 一、9 条规则（全部 must；一句话索引，正文在 [`rules/zh/`](rules/zh/)）
+## 一、11 条规则（全部 must；一句话索引，正文在 [`rules/zh/`](rules/zh/)）
 
 | # | 规则 | 一句话 |
 |---|---|---|
@@ -18,6 +18,8 @@
 | 07 | 任务忠实 | 完成前自答 3 题（覆盖性 / 标准性 / 忠实性）。用户每个程度词（强制 / 完整 / 严格 / 所有）必须落地为硬动作。 |
 | 08 | 改前必读·写前必想 | `Edit` 前完整 Read 目标 + 调用点 + 连带文件；回复中显式答 ≥ 3 项（根因 / 架构 / 方案 / 连带 / 风险 / 对比）。违反 → Stop **layer (e)** BLOCK。 |
 | 09 | 系统式修改 / 禁止打补丁 | 补丁标记必带 why 注释；禁 rolling patches；禁在调用点包 wrapper 让异常消失。违反 → Stop **layer (f)** BLOCK。 |
+| 10 | 禁止非必须硬编码 | 设计上本应是配置 / 环境 / 变量的值（密钥 / 凭证 / 私钥 / URL 内凭证）不得内联成源码字面量。未辩护的硬编码密钥 → `PreToolUse(Edit\|Write)` DENY。 |
+| 11 | 禁止非必须路径依赖 | 机器特定的 user-home 绝对路径（`C:\Users\…`、`/home/…`、`$HOME`、`%USERPROFILE%`、`"~/…"`）不得写死进代码 —— 运行时派生。未辩护的路径依赖 → `PreToolUse(Edit\|Write)` DENY。 |
 
 ---
 
@@ -27,6 +29,8 @@
 |---|---|---|
 | Edit 一个本会话**没 Read 过**的已存在文件 | `PreToolUse(Edit\|Write)` DENY | 先 Read 完整文件再 Edit |
 | Edit/Write 含未带 why 的 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` / `time.sleep` 工作绕过 | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释，或改成真修根因 |
+| Edit/Write 往**代码**里塞未辩护的硬编码密钥（密钥命名字面量 ≥ 8 字符 / PEM 私钥头 / `AKIA…` / URL 内凭证）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 10）| 外部化到环境 / 密钥库，用标注过的占位，或紧邻补 why 注释 |
+| Edit/Write 往**代码**里塞未辩护的用户特定绝对路径（`C:\Users\…` / `/home`、`/Users/…` / `$HOME` / `%USERPROFILE%` / 引号 `~/…`）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 11）| 运行时派生路径（插件根 / cwd / 环境 / 参数），或紧邻补 why 注释。散文文档 + 锁文件目标豁免 |
 | 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
 | Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限的根因 |
 | Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 6 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
@@ -95,6 +99,8 @@ cc-enslaver:
 - 即将做 ≤ 5 行的 "快速修复" → rule 02 + 09
 - 即将 `# noqa` / `@ts-ignore` / `eslint-disable` 而无 why → rule 09（**会被 PreToolUse DENY**）
 - 即将 `--no-verify` / `git push --force` / `chmod 777` → rule 03 + 09（**会被 Bash hook DENY**）
+- 即将把密钥 / API key / token / 私钥 / URL 内凭证内联成代码字面量 → rule 10（**会被 PreToolUse DENY**）
+- 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进代码 → rule 11（**会被 PreToolUse DENY**）
 - 测试通过就宣告完成（没问"为什么之前不通过"）→ rule 06
 - 给出代码位置陈述但无 `file:line` → rule 05
 - 即将说 "已解决 / 修好了" 但没重触发原症状 → rule 06（**会被 Stop BLOCK**）
@@ -109,5 +115,5 @@ cc-enslaver:
 
 ## 五、文档地址
 
-- 规则正文：[`rules/zh/01-verify-dont-guess.md`](rules/zh/01-verify-dont-guess.md) ~ [`rules/zh/09-systematic-modification.md`](rules/zh/09-systematic-modification.md)
+- 规则正文：[`rules/zh/01-verify-dont-guess.md`](rules/zh/01-verify-dont-guess.md) ~ [`rules/zh/11-no-path-dependency.md`](rules/zh/11-no-path-dependency.md)
 - 索引：[`docs/RULES.md`](docs/RULES.md) · 架构：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · 项目指令：[`CLAUDE.md`](CLAUDE.md)

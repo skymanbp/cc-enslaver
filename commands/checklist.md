@@ -1,5 +1,5 @@
 ---
-description: 打印 cc-enslaver 九条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改）。
+description: 打印 cc-enslaver 十一条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改）。
 argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；默认 all)"
 ---
 
@@ -172,4 +172,4 @@ F5 · 无补丁标记 ✅  new_string 中无裸 `# noqa` / `try/except: pass`
 
 **不允许**笼统的"都做了"。**不允许**虚报 ✅。如果某条不通过，请在最终回复中**优先修复后再宣告完成**。
 
-> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/09-systematic-modification.md`](rules/09-systematic-modification.md)。
+> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md)。

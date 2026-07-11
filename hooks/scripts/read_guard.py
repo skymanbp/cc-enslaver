@@ -254,6 +254,84 @@ manually -- the discipline exists to flag laziness, not block you.
 """
 
 
+HARDCODE_DENY_TEMPLATE = """cc-enslaver · rule 10 violation (non-essential hardcoding)
+
+Tool: {tool_name}
+Target: {file_path}
+Pattern matched: {pattern_label}
+
+Snippet (the offending segment in your content):
+{snippet}
+
+Per rule 10 (rules/10-no-hardcoding.md), a value that by design should
+be externalized -- read from configuration, an environment variable, a
+secret manager, or a function parameter -- has been lazily inlined as a
+literal. This is the "设计上应该是变量却被偷懒塞成硬编码" antipattern:
+credentials, API keys, tokens, and private-key material must never be
+baked into source.
+
+To proceed, do one of:
+
+  (1) **Externalize it** (preferred, rule 03 root cause): read the value
+      from the environment or a config / secret store, e.g.
+        api_key = os.environ["API_KEY"]          # not a literal
+      and keep the real value only in an untracked .env / secret store.
+
+  (2) **If this is genuinely a non-secret placeholder / example / test
+      fixture**, make it distinguishable: use an obvious placeholder
+      value (containing `example`, `changeme`, `your-`, `<...>`,
+      `${{...}}`, `dummy`, `redacted`) OR add an adjacent why-comment
+      stating it is essential / a fixture / an example (a token from:
+      essential / 必须 / example / fixture / placeholder / 占位 /
+      sample / test data).
+
+  (3) **Stop and surface**: if you believe the hardcoding is truly
+      unavoidable, tell the user and let them decide -- do not silently
+      commit a secret.
+
+Note: prose docs (.md / .rst / .txt / .adoc) and lockfiles are exempt
+from this detector; it targets freshly authored *code*.
+"""
+
+
+PATHDEP_DENY_TEMPLATE = """cc-enslaver · rule 11 violation (non-essential path dependency)
+
+Tool: {tool_name}
+Target: {file_path}
+Pattern matched: {pattern_label}
+
+Snippet (the offending segment in your content):
+{snippet}
+
+Per rule 11 (rules/11-no-path-dependency.md), a machine-specific
+absolute filesystem path -- a user-home directory, a hardcoded drive
+root, or a shell home variable baked into a string literal -- has been
+committed into code. This breaks portability the moment the code runs on
+another machine, another OS, or in CI. (This repo itself shipped v0.21.1
+to fix exactly such a Windows path-portability bug in its own hook.)
+
+To proceed, do one of:
+
+  (1) **Derive the path at runtime** (preferred, rule 03 root cause):
+        from pathlib import Path
+        base = Path(__file__).resolve().parent          # module-relative
+        base = Path(os.environ["CLAUDE_PLUGIN_DATA"])    # from a config var
+      Use a project-root marker, an env var, tempfile, or a passed-in
+      argument instead of a literal user directory.
+
+  (2) **If the path is genuinely essential** (a fixed OS location that is
+      identical on every target machine), add an adjacent why-comment
+      saying so (a token from: essential / 必须 / 必需 / example /
+      fixture / sample).
+
+  (3) **Stop and surface**: if portability truly cannot be achieved, tell
+      the user rather than silently hardcoding your own machine.
+
+Note: prose docs (.md / .rst / .txt / .adoc) and lockfiles are exempt
+from this detector; it targets freshly authored *code*.
+"""
+
+
 def _emit_deny(template: str, **fields: object) -> None:
     """Write a structured deny response and exit 0.
 
@@ -475,9 +553,11 @@ def _line_window(text: str, span_start: int, span_end: int) -> str:
     return text[prev_start:next_end]
 
 
-def _has_rationale(snippet: str) -> bool:
+def _has_rationale(
+    snippet: str, tokens: tuple[str, ...] = RATIONALE_TOKENS
+) -> bool:
     snippet_lc = snippet.lower()
-    return any(tok in snippet_lc for tok in RATIONALE_TOKENS)
+    return any(tok in snippet_lc for tok in tokens)
 
 
 def _find_unjustified_patch_marker(new_string: str) -> tuple[str, str] | None:
@@ -516,6 +596,174 @@ def _find_unjustified_patch_marker(new_string: str) -> tuple[str, str] | None:
                 # Trim snippet to a reasonable size for the deny message.
                 short = window if len(window) <= 240 else window[:237] + "..."
                 return label, short
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Rule 10 (no non-essential hardcoding) + rule 11 (no non-essential path
+# dependency) — write-time content detectors, v0.22.0.
+#
+# Same mechanism as the rule-09 patch-marker detector above: scan the
+# incoming new_string / content, and DENY on a high-confidence match
+# unless an adjacent why-comment (or, for secrets, an obvious placeholder
+# value) marks it as essential / example. That escape hatch is how the
+# user's "*非必须*" (non-essential) scoping is operationalized: a flagged
+# literal WITH a stated justification is allowed; a bare one is not.
+#
+# Design (mirrors the conservative-detector note at PATCH_MARKERS above):
+# prefer false negatives to false positives. Only the unambiguous
+# should-be-config classes are hard-matched; magic numbers and bare
+# network endpoints are left to the soft rule text (rules/10, rules/11),
+# not enforced here.
+#
+# Self-scan safety: this module is itself a .py file, so a future Edit to
+# it re-runs these very detectors on the new source. Every pattern below
+# is written so its own *definition* text does not match it (the home-var
+# literals are split across string concatenation for exactly this
+# reason), and the DENY templates use env-read / placeholder examples
+# that the value filter skips. Test fixtures build offending strings at
+# runtime for the same reason.
+# --------------------------------------------------------------------------- #
+
+# Extra rationale tokens that mark a flagged literal / path as essential
+# or as a deliberate example / fixture. Union with rule-09
+# RATIONALE_TOKENS so `because` / `原因` / etc. also work; rule-09's own
+# tuple is left untouched (byte-identical rule-09 behavior).
+HARDCODE_RATIONALE_TOKENS = RATIONALE_TOKENS + (
+    "essential", "必须", "必需", "example", "fixture",
+    "placeholder", "占位", "sample", "test data", "test-data",
+)
+
+# A secret-named identifier assigned a quoted literal of >= 8 chars. The
+# value is captured (group `val`) so obvious placeholders can be filtered
+# out below. Bounded, backtrack-free (the value class excludes both
+# quotes, so the closing quote terminates the run in one pass).
+_SECRET_ASSIGN = re.compile(
+    r"\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key"
+    r"|secret[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key"
+    r"|bearer)\b[ \t]*[:=][ \t]*(['\"])(?P<val>[^'\"\n]{8,})\1",
+    re.IGNORECASE,
+)
+
+# If the captured value contains any of these, it is a placeholder /
+# env-read / template reference, not a real embedded secret -> skip it.
+_SECRET_PLACEHOLDERS = (
+    "example", "changeme", "change-me", "change_me", "your-", "your_",
+    "yourkey", "redacted", "dummy", "placeholder", "sample", "fake",
+    "todo", "xxxx", "****", "....", "<", ">", "${", "os.environ",
+    "getenv", "process.env", "config.", "settings.",
+)
+
+# Standalone secret literals that need no keyword on the left.
+_SECRET_LITERAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "Hardcoded credential: private-key PEM header",
+        re.compile(r"-----BEGIN (?:[A-Z][A-Z ]*)?PRIVATE KEY-----"),
+    ),
+    (
+        "Hardcoded credential: AWS access-key literal",
+        re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    ),
+    (
+        "Hardcoded credential: username:password in a connection URL",
+        re.compile(r"://[^/\s:@'\"]+:[^/\s:@'\"]+@"),
+    ),
+]
+
+# Machine-specific absolute filesystem paths (user-home rooted). Kept
+# deliberately narrow to *user-specific* roots to hold the false-positive
+# rate down -- not every C:\ or /etc/ path, only ones tied to a person's
+# home directory or profile.
+_PATH_DEP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "Path dependency: Windows user-home absolute path",
+        re.compile(r"[A-Za-z]:[\\/](?:Users|home)[\\/][^\\/\s'\"<>|]+", re.IGNORECASE),
+    ),
+    (
+        "Path dependency: POSIX user-home absolute path",
+        re.compile(r"/(?:home|Users)/[^/\s'\"<>|]+/"),
+    ),
+    (
+        "Path dependency: shell home variable in a literal",
+        # Split across concatenation so this definition does not match
+        # itself when the guard later scans its own source (rule 11
+        # self-scan safety; see the module note above).
+        re.compile(r"\$" r"HOME\b|%USER" r"PROFILE%"),
+    ),
+    (
+        "Path dependency: user-home tilde path in a string literal",
+        re.compile(r"['\"]~/[^'\"\n]*['\"]"),
+    ),
+]
+
+# Targets exempt from the rule 10 + 11 content detectors: prose docs and
+# lockfiles legitimately carry illustrative example paths / placeholder
+# values, and lockfiles are machine-generated. The rule-09 patch-marker
+# detector keeps its all-files behavior; only these two new detectors
+# honor the exemption. Mirrors the user's "写完*代码*后" framing.
+_PROSE_DOC_EXTS = {".md", ".markdown", ".rst", ".txt", ".adoc"}
+_LOCKFILE_NAMES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
+    "cargo.lock", "gemfile.lock", "composer.lock",
+}
+
+
+def _is_scannable_target(file_path: str) -> bool:
+    """Return False for prose-doc / lockfile targets (rule 10 + 11 exempt)."""
+    name = os.path.basename(file_path).lower()
+    if name in _LOCKFILE_NAMES or name.endswith(".lock"):
+        return False
+    return os.path.splitext(name)[1] not in _PROSE_DOC_EXTS
+
+
+def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
+    """Scan `text` for the first unjustified hardcoded secret (rule 10).
+
+    Returns (label, surrounding_snippet) on hit, or None on clean. A
+    match is suppressed when the value is an obvious placeholder / env-
+    read or when an adjacent line carries an essential / example
+    rationale (HARDCODE_RATIONALE_TOKENS).
+    """
+    if not text:
+        return None
+    for m in _SECRET_ASSIGN.finditer(text):
+        val_lc = m.group("val").lower()
+        if any(ph in val_lc for ph in _SECRET_PLACEHOLDERS):
+            continue
+        window = _line_window(text, m.start(), m.end())
+        if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
+            continue
+        short = window if len(window) <= 240 else window[:237] + "..."
+        return (
+            "Hardcoded credential: secret-named variable assigned a literal",
+            short,
+        )
+    for label, pat in _SECRET_LITERAL_PATTERNS:
+        for m in pat.finditer(text):
+            window = _line_window(text, m.start(), m.end())
+            if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
+                continue
+            short = window if len(window) <= 240 else window[:237] + "..."
+            return label, short
+    return None
+
+
+def _find_path_dependency(text: str) -> tuple[str, str] | None:
+    """Scan `text` for the first unjustified machine-specific path (rule 11).
+
+    Returns (label, surrounding_snippet) on hit, or None on clean. A
+    match is suppressed when an adjacent line carries an essential
+    rationale (HARDCODE_RATIONALE_TOKENS).
+    """
+    if not text:
+        return None
+    for label, pat in _PATH_DEP_PATTERNS:
+        for m in pat.finditer(text):
+            window = _line_window(text, m.start(), m.end())
+            if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
+                continue
+            short = window if len(window) <= 240 else window[:237] + "..."
+            return label, short
     return None
 
 
@@ -559,6 +807,36 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 hit, kind=tool, tool_or_cmd=file_path,
             ))
             return  # unreachable; _emit_raw_deny exits
+
+    def _check_hardcode_and_path(content: str) -> None:
+        """Rule 10 + 11 content detectors (v0.22.0). DENY on first hit.
+
+        Skips prose-doc / lockfile targets (they legitimately carry
+        example paths and placeholder values). Ordered secret-first,
+        path-second, matching the rules' numeric order.
+        """
+        if not _is_scannable_target(file_path):
+            return
+        hit = _find_hardcoded_secret(content)
+        if hit is not None:
+            _emit_deny(
+                HARDCODE_DENY_TEMPLATE,
+                tool_name=tool,
+                file_path=file_path,
+                pattern_label=hit[0],
+                snippet=hit[1],
+            )
+            return  # unreachable; _emit_deny exits
+        hit = _find_path_dependency(content)
+        if hit is not None:
+            _emit_deny(
+                PATHDEP_DENY_TEMPLATE,
+                tool_name=tool,
+                file_path=file_path,
+                pattern_label=hit[0],
+                snippet=hit[1],
+            )
+            return  # unreachable; _emit_deny exits
 
     def _check_rolling_patch(old_string: str, new_string: str) -> None:
         """Rule-09 rolling-patch counter (v0.13).
@@ -618,6 +896,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
                     snippet=hit[1],
                 )
                 return  # unreachable; _emit_deny exits
+            # rule 10 + 11 content check (v0.22) — hardcoded secrets /
+            # machine-specific paths are laziness in a brand-new file too.
+            _check_hardcode_and_path(content)
             # 圣旨 check (v0.12) — applies to new files too.
             _check_edicts(content)
             state_lib.record_edit_turn(session_id, turn_count)
@@ -642,6 +923,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 snippet=hit[1],
             )
             return
+        # rule 10 + 11 content check (v0.22) — hardcoded secrets /
+        # machine-specific paths.
+        _check_hardcode_and_path(content)
         # 圣旨 check (v0.12).
         _check_edicts(content)
         # Rolling-patch check (v0.13). A Write to an existing file is
@@ -684,6 +968,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 snippet=hit[1],
             )
             return  # unreachable; _emit_deny exits
+        # rule 10 + 11 content check (v0.22) — hardcoded secrets /
+        # machine-specific paths in the incoming new_string.
+        _check_hardcode_and_path(new_string)
         # 圣旨 check (v0.12) — scan the incoming new_string.
         _check_edicts(new_string)
         # Rolling-patch check (v0.13).

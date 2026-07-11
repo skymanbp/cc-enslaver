@@ -7,7 +7,7 @@
 
 ---
 
-## 1. The 9 rules (all `must`; one-line index; full text in [`rules/`](rules/))
+## 1. The 11 rules (all `must`; one-line index; full text in [`rules/`](rules/))
 
 | # | Rule | One-liner |
 |---|---|---|
@@ -20,6 +20,8 @@
 | 07 | Task fidelity | Before declaring done, answer 3 questions (coverage / standard / fidelity). Every modifier word the user used (mandatory / strict / complete / all) must land as a hard action, not soft documentation. |
 | 08 | Read-before-edit · think-before-write | Before any `Edit`: full Read of target + call sites + connected files; in your reply explicitly answer ≥ 3 of (root cause / architecture / solution / impact / risk / alternatives). Violation → Stop **layer (e)** BLOCK. |
 | 09 | Systematic modification / no patch-style | Patch markers require a why-comment adjacent; no rolling patches; no wrapping the call site to make exceptions vanish. Violation → Stop **layer (f)** BLOCK. |
+| 10 | No non-essential hardcoding | A value that by design should be config/env/variable (secret / credential / private key / credentials-in-a-URL) must not be inlined as a source literal. Unjustified hardcoded secret → `PreToolUse(Edit\|Write)` DENY. |
+| 11 | No non-essential path dependency | A machine-specific user-home absolute path (`C:\Users\…`, `/home/…`, `$HOME`, `%USERPROFILE%`, `"~/…"`) must not be baked into code — derive it at runtime. Unjustified path dependency → `PreToolUse(Edit\|Write)` DENY. |
 
 ---
 
@@ -29,6 +31,8 @@
 |---|---|---|
 | Edit a pre-existing file you have NOT Read this session | `PreToolUse(Edit\|Write)` DENY | Read the full file first, then Edit |
 | Edit/Write containing unjustified `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` / `time.sleep` workaround | `PreToolUse(Edit\|Write)` DENY | Add an adjacent why-comment, or actually fix the root cause |
+| Edit/Write into **code** containing an unjustified hardcoded secret (secret-named literal ≥ 8 chars / PEM private-key header / `AKIA…` / credentials-in-a-URL) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 10) | Externalize to env / secret store, use a marked placeholder, or add an adjacent why-comment |
+| Edit/Write into **code** containing an unjustified user-specific absolute path (`C:\Users\…` / `/home\|/Users/…` / `$HOME` / `%USERPROFILE%` / quoted `~/…`) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 11) | Derive the path at runtime (plugin root / cwd / env / arg), or add an adjacent why-comment. Prose-doc + lockfile targets are exempt |
 | 4th small Edit (≤ 10 lines AND < 200 chars) to the same file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | `PreToolUse(Edit\|Write)` DENY (v0.13) | Combine pending fixes into one large Edit, or `Write` to replace the whole file, or stop and surface to user |
 | Bash containing `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Find the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing verification evidence / containing a hedge / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 6-layer BLOCK | Read the status table in the block reason; fix the FAIL row |
@@ -99,6 +103,8 @@ cc-enslaver:
 - About to do a ≤ 5 line "quick fix" → rule 02 + 09
 - About to write `# noqa` / `@ts-ignore` / `eslint-disable` without why → rule 09 (**PreToolUse will DENY**)
 - About to run `--no-verify` / `git push --force` / `chmod 777` → rule 03 + 09 (**Bash hook will DENY**)
+- About to inline a secret / API key / token / private key / credentials-in-a-URL as a code literal → rule 10 (**PreToolUse will DENY**)
+- About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into code → rule 11 (**PreToolUse will DENY**)
 - Tests pass = declare done (without asking "why was it failing before") → rule 06
 - Code location stated without `file:line` → rule 05
 - About to say "solved / fixed" without re-triggering the original symptom → rule 06 (**Stop will BLOCK**)
@@ -113,5 +119,5 @@ cc-enslaver:
 
 ## 5. Documentation locations
 
-- Rule texts: [`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/09-systematic-modification.md`](rules/09-systematic-modification.md)
+- Rule texts: [`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md)
 - Index: [`docs/RULES.md`](docs/RULES.md) · Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Project doc: [`CLAUDE.md`](CLAUDE.md)

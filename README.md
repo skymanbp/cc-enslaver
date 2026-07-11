@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.21.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.22.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -25,8 +25,10 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 8 Stop-hook gates** (v0.21.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **11 built-in rules + user-defined Imperial Edicts (圣旨) + 8 Stop-hook gates** (v0.22.0):
 
+> **New in v0.22** — 🔒 **Two new write-time content detectors (rules 10 + 11)**: `PreToolUse(Edit|Write)` now physically **DENY**s writing *non-essential* hardcoding or machine-specific path dependencies into code. **Rule 10 (no hardcoding)** flags an unjustified hardcoded secret — a secret-named literal (`password` / `api_key` / `token` / … ≥ 8 chars), a PEM `-----BEGIN … PRIVATE KEY-----` header, an `AKIA…` AWS access key, or credentials embedded in a connection URL. **Rule 11 (no path dependency)** flags a user-home absolute path baked into code (`C:\Users\…`, `/home/…` or `/Users/…`, `$HOME`, `%USERPROFILE%`, a quoted `~/…`). Both share the rule-09 **why-comment escape hatch** — an adjacent `because` / `原因` / `essential` / `fixture` / `placeholder` justification allows the write, which is exactly how "*non-essential*" is operationalized — and both **exempt prose-doc + lockfile targets** (`.md` / `.rst` / `.txt` / `.adoc`, `*.lock`, `package-lock.json`) so this repo's own example-laden docs never self-trip. Like the other content detectors they are **PreToolUse-only** (no Stop layer). See [`rules/10-no-hardcoding.md`](rules/10-no-hardcoding.md) + [`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md).
+>
 > **New in v0.21** — 🌍 **English is now the skeleton language**: the plugin's rule + prompt surface flipped from Chinese-canonical to **English-as-source-of-truth**. English lives at the root (`rules/*.md`, `prompts/*.md`); each translation lives in a language subdir (`rules/zh/`, `prompts/zh/`, and any `rules/<code>/`). Injection defaults to English (`CC_ENSLAVER_LANG` unset / `en`); set `CC_ENSLAVER_LANG=zh` for Chinese, or any code for a partial translation (missing files fall back to the English skeleton). **Language version control is a hard, CI-enforced gate**: [`hooks/scripts/i18n_check.py`](hooks/scripts/i18n_check.py) (run via `/cc-enslaver:i18n`) asserts every translation tracks the skeleton file-for-file and section-for-section; [`tests/test_i18n_sync.py`](tests/test_i18n_sync.py) turns CI red on any drift. **On drift, English wins.** See [`docs/I18N.md`](docs/I18N.md).
 >
 > **New in v0.20** — 📋 **Structured YAML reporting + plain-language TL;DR**: every reply now ends with a fixed ```yaml `cc-enslaver:` block (`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`; English mirror `before / edits / convergence / fidelity / closing / tldr`) — the audit trail is **scannable at a glance** instead of drifting free-form prose. A new **Stop layer (h)** hard-enforces a one-sentence `tldr` (大白话总结) on every done-claim reply, and every block reason now carries a `大白话:` takeaway. The schema's field names ARE the existing Stop-hook detection markers, so no detector changed — old emoji-markdown and new YAML reply forms both pass.
@@ -46,10 +48,12 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 > **From v0.12** — 🏛️ **Imperial Edicts (圣旨)**: user-defined per-project hard rules loaded from `.claude/cc-enslaver/edicts.toml` with PreToolUse(Edit|Write|Bash) DENY and `/cc-enslaver:edict` CRUD slash command. See [`docs/EDICTS.md`](docs/EDICTS.md). Stop-hook block reasons render as uniform **status tables**. Soft-layer prompts thinned 54%.
 
 
-1. **Soft layer (prompt injection)** — at session start and before every user prompt, the plugin injects a concise reminder of the 9 discipline rules into the agent's context. v0.11 added a standard response skeleton; **v0.20 turns it into a fixed YAML reply schema** (`cc-enslaver:` block with `改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr` fields — English mirror uses `before / edits / convergence / fidelity / closing / tldr`) whose field names ARE the Stop-hook detection markers, plus a mandatory plain-language `tldr` (大白话总结) closing line. A **9-item per-turn self-check checklist** with a physical-enforcement table maps each lazy attempt to the specific hook that catches it.
+1. **Soft layer (prompt injection)** — at session start and before every user prompt, the plugin injects a concise reminder of the 11 discipline rules into the agent's context. v0.11 added a standard response skeleton; **v0.20 turns it into a fixed YAML reply schema** (`cc-enslaver:` block with `改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr` fields — English mirror uses `before / edits / convergence / fidelity / closing / tldr`) whose field names ARE the Stop-hook detection markers, plus a mandatory plain-language `tldr` (大白话总结) closing line. A **per-turn self-check checklist** with a physical-enforcement table maps each lazy attempt to the specific hook that catches it.
 2. **Hard layer (PreToolUse blocks)** — at the moment the agent calls `Edit`, `Write`, or `Bash`, the plugin gates the call:
    - **Edit/Write read-before-edit** (rule 04 + rule 08): denied if the target file already exists but has not been `Read` in this session. New file creation is allowed.
    - **Edit/Write patch-style content** (rule 09, **v0.11**): denied if `new_string` (Edit) or `content` (Write) contains an *unjustified* suppression marker — `try / except: pass`, `# noqa`, `# type: ignore`, `// @ts-ignore`, `// @ts-expect-error`, `// eslint-disable[-next-line]`, `time.sleep(...) # race/wait/workaround`. Each marker is allowed when accompanied by a why-comment on the same or adjacent line containing `because`, `原因`, `why`, `正当`, `rationale`, `see issue/pr/ticket`, `intentional[ly]`, `deliberate[ly]`, `third-party`, or `per spec/rfc/standard`.
+   - **Edit/Write hardcoded secret** (rule 10, **v0.22**): denied if `new_string` (Edit) or `content` (Write) targets *code* — not a `.md`/`.rst`/`.txt`/`.adoc` prose doc or a lockfile — and contains an *unjustified* hardcoded secret: a secret-named literal ≥ 8 chars (`password` / `api_key` / `token` / …), a PEM `-----BEGIN … PRIVATE KEY-----` header, an `AKIA…` AWS access key, or credentials embedded in a connection URL. Allowed when an adjacent line carries a why/essential rationale (`because`, `原因`, `essential`, `fixture`, `placeholder`, …) or the value is an obvious placeholder / env-read.
+   - **Edit/Write path dependency** (rule 11, **v0.22**): denied if code contains an *unjustified* machine-specific user-home absolute path (`C:\Users\…`, `/home/…` or `/Users/…`, `$HOME`, `%USERPROFILE%`, a quoted `~/…`). Recovery: derive the path at runtime (plugin root / cwd / env / arg), or justify with an adjacent why-comment. Same prose-doc + lockfile exemption as rule 10; deliberately narrow to *user-specific* roots to keep false positives low.
    - **Bash bypass patterns** (rule 03 + rule 09): denied if the command contains `--no-verify`, `--no-gpg-sign`, `git push --force` (without `--force-with-lease`), or `chmod 777`. Each deny includes a precise recovery instruction.
    - **Read-cache escape hatch** (v0.4.0): when Claude Code's harness short-circuits a `Read` to its result cache without invoking the tool, the file never enters session state and a subsequent `Edit` is falsely denied. Agents can call `register_read.py --file ABS --hash SHA256` from Bash; `bash_guard.py` recomputes the hash from disk and only registers on match, so the hatch can't itself be used as a bypass.
    - **Edit-turn stamping** (**v0.11**): every accepted Edit/Write records `last_edit_turn = turn_count` in session state. The Stop-hook layers (e)+(f) consult this to scope themselves to edit turns only.
@@ -92,7 +96,7 @@ cc-enslaver/
 │   ├── EDICTS.md                # Imperial Edicts (圣旨) user guide (v0.12)
 │   └── I18N.md                  # Language version control — English is the skeleton (v0.21)
 ├── rules/                       # ★ LLM-agnostic source of truth (plain Markdown)
-│   ├── 00-index.md ~ 09-systematic-modification.md  # English skeleton (source of truth)
+│   ├── 00-index.md ~ 11-no-path-dependency.md  # English skeleton (source of truth)
 │   └── zh/                      # 中文 translation (any rules/<code>/; v0.21)
 ├── prompts/                     # Distilled injection text (consumed by hooks)
 │   ├── session-start.md         # SessionStart injection (English skeleton)
@@ -102,7 +106,7 @@ cc-enslaver/
 │   ├── hooks.json               # Hook registration (4 events)
 │   └── scripts/
 │       ├── inject_context.py    # Soft-layer injection (English skeleton; any lang via CC_ENSLAVER_LANG)
-│       ├── read_guard.py        # PreToolUse(Read|Edit|Write) — rule 04+08+09 + edicts + baseline
+│       ├── read_guard.py        # PreToolUse(Read|Edit|Write) — rule 04+08+09+10+11 + edicts + baseline
 │       ├── bash_guard.py        # PreToolUse(Bash) — rule 03+09 + edicts
 │       ├── stop_guard.py        # Stop — 7-layer status table
 │       ├── register_read.py     # Read-cache escape hatch (v0.4)
@@ -115,7 +119,7 @@ cc-enslaver/
 ├── commands/                    # /cc-enslaver:{checklist,verify,gc,edict,i18n}
 ├── agents/verifier.md           # Independent citation verifier subagent
 ├── skills/systematic-debug/     # Auto-invoked debug discipline skill
-└── tests/                       # 174 black-box subprocess tests (run with python -m unittest discover tests)
+└── tests/                       # 248 black-box subprocess tests (run with python -m unittest discover tests)
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a layer-by-layer walkthrough and [`docs/EDICTS.md`](docs/EDICTS.md) for the Imperial Edicts user guide.
@@ -172,7 +176,7 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 |---|---|---|---|
 | `SessionStart` | — | Inject 9-rule discipline summary + standard response skeleton + Imperial Edicts block (English skeleton by default; any language via `CC_ENSLAVER_LANG`) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `UserPromptSubmit` | — | Re-inject per-turn decision triggers + Imperial Edicts (defends against context compaction) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
-| `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; capture mtime baseline (v0.16); deny Edit/Write of unread existing file (rule 04+08); deny patch-style `new_string` (rule 09 v0.11); deny 4th small Edit without systematic rewrite (rule 09 v0.13); deny on Imperial Edict `deny_edit` regex hit (v0.12); stamp `last_edit_turn` | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
+| `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; capture mtime baseline (v0.16); deny Edit/Write of unread existing file (rule 04+08); deny patch-style `new_string` (rule 09 v0.11); deny hardcoded secret in code (rule 10 v0.22); deny user-home path dependency in code (rule 11 v0.22); deny 4th small Edit without systematic rewrite (rule 09 v0.13); deny on Imperial Edict `deny_edit` regex hit (v0.12); stamp `last_edit_turn` | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns (rule 03+09: `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` root paths); process `register_read.py`; deny on Imperial Edict `deny_bash` regex hit | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
 | `Stop` | — | **Eight-layer decision** (v0.20): (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking / (f) missing rule-09 triplet / (g) file-claim contradicted by disk / (h) missing plain-language TL;DR. Block reason renders as a uniform status table + a `大白话:` line. | [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py) |
 
@@ -187,7 +191,7 @@ Hook scripts (8 total under [`hooks/scripts/`](hooks/scripts/)):
 - **`manage_edicts.py`** — Imperial Edicts CRUD CLI (v0.12; `--global` flag v0.14; UTF-8 stdout v0.17). Used by the `/cc-enslaver:edict` slash command and directly from the shell.
 - **`lib/state.py`** + **`lib/edicts.py`** — shared per-session-state library and Imperial Edicts loader / matcher / **multilingual renderer** (English default; `zh` — or any code — via `CC_ENSLAVER_LANG`, with English fallback for unknown codes; v0.17 + v0.21).
 
-All scripts are covered by **174 black-box subprocess tests** in [`tests/`](tests/) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13.
+All scripts are covered by **248 black-box subprocess tests** in [`tests/`](tests/) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output contracts.
 
@@ -248,8 +252,10 @@ MIT — see [`LICENSE`](LICENSE).
 | 根因绕过 | 用 `sleep` 掩盖竞态、用 `--no-verify` 跳过钩子 |
 | 半成品 | 写到"应该能工作"就停手，留 TODO，不验证整条链路 |
 
-### 防御分层（**v0.21.0**：9 内置规则 + 用户自定义圣旨 + Stop 钩子 8 层闸门）
+### 防御分层（**v0.22.0**：11 内置规则 + 用户自定义圣旨 + Stop 钩子 8 层闸门）
 
+> **v0.22 新增** — 🔒 **两个写时内容检测器（规则 10 + 11）**：`PreToolUse(Edit|Write)` 现在物理 **DENY** 把*非必须*的硬编码或机器相关路径依赖写进代码。**规则 10（禁止硬编码）** 拦截未经证明的硬编码密钥——secret 命名的字面量（`password` / `api_key` / `token` / … ≥ 8 字符）、PEM `-----BEGIN … PRIVATE KEY-----` 头、`AKIA…` AWS key、或连接串里内嵌的凭证。**规则 11（禁止路径依赖）** 拦截写死进代码的 user-home 绝对路径（`C:\Users\…`、`/home/…` 或 `/Users/…`、`$HOME`、`%USERPROFILE%`、带引号的 `~/…`）。两者共用 rule-09 的 **why 注释逃生口**——相邻一行有 `because` / `原因` / `essential` / `fixture` / `placeholder` 说明即放行，这正是"*非必须*"的落地方式——且都**豁免散文档 + lockfile**（`.md` / `.rst` / `.txt` / `.adoc`、`*.lock`、`package-lock.json`），所以本仓库自己满是示例路径的文档不会自触发。跟其它内容检测器一样是 **PreToolUse-only**（无 Stop 层）。详见 [`rules/10-no-hardcoding.md`](rules/10-no-hardcoding.md) + [`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md)。
+>
 > **v0.21 新增** — 🌍 **英文成为骨架语言**：插件的规则 + 注入文案从"中文 canonical"翻转为**英文 = source of truth**。英文放在根层（`rules/*.md`、`prompts/*.md`），每种翻译放语言子目录（`rules/zh/`、`prompts/zh/`、任意 `rules/<code>/`）。注入**默认英文**（`CC_ENSLAVER_LANG` 未设 / `en`）；设 `CC_ENSLAVER_LANG=zh` 用中文，或任意语言码用部分翻译（缺失文件自动回退英文骨架）。**语言版本控制是硬性、CI 强制的闸门**：[`hooks/scripts/i18n_check.py`](hooks/scripts/i18n_check.py)（`/cc-enslaver:i18n` 调用）断言每种翻译逐文件、逐章节跟随骨架；[`tests/test_i18n_sync.py`](tests/test_i18n_sync.py) 一旦漂移就让 CI 变红。**漂移时以英文为准。** 详见 [`docs/I18N.md`](docs/I18N.md)。
 >
 > **v0.20 新增** — 📋 **结构化 YAML 汇报 + 大白话总结**：每次回复末尾输出固定的 ```yaml `cc-enslaver:` 块（`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`），把审计轨迹从飘忽的自由文本变成**一眼可扫的固定 schema**。新增 **Stop layer (h)** 硬强制每条 done-claim 回复必含一句 `tldr`（大白话总结），每条拦截理由也附一行 `大白话:`。schema 的字段名**本身就是**现有 Stop 检测 marker，所以检测层一行未改——新旧两种回复格式都通过。
@@ -259,6 +265,8 @@ MIT — see [`LICENSE`](LICENSE).
    - **Edit/Write 改前必读**（v0.2 + v0.11 rule 08）：目标文件已存在但本会话未 `Read` 过 → DENY。新文件创建放行。
    - **Edit/Write 反补丁内容**（**v0.11 rule 09**）：new_string 含未带 why 注释的 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `// eslint-disable` / `time.sleep(...) # race` → DENY。
    - **Edit/Write rolling-patch 频率**（**v0.13 rule 09**）：同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）且**无**系统式重写（≥ 50 行 / ≥ 1500 字符）介入 → DENY；不增计数器，需一次系统式 Edit/Write 才能重置。
+   - **Edit/Write 禁止非必须硬编码**（**v0.22 rule 10**）：写入*代码*（非 `.md`/`.rst`/`.txt`/`.adoc` 散文档、非 lockfile）的 new_string 含未经证明的硬编码密钥（secret 命名字面量 ≥ 8 字符 / PEM 私钥头 / `AKIA…` / 连接串内嵌凭证）→ DENY。相邻 why 注释（`because` / `原因` / `essential` / `fixture` / `placeholder`）或占位符放行。
+   - **Edit/Write 禁止非必须路径依赖**（**v0.22 rule 11**）：写入代码的 user-home 绝对路径（`C:\Users\…` / `/home/…` 或 `/Users/…` / `$HOME` / `%USERPROFILE%` / 带引号 `~/…`）→ DENY。改为运行时派生，或加相邻 why 注释。与 rule 10 同样豁免散文档 + lockfile。
    - **Edit/Write 圣旨**（**v0.12**）：new_string 命中项目 `edicts.toml` 中 `must` 圣旨的 `deny_edit` 正则 → DENY。
    - **Bash 内置绕过**（v0.3 + **v0.14 扩**）：`--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 根路径 → DENY。
    - **Bash 圣旨**（v0.12）：命令命中 `must` 圣旨的 `deny_bash` 正则 → DENY。内置先跑、圣旨后跑（圣旨不能 whitelist `--no-verify`）。

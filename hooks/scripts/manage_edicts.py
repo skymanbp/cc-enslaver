@@ -38,7 +38,7 @@ from lib import edicts as edicts_lib  # noqa: E402
 _HEADER = """# cc-enslaver — Imperial Edicts (圣旨) file
 #
 # This file defines project-specific hard rules that the cc-enslaver
-# plugin enforces on top of the built-in 9 rules.
+# plugin enforces on top of the built-in 11 rules.
 #
 # Schema:
 #   [[edicts]]

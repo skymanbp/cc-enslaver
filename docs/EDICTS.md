@@ -1,13 +1,13 @@
 # 圣旨 — User-Defined Imperial Edicts
 
 > Project-specific hard rules that ride on top of cc-enslaver's built-in
-> 9 rules. v0.12 introduces this as a layer-0 customisation mechanism.
+> 11 rules. v0.12 introduces this as a layer-0 customisation mechanism.
 
 ---
 
 ## 1. Why 圣旨
 
-The built-in 9 rules cover general AI laziness patterns (verify don't
+The built-in 11 rules cover general AI laziness patterns (verify don't
 guess, root cause not symptom, etc.). But every project has its own red
 lines that no general rule can cover:
 
@@ -90,8 +90,8 @@ base prompts:
 
 | `CC_ENSLAVER_LANG` | Injection banner | DENY headline |
 |---|---|---|
-| unset / `zh` / unknown | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 9 条）` | `cc-enslaver · 圣旨 E01 violation` |
-| `en` | `🏛️ Imperial Edicts (project hard rules; priority > builtin 9)` | `cc-enslaver · Imperial Edict E01 violation` |
+| unset / `zh` / unknown | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 11 条）` | `cc-enslaver · 圣旨 E01 violation` |
+| `en` | `🏛️ Imperial Edicts (project hard rules; priority > builtin 11)` | `cc-enslaver · Imperial Edict E01 violation` |
 
 The edict `text` / `note` strings themselves are passed through
 verbatim — they're whatever you wrote in `edicts.toml`. Only the
@@ -101,7 +101,9 @@ framing language switches.
 
 1. read-before-edit guard (rule 04 + 08)
 2. patch-style marker guard (rule 09)
-3. **圣旨 scan**
+3. hardcoded-secret guard (rule 10)
+4. path-dependency guard (rule 11)
+5. **圣旨 scan**
 
 Order in `bash_guard.py`:
 

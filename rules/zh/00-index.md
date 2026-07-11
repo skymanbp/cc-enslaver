@@ -26,13 +26,15 @@ severity: info
 | 07  | `07-task-fidelity.md`                           | 任务忠实                 | must     |
 | 08  | `08-read-before-edit-think-before-write.md`     | 改前必读，写前必想       | must     |
 | 09  | `09-systematic-modification.md`                 | 系统式修改，禁止打补丁   | must     |
+| 10  | `10-no-hardcoding.md`                           | 禁止非必须硬编码         | must     |
+| 11  | `11-no-path-dependency.md`                      | 禁止非必须路径依赖       | must     |
 
 ## 编号规则
 
 - 编号格式 `<两位数>-<kebab-case>.md`；
 - 一旦发布**永不复用**编号；
 - 废弃的规则保留文件，frontmatter 加 `status: deprecated` 字段。
-- 当前编号区间：`01–09`。
+- 当前编号区间：`01–11`。
 
 ## 关系
 
@@ -49,3 +51,8 @@ severity: info
 - **09** —— *修改时的内容形态*约束：编辑必须系统式，禁止打补丁。禁止
   无 why 的 `# noqa`、`@ts-ignore`、`try/except: pass`、掩竞态的
   `time.sleep`，以及永远够不到根因的 rolling 小补丁。
+- **10 / 11** —— *修改时的内容取值*约束，与 09 同属写入时 PreToolUse
+  内容探测器家族。**10** 禁止非必须硬编码（本应外部化为配置的密钥 /
+  凭证 / 私钥 / URL 内凭证）。**11** 禁止非必须路径依赖（本应运行时派生
+  的机器特定 user-home 绝对路径）。两者共享一个把"非必须"操作化的
+  why 注释逃生舱，且都豁免散文文档 + 锁文件目标。

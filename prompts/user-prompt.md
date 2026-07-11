@@ -15,6 +15,8 @@
 | About to write `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` without why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | Patching locally instead of **systematic** modification (rolling patches / wrap-and-swallow) | rule 09 | rule 09 DENY (if suppression marker has no why) |
 | About to `time.sleep()` to mask a race / comment out failing tests / loosen asserts | rule 03 + 09 | rule 09 DENY (for new code) |
+| About to inline a secret / API key / token / private key / credentials-in-a-URL as a **code** literal (should be config/env) | rule 10 | **PreToolUse(Edit\|Write) DENY** (unless placeholder / adjacent why) |
+| About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into **code** | rule 11 | **PreToolUse(Edit\|Write) DENY** (unless adjacent why; prose-doc/lockfile exempt) |
 | About to run `--no-verify` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf /` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
 | About to say "done / fixed" with no `$ command + output` evidence (missing **convergence**) | rule 06 (a) | Stop layer (a) BLOCK |
 | Have evidence but no explicit answers to 4 questions (really solved / better solution / what's not verified / verification reasonable; rule 06 **convergence**) | rule 06 (c) | Stop layer (c) BLOCK |

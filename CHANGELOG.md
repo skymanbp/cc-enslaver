@@ -17,6 +17,62 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.22.0] — 2026-07-11
+
+**Two new write-time content detectors: rule 10 (no non-essential hardcoding) + rule 11 (no non-essential path dependency).**
+
+Both extend the rule-09 `PreToolUse(Edit|Write)` content-detector mechanism: when an
+Edit or Write targets a *code* file, the `new_string` / `content` is scanned and an
+unjustified match is physically DENied before it lands. "Non-essential" is
+operationalized by the shared **adjacent why-comment escape hatch** — a flagged
+literal or path accompanied by a rationale comment (`because` / `原因` / `essential`
+/ `example` / `fixture` / `placeholder` / `占位` / …) is allowed; without one it is
+denied. Neither rule adds a Stop layer — content detectors are PreToolUse-only,
+mirroring the rule-09 patch-marker precedent (the noqa / ts-ignore sibling has no
+Stop twin either).
+
+### Added
+
+- **rule 10 — no non-essential hardcoding** ([`rules/10-no-hardcoding.md`](rules/10-no-hardcoding.md)
+  + [`rules/zh/10-no-hardcoding.md`](rules/zh/10-no-hardcoding.md)). `_find_hardcoded_secret`
+  in [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) flags: a secret-named
+  identifier (`password` / `secret` / `api_key` / `access_key` / `auth_token` /
+  `client_secret` / `private_key` / `bearer`) assigned a quoted literal ≥ 8 chars
+  (obvious placeholders and env-reads excluded); a PEM private-key header; an AWS
+  access-key literal (`AKIA…`); and credentials embedded in a connection URL
+  (`://user:pass@`).
+- **rule 11 — no non-essential path dependency** ([`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md)
+  + [`rules/zh/11-no-path-dependency.md`](rules/zh/11-no-path-dependency.md)).
+  `_find_path_dependency` flags machine-specific user-home absolute paths (Windows
+  `C:\Users\…`, POSIX `/home/…` and `/Users/…`), shell home variables (`$HOME`,
+  `%USERPROFILE%`), and quoted `~/…` tilde paths.
+- Prose-doc (`.md` / `.markdown` / `.rst` / `.txt` / `.adoc`) and lockfile targets are
+  exempt from both detectors (`_is_scannable_target`), so illustrative example paths
+  and placeholder values in documentation, and machine-generated lockfiles, do not
+  trip the guard. The rule-09 patch-marker detector keeps its all-files behavior.
+
+### Changed
+
+- Rule count 9 → **11** across the injected prompts
+  ([`prompts/session-start.md`](prompts/session-start.md),
+  [`prompts/user-prompt.md`](prompts/user-prompt.md), and their `zh/` translations),
+  [`rules/00-index.md`](rules/00-index.md), [`docs/RULES.md`](docs/RULES.md),
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`README.md`](README.md), and
+  [`CLAUDE.md`](CLAUDE.md) (new §2.12 / §2.13). The numbering range is now `01–11`;
+  new rules start at 12.
+
+### Tests
+
+- **229 → 248.** Added `TestHardcodedSecretEdit` + `TestPathDependencyEdit` (19 tests)
+  in [`tests/test_read_guard.py`](tests/test_read_guard.py): DENY on a hardcoded
+  secret / path dependency, allow with an adjacent why-comment, allow clean code,
+  new-file `Write` coverage, and the prose-doc exemption. Offending fixtures are built
+  by runtime string concatenation so this test file's own source never self-trips.
+  [`tests/test_i18n_sync.py`](tests/test_i18n_sync.py) auto-enforces
+  `rules/zh/10-*.md` + `11-*.md` structural parity against the English skeleton.
+
+---
+
 ## [0.21.1] — 2026-07-11
 
 **Hotfix: Stop layer (g) silently no-op'd on the GitHub Windows runner (pre-existing CI red).**

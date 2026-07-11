@@ -36,13 +36,15 @@ severity: info
 | 07  | `07-task-fidelity.md`                           | Task fidelity                                              | must     |
 | 08  | `08-read-before-edit-think-before-write.md`     | Read before edit, think before write                       | must     |
 | 09  | `09-systematic-modification.md`                 | Systematic modification, no patch-style                    | must     |
+| 10  | `10-no-hardcoding.md`                           | No non-essential hardcoding                                | must     |
+| 11  | `11-no-path-dependency.md`                      | No non-essential path dependency                           | must     |
 
 ## Numbering convention
 
 - Format `<two-digit>-<kebab-case>.md`.
 - Numbers are **never reused** once published (even if a rule is
   retired, its number stays — frontmatter gets `status: deprecated`).
-- Current range: `01–09`.
+- Current range: `01–11`.
 
 ## Relationships
 
@@ -67,3 +69,11 @@ severity: info
   must be systematic, not patch-style. Bans unjustified `# noqa`,
   `@ts-ignore`, `try/except: pass`, `time.sleep` over a race, and
   rolling small patches that never reach the root cause.
+- **10 / 11** — *content-value constraints during modification*, the
+  same write-time PreToolUse content-detector family as 09. **10** bans
+  non-essential hardcoding (secrets / credentials / private keys /
+  credentials in a URL that should be externalized config). **11** bans
+  non-essential path dependency (machine-specific user-home absolute
+  paths that should be derived at runtime). Both share a why-comment
+  escape hatch operationalizing "non-essential", and both exempt
+  prose-doc + lockfile targets.

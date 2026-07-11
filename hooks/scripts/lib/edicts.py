@@ -1,6 +1,6 @@
 """cc-enslaver — 圣旨 (Imperial Edicts) system.
 
-User-defined per-project hard rules that ride on top of the built-in 9
+User-defined per-project hard rules that ride on top of the built-in 11
 rules. Loaded from a TOML file (project-level by default), injected into
 the session-start / user-prompt soft-layer reminders, and enforced as
 PreToolUse DENY when a regex matches Edit / Write content or Bash
@@ -343,7 +343,7 @@ def _resolved_lang(explicit: str | None = None) -> str:
 # to "en" at the call site (`.get(lang, ...["en"])`).
 _INJECT_STRINGS = {
     "en": {
-        "title": "## 🏛️ Imperial Edicts (project hard rules; priority > builtin 9)",
+        "title": "## 🏛️ Imperial Edicts (project hard rules; priority > builtin 11)",
         "intro": (
             "> User-defined, hot-reloadable. `must` = physically enforced "
             "(DENY on violation); `should` = soft reminder only."
@@ -362,7 +362,7 @@ _INJECT_STRINGS = {
         "bash_unit": "Bash",
     },
     "zh": {
-        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 9 条）",
+        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 11 条）",
         "intro": (
             "> 用户自定义、可热更新。`must` = 物理强制（违反即 DENY）；"
             "`should` = 软提醒。"

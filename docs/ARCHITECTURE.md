@@ -48,7 +48,7 @@ Five hook entries across four events:
 |---|---|---|---|
 | `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
-| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09); stamp `last_edit_turn` for Stop layers (e)+(f) |
+| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09), hardcoded secret (rule 10), or user-home path dependency (rule 11) in code targets; stamp `last_edit_turn` for Stop layers (e)+(f) |
 | `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (rule 03 + 09); also register file-as-read on `register_read.py` invocation |
 | `Stop` | — | `stop_guard.py` | Six-layer block: (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking (edit turns only) / (f) missing rule-09 triplet (edit turns only) |
 
@@ -327,6 +327,43 @@ soft-layer half (the `rules/09-systematic-modification.md`
 discipline + Stop layer (f) closing check) covers the cases the
 regex set cannot catch (rolling patches, loosened assertions, etc.).
 
+#### `Edit` / `Write` hardcoding + path-dependency blocking (v0.22.0)
+
+A third and fourth content responsibility of `read_guard.py`, added
+alongside the rule-09 patch-style scan and sharing its mechanism
+(`new_string` / `content` scan → DENY on first hit, with a why-comment
+escape hatch). They physically enforce rule 10 (no non-essential
+hardcoding) and rule 11 (no non-essential path dependency):
+
+| Detector (function) | Flags (high-confidence only) | Rule |
+|---|---|---|
+| `_find_hardcoded_secret` | assignment to a secret-named identifier (`password` / `api_key` / `secret` / `token` / `private_key` / …) with a ≥ 8-char string literal; PEM `-----BEGIN … PRIVATE KEY-----`; AWS `AKIA…` access-key; credentials embedded in a connection URL (`://user:pass@`) | 10 |
+| `_find_path_dependency` | machine-specific **user-home** absolute paths (`C:\Users\…` / `/home/…` / `/Users/…`), plus `$HOME` / `%USERPROFILE%` / quoted `~/…` inside a string literal | 11 |
+
+Two scoping refinements keep false positives low, honouring the repo's
+"宁可漏报不误报" detector philosophy:
+
+- **Escape hatch = how "non-essential" is operationalized.** A flagged
+  literal / path *with* an adjacent rationale comment (the extended
+  `HARDCODE_RATIONALE_TOKENS`: the rule-09 tokens plus `essential` /
+  `必须` / `必需` / `example` / `fixture` / `placeholder` / `占位` /
+  `sample` / `test data`) is allowed; obvious placeholders (`example`,
+  `changeme`, `xxxx`, `<…>`, `your-`, and `os.environ` / `getenv` /
+  `process.env` reads) are skipped by construction. "Essential"
+  hardcoding declares itself; lazy hardcoding does not.
+- **Prose-doc + lockfile targets are exempt** (`_is_scannable_target`
+  returns False for `.md` / `.markdown` / `.rst` / `.txt` / `.adoc` and
+  `*.lock` / `package-lock.json` / `yarn.lock` / `poetry.lock` /
+  `Cargo.lock`). The user framed this as "写完**代码**后" detection, and
+  this repo's own docs are full of example paths and values — scanning
+  them would self-trip. The rule-09 patch check keeps its all-files
+  behaviour; only these two new detectors are gated.
+
+Unlike rule 09, rule 10 / 11 have **no Stop layer** — content detectors
+are `PreToolUse`-only by precedent (the sibling `# noqa` / `@ts-ignore`
+detectors have no Stop twin), and a Stop layer would double-jeopardy an
+already-blocked write.
+
 #### `Bash` bypass-pattern blocking
 
 `bash_guard.py` (matcher `Bash`) inspects the `tool_input.command` string and
@@ -545,7 +582,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `rules/<n>-*.md` (English skeleton) | `rules/zh/<n>-*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/zh/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
 | `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
-| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table), `tests/test_read_guard.py` (read-before-edit cases + patch-style positive/negative cases + record_edit_turn cases) |
+| `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
 | `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers + `did_edit_this_turn`), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases; rule 08 / rule 09 layer (e)+(f) cases) |

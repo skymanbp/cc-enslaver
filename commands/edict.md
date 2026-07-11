@@ -5,7 +5,7 @@ argument-hint: "list | add ID \"TEXT\" [--must|--should] [--deny-edit REGEX]* [-
 
 # /cc-enslaver:edict
 
-> 圣旨 = 用户为本项目自定义的硬规则，优先级高于通用 9 条。
+> 圣旨 = 用户为本项目自定义的硬规则，优先级高于通用 11 条。
 > 默认文件：`${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`（项目级，可入 git 团队共享）。
 > `--global`（v0.14）：写入 `~/.claude/cc-enslaver/edicts.toml`（个人全局，跨项目生效）。
 
@@ -47,7 +47,7 @@ python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" $ARGUMENTS
 
 - **必须（must）**：违反即被 `PreToolUse(Edit|Write|Bash)` 物理 DENY。
 - **建议（should）**：仅注入软提醒，不 DENY。
-- 圣旨**不能**绕过插件内置的 9 条规则；内置守卫先跑、圣旨后跑。
+- 圣旨**不能**绕过插件内置的 11 条规则；内置守卫先跑、圣旨后跑。
 - 文件改动**即时生效**（hooks 每次重读）。
 
 完整设计 → [`docs/EDICTS.md`](docs/EDICTS.md)。

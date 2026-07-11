@@ -13,6 +13,8 @@
 | 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|
 | 即将写 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 `time.sleep()` 掩竞态 / 注释失败测试 / 放宽断言 | rule 03 + 09 | rule 09 DENY（若是新代码）|
+| 即将把密钥 / API key / token / 私钥 / URL 内凭证内联成**代码**字面量（本应是配置/环境）| rule 10 | **PreToolUse(Edit\|Write) DENY**（除非占位 / 紧邻 why）|
+| 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进**代码** | rule 11 | **PreToolUse(Edit\|Write) DENY**（除非紧邻 why；散文文档/锁文件豁免）|
 | 即将跑 `--no-verify` / `git push --force` / `chmod 777` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
 | 即将说 "完成 / 修好了 / done" 但无 `$ 命令 + 输出` 证据（缺**收敛**）| rule 06 (a) | Stop layer (a) BLOCK |
 | 有证据但没显式答 4 题（真解决 / 更好方案 / 哪些没验 / 验证合理；rule 06 **收敛**）| rule 06 (c) | Stop layer (c) BLOCK |

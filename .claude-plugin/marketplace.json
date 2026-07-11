@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.21.1"
+    "version": "0.22.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.21.1 hotfixes a pre-existing windows-latest CI red: Stop layer (g)'s file-claim path regex (_PATH_TOKEN) excluded '~', so it silently no-op'd on the GitHub Windows runner whose TEMP is a DOS 8.3 short path (C:\\Users\\RUNNER~1\\...); the char class now includes '~', with a 4-test deterministic regression. v0.21 inverts the i18n architecture to English-skeleton: English rules/ + prompts/ live at the root and are the source of truth and default injection, Chinese is a first-class translation under rules/zh/ + prompts/zh/ (CC_ENSLAVER_LANG=zh), any language code falls back to the English skeleton, and drift is CI-blocked by i18n_check.py + test_i18n_sync.py (on drift, English wins).",
-      "version": "0.21.1",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.22 adds two write-time content detectors as rules 10 and 11: rule 10 (no non-essential hardcoding) denies Edit/Write of code that inlines a credential (secret-named literal, PEM private-key header, AWS access-key literal, credentials in a connection URL); rule 11 (no non-essential path dependency) denies code baking in a machine-specific user-home absolute path or shell home variable. Both mirror the rule-09 PreToolUse content-detector mechanism, share its adjacent why-comment escape hatch, exempt prose-doc and lockfile targets, and add no Stop layer. English is the i18n skeleton and source of truth (rules/ + prompts/ at the root, default injection); Chinese is a first-class translation (rules/zh/ + prompts/zh/, CC_ENSLAVER_LANG=zh), with drift CI-blocked by i18n_check.py + test_i18n_sync.py.",
+      "version": "0.22.0",
       "author": {
         "name": "skymanbp"
       },

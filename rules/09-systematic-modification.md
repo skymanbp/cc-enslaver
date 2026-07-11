@@ -1,87 +1,88 @@
 ---
 id: "09"
-title: "系统式修改，禁止打补丁"
+title: "Systematic modification, no patch-style"
 severity: must
 ---
 
-# 规则 09 — 系统式修改，禁止打补丁（systematic-modification · no-patch-style）
+# Rule 09 — Systematic modification · no patch-style
 
-## 原则
+## Principle
 
-> **修改必须是系统性的、完整性的更新，不是局部打补丁。**
+> **Modifications must be systematic and complete, not local patches.**
 
-打补丁式修改的典型特征：
+Typical patch-style modifications:
 
-- 看到症状改症状（"加一行 if 把异常吞掉"），不改根因；
-- 局部塞 `try / except: pass` / `# noqa` / `@ts-ignore` / `// eslint-disable` 静音报错；
-- 同一文件同一会话里反复小幅 `Edit`（rolling patches），每次只动 1-3 行；
-- 在调用点局部包一层 wrapper / try 来"修好"，而真正的 bug 在被调函数；
-- 把超时拉长 / 把断言放宽 / 把测试改宽容；
-- 注释掉失败的测试而不是修代码；
-- 在新代码里塞 TODO / "暂时这样" / "之后再做"。
+- Treating the symptom ("add an `if` to swallow the exception") instead of the root cause;
+- Local `try / except: pass` / `# noqa` / `@ts-ignore` / `// eslint-disable` silencers without justification;
+- Repeated small `Edit`s on the same file in the same session (rolling patches), each touching 1–3 lines;
+- Wrapping a try at the call site to "fix" the symptom while the real bug is in the callee;
+- Increasing the timeout / loosening assertions / making tests more permissive;
+- Commenting out failing tests instead of fixing the code;
+- Stuffing TODO / "for now" / "later" into new code.
 
-这些都不是"修复"，是**延后**问题。rule 09 把它们提到一类硬性禁令，并在 hook 层落实**物理拦截**。
+These are not "fixes" — they **defer** problems. Rule 09 elevates them to a hard prohibition and installs **physical interception** at the hook layer.
 
-## 必须做（MUST）
+## Must do (MUST)
 
-### 修改之前
+### Before modification
 
-1. **找到真正的根因**（rule 03）—— 不是"在哪里报错"，而是"为什么会这样"。
-2. **确认根因证据**（rule 01 验证）—— 通过 Read / Grep / 命令输出**当场验证**根因假设。
-3. **梳理影响范围**（rule 02 七问的"连带影响"）—— 列出根因牵涉的所有上下游。
-4. **比较至少 2 个修复方案**（rule 08 第 6 项）—— 在简洁性 / 性能 / 与现有架构契合度 / 后续维护 4 个维度对比。
+1. **Find the actual root cause** (rule 03) — not "where it throws", but "why it throws".
+2. **Verify root-cause evidence** (rule 01 verification) — confirm the root-cause hypothesis *on the spot* via Read / Grep / command output.
+3. **Map the impact** (rule 02 Q5) — list every upstream / downstream tied to the root cause.
+4. **Compare ≥ 2 fix strategies** (rule 08 item 6) — across simplicity / performance / fit with existing architecture / future maintainability.
 
-### 修改之中
+### During modification
 
-5. **修根因，不修症状**（rule 03）—— 修改点应位于因果链的源头，而非现象处。
-6. **完整覆盖影响范围** —— 同一根因的所有连带点一并修，不允许"先修一个明天再补"。
-7. **不引入补丁标记** —— 见下方"物理拦截"。
-8. **新建/更新不变量必须记录** —— 若修改建立了新的不变量（"X 永远 ≠ None" / "必须先获取锁"），在代码或文档中显式声明。
+5. **Fix the cause, not the symptom** (rule 03) — the edit point must sit at the source of the causal chain, not at the manifestation.
+6. **Cover the full impact** — fix every connected point of the same root cause; never "fix one now and patch the rest later".
+7. **Do not introduce patch markers** — see "Physical interception" below.
+8. **Record new invariants** — if the change establishes a new invariant ("X is never None" / "must acquire the lock first"), declare it explicitly in code or docs.
 
-### 修改之后
+### After modification
 
-9. 走 rule 06 收敛验证；走 rule 07 任务忠实。
+9. Run rule 06 convergence; run rule 07 task fidelity.
 
-## 物理拦截（hooks）
+## Physical interception (hooks)
 
-| 拦截层 | 钩子 | 触发条件 | 动作 |
+| Layer | Hook | Trigger | Action |
 |---|---|---|---|
-| **Edit/Write 内容层** | `PreToolUse(Edit\|Write)` | new_string 含未带 "why" 注释的补丁标记 | **DENY** |
-| **Edit/Write 频率层**（v0.13） | `PreToolUse(Edit\|Write)` | 同一文件本会话第 4 次"小幅 Edit" (≤ 10 行 且 < 200 字符) 而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | **DENY** |
-| **Bash 命令层** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY**（v0.3 bash_guard） |
-| **收尾层** | `Stop` layer (f) | 本轮做了 Edit 但最终回复缺"根因 + 影响 + 方案"标记 | **BLOCK** |
+| **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` contains an unjustified patch marker | **DENY** |
+| **Edit/Write frequency** (v0.13) | `PreToolUse(Edit\|Write)` | same file, 4th "small edit" (≤ 10 lines AND < 200 chars) in one session without a systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | **DENY** |
+| **Bash command** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY** (v0.3 bash_guard) |
+| **Closing** | `Stop` layer (f) | this turn did Edit but the final reply lacks "root cause + impact + solution" markers | **BLOCK** |
 
-### Edit/Write 频率层 — rolling-patch 计数器（v0.13）
+### Edit/Write frequency layer — rolling-patch counter (v0.13)
 
-每个文件维护一个**小幅 Edit 计数器** `state.edits_per_file[path]`：
+The guard maintains a per-file small-edit counter at
+`state.edits_per_file[path]`:
 
-| 分类 | 边界 | 计数器动作 |
+| Classification | Bounds | Counter action |
 |---|---|---|
-| **small** | max(\|old\|, \|new\|) < 200 字符 **且** max 行数 ≤ 10 | +1（若预计达到 4 → DENY，**不增**） |
-| **systematic** | max 字符 ≥ 1500 **或** max 行数 ≥ 50 | 重置为 0 |
-| **medium** | 介于两者之间 | 不动 |
+| **small** | max(\|old\|, \|new\|) < 200 chars **and** max line count ≤ 10 | +1 (if predicted to reach 4 → DENY, **no increment**) |
+| **systematic** | max chars ≥ 1500 **or** max line count ≥ 50 | reset to 0 |
+| **medium** | between the two | no change |
 
-预计到达阈值（4）即 DENY，且**不**增加计数器。这使得后续小幅 Edit 仍然被拦，直到一次系统式重写出现把计数器清零——这正是规则 09 想要的：**重新理解整个文件结构，而不是继续打补丁**。
+A predicted reach of the threshold (4) triggers DENY and the counter is **not** incremented. Subsequent small edits to the same file therefore also DENY until a systematic rewrite resets the counter — which is exactly what rule 09 wants: **re-engage with the whole file structure, don't keep patching**.
 
-DENY 时给出的恢复路径：
-1. 合并多个待办小改成一次系统式 Edit（new_string ≥ 50 行）；
-2. 用 `Write` 整体覆写（content ≥ 50 行）；
-3. 停下来 surface 给用户，让其评估是否需要架构级重构。
+Recovery paths offered in the DENY message:
+1. Combine the pending small fixes into a single systematic Edit (new_string ≥ 50 lines);
+2. Use `Write` to replace the file wholesale (content ≥ 50 lines);
+3. Stop and surface to the user that the file needs a refactor.
 
-### Edit/Write 内容层 — 补丁标记清单
+### Edit/Write content layer — patch-marker catalog
 
-下列模式只要出现在 `new_string` 中，且**未在同一段附带 "why" 注释**说明合理性，即被拦截：
+The following patterns, when present in `new_string` **without an accompanying "why" comment** justifying them, are intercepted:
 
-| 模式 | 拒绝理由 |
+| Pattern | Reason |
 |---|---|
-| `try:\s*\n[^\n]*\n\s*except[^:]*:\s*\n\s*pass` | 静默吞错（rule 03） |
-| `^\s*#\s*noqa\b`（无紧随的解释注释） | 屏蔽 lint（rule 03） |
-| `^\s*#\s*type:\s*ignore\b`（无紧随的解释注释） | 屏蔽类型检查（rule 03） |
-| `//\s*@ts-ignore\b`（无紧随的解释注释） | 屏蔽 TS 报错（rule 03） |
-| `//\s*eslint-disable(?:-next-line)?\b`（无解释） | 屏蔽 lint（rule 03） |
-| `time\.sleep\([^)]*\)\s*#\s*(wait|race|workaround)` | 用 sleep 掩盖竞态（rule 03） |
+| `try:\s*\n[^\n]*\n\s*except[^:]*:\s*\n\s*pass` | Silent exception-swallowing (rule 03) |
+| `^\s*#\s*noqa\b` (without immediately adjacent rationale comment) | Lint suppression (rule 03) |
+| `^\s*#\s*type:\s*ignore\b` (without rationale) | Type-checker suppression (rule 03) |
+| `//\s*@ts-ignore\b` (without rationale) | TS suppression (rule 03) |
+| `//\s*eslint-disable(?:-next-line)?\b` (without rationale) | Lint suppression (rule 03) |
+| `time\.sleep\([^)]*\)\s*#\s*(wait\|race\|workaround)` | Sleep masking a race (rule 03) |
 
-**允许的形式**：每个屏蔽标记必须在同一行或紧邻上一行/下一行带**理由注释**（含 "because" / "原因" / "why" / "正当" / 显式说明），例如：
+**Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing "because" / "原因" / "why" / a concrete justification, e.g.:
 
 ```python
 # noqa: E501  -- URL string exceeds 100 chars; splitting hurts readability
@@ -93,50 +94,48 @@ LONG_URL = "https://..."
 const result = legacy.foo();
 ```
 
-无理由的裸标记 = 偷懒，被拦截。
+A bare marker without justification = laziness, intercepted.
 
-## 禁止做（MUST NOT）
+## Must not (MUST NOT)
 
-- ❌ **症状式修补**：在调用点包 try/except 让异常消失，但**没改根因**。
-- ❌ **静默屏蔽**：`# noqa` / `@ts-ignore` / `// eslint-disable` 无 why 注释。
-- ❌ **竞态用 sleep 掩盖**：加 `time.sleep(0.5)` 让测试稳定通过 ≠ 修复竞态。
-- ❌ **测试放宽**：原测试要求 X==5，改成 X>0 让它过。
-- ❌ **超时拉长**：原 timeout=5s 拉到 60s 掩盖性能问题。
-- ❌ **注释掉失败测试**：删除 / 注释 / `@skip` 失败用例当作"修好了"。
-- ❌ **滚动补丁**：同一文件本会话 ≥ 4 次小幅 Edit 而**没有**一次系统性重写，属于反应式累加。v0.13 起由 `PreToolUse(Edit|Write)` 频率层物理拦截，不再是软纪律。
-- ❌ **修一个留三个 TODO**：不允许"先把这个修好其他下次再说"，必须一次性覆盖完整根因影响范围。
+- ❌ **Symptom patching**: wrap the call site with try/except to make the exception vanish without changing the root cause.
+- ❌ **Silent suppression**: `# noqa` / `@ts-ignore` / `// eslint-disable` without a why comment.
+- ❌ **Race-via-sleep**: adding `time.sleep(0.5)` to stabilize a test ≠ fixing the race.
+- ❌ **Loosening tests**: original asserts `X == 5`, you change to `X > 0` to make it pass.
+- ❌ **Extending timeouts**: original `timeout=5s`, you push to `60s` to mask a performance issue.
+- ❌ **Commenting out failing tests**: deleting / commenting / `@skip` to declare "done".
+- ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation. As of v0.13 this is physically intercepted by the `PreToolUse(Edit|Write)` frequency layer, not just soft discipline.
+- ❌ **Fix one and leave three TODOs**: "I'll patch the rest later" is not allowed; one pass must cover the full root-cause impact.
 
-## 与其他规则的关系
+## Relationships
 
-| 关系 | 说明 |
+| Relationship | Note |
 |---|---|
-| 09 vs 03 | 03 列出几条"偷懒反模式"；09 把它们**结构化为修改通用纪律**并加物理拦截。 |
-| 09 vs 02 | 02 是修改前的思考纪律；09 是修改时的执行纪律。两者前后衔接。 |
-| 09 vs 08 | 08 验"改前是否走完准备"；09 验"改的内容是否系统、非补丁"。前置 / 内容两轴。 |
-| 09 vs 06 | 06 验"改完是否收敛"；09 验"改的方式是否系统"。过程 / 结果两轴。 |
-| 09 vs 07 | 07 验"用户要的全部做了吗"；09 验"做的方式是不是打补丁"。请求覆盖 / 实现方式两轴。 |
+| 09 vs 03 | 03 lists specific lazy anti-patterns; 09 **structures them into a general modification discipline** with physical interception. |
+| 09 vs 02 | 02 is the thinking discipline before modification; 09 is the execution discipline during. They chain. |
+| 09 vs 08 | 08 verifies "did you complete pre-action prep?"; 09 verifies "is the content systematic, not patch-style?". Pre vs content. |
+| 09 vs 06 | 06 verifies "did the fix converge?"; 09 verifies "was the fix done systematically?". Process vs result. |
+| 09 vs 07 | 07 verifies "did you deliver everything the user asked for?"; 09 verifies "was the way of delivering it patch-style?". Coverage vs implementation. |
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 必须主动自检本规则：
+- About to make a ≤ 5-line "quick fix".
+- About to write `try / except: pass` or `try / except: ...` with vague handling.
+- About to write `# noqa` / `@ts-ignore` / `eslint-disable` **without** a rationale.
+- About to add `time.sleep` to stabilize a test.
+- About to loosen a test assertion / extend a timeout.
+- Commenting out / `@skip`-ing any failing test.
+- Already made ≥ 3 small Edits on the same file this session and still patching, not rewriting.
+- Chain-of-thought lacks the "root cause + impact + alternatives" triplet.
 
-- 即将做不超过 5 行的"快速修复"；
-- 即将写 `try / except: pass` 或 `try / except: ...` 含糊处理；
-- 即将写 `# noqa` / `@ts-ignore` / `eslint-disable` 而**不解释为什么**；
-- 即将加 `time.sleep` 让测试稳定；
-- 即将把测试断言放宽 / timeout 拉长；
-- 注释掉 / `@skip` 任何失败的测试；
-- 本会话内已对同一文件做过 ≥ 3 次小幅 Edit，仍在打补丁而不是重写；
-- 思维链里没有"根因 + 影响范围 + 方案对比"三件套。
+## Termination condition
 
-## 终止条件
+"Modification complete" is allowed only when **all** of the following hold:
 
-只有当下面**全部**成立时，才允许声称"修改完成"：
+1. Root cause has been found and verified (rule 03 + rule 01).
+2. All connected points of the root cause have been covered (rule 02 Q5).
+3. `new_string` contains no unjustified patch markers (read_guard patch-style check passes).
+4. Chain-of-thought or final reply explicitly records the "root cause / impact / alternatives" triplet (Stop layer (f) passes).
+5. Rule 06 convergence + rule 07 fidelity self-quizzes done.
 
-1. 已找到并验证根因（rule 03 + rule 01）；
-2. 已覆盖根因的所有连带点（rule 02 第 5 问）；
-3. new_string 中无未带 why 注释的补丁标记（read_guard patch-style 检查通过）；
-4. 思维链或最终回复中已显式记录"根因 / 影响 / 方案对比"三件套（Stop layer (f) 通过）；
-5. 已走完 rule 06 收敛 + rule 07 忠实自答。
-
-否则 → **未达系统式修改**，回到 rule 02 + rule 03 + rule 08 重新分析。
+Otherwise → **not systematic**, return to rule 02 + rule 03 + rule 08.

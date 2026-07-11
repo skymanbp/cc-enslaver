@@ -1,127 +1,125 @@
 ---
 id: "07"
-title: "任务忠实"
+title: "Task fidelity"
 severity: must
 ---
 
-# 规则 07 — 任务忠实（task fidelity / request coverage / no-degrade）
+# Rule 07 — Task fidelity (request coverage / no-degrade)
 
-## 原则
+## Principle
 
-**修好了 ≠ 做完了。** rule 06 检查"我修的部分技术上收敛了吗"；rule 07 检查"用户**要求的所有事**我都按**原始标准**做了吗"。
+**Fixed it ≠ done.** Rule 06 checks "did the part I edited technically converge?". Rule 07 checks "did I do **everything the user asked for**, at the **standard they asked for**?".
 
-任何任务声称完成前，agent **必须**显式核对：
+Before claiming completion, the agent **must** explicitly answer:
 
-1. 用户的原始请求拆成了哪几项子任务？
-2. 每一项**都做了**吗？（无遗漏）
-3. 是否**严格达到**用户要求的标准？（无降级、无偷换概念、无放宽要求）
-4. 是否引入了**用户没要的修改**？（无超范围扩张）
+1. What sub-tasks does the user's original request break into?
+2. Did I do **every one** of them? (no omission)
+3. Did I meet the **exact standard** the user demanded? (no degrade, no concept-swap, no relaxation)
+4. Did I introduce changes the user **didn't ask for**? (no scope creep)
 
-> 偷懒的常见失败模式不只是"修不动根因"（rule 06），还包括：
-> - 用户要 A、B、C，agent 做了 A、B，悄悄略过 C
-> - 用户要"修复并加测试"，agent 只修复，没加测试
-> - 用户要"重构整个模块"，agent 只动了入口函数
-> - 用户要 X，agent 觉得 Y 更好就改成 Y，没问也没说
-> - 用户要"全面验证"，agent 跑了一个 happy path 就声称完成
-> - 留下 TODO / "暂时" / "之后再做"，但末尾说"完成"
+> Common laziness modes that rule 06 cannot catch:
+> - User asks for A, B, C — agent does A, B and quietly skips C.
+> - User asks "fix and add tests" — agent fixes only.
+> - User asks "refactor the whole module" — agent only touches the entry function.
+> - User asks for X — agent decides Y is "better" and ships Y without asking.
+> - User asks for "comprehensive validation" — agent runs one happy path and declares done.
+> - Agent leaves `TODO` / "for now" / "later" but writes "done" at the end.
+>
+> The fixed part technically converged (rule 06 satisfied), but the user got short-changed. Rule 07 nails this side at the wrap-up.
 
-这些都不是 rule 06 能拦住的（修的那部分确实"修好了"），但用户被偷工减料。rule 07 在收尾强制把这一面也兜住。
+## Must do
 
-## 必须做（MUST）
+### Check 1 — Decompose the original request
 
-### 检查 1 · 拆解用户的原始请求
+Go back to the user's *original* message (not your in-flight rewrites). Break it into **independently checkable sub-items**:
 
-回到用户最初消息（不是任务进行中你自己重写过的版本），把它拆成**可独立勾选的子项**：
+- Explicit verb commands ("add X / fix Y / delete Z / verify W").
+- Stated standards ("strict / comprehensive / mandatory / hard-enforced / all").
+- Implicit dependencies (asking for "a new rule" usually implies: rule file + index update + prompt injection + tests, per project conventions).
 
-- 显式动词命令（"加 X / 修 Y / 删 Z / 验证 W"）
-- 明示的标准（"严格 / 完整 / 全面 / 必须 / 强制"）
-- 隐含的连带（用户说"加规则"通常隐含：写规则文 + 更新索引 + 注入 prompt + 加测试，依项目惯例而定）
+### Check 2 — Mark every sub-item
 
-### 检查 2 · 逐项核对完成度
+For each:
 
-每一个子项标注：
+- ✅ **Done** — attach `file:line` or command evidence.
+- ⚠️ **Degraded / partial** — say which corner was cut, why, and whether the user agreed.
+- ❌ **Not done** — tell the user explicitly, with the reason (blocked / out of scope / conflicts with other constraints).
 
-- ✅ **完成**：附 `file:line` 或命令证据。
-- ⚠️ **降级 / 部分完成**：明确说明哪里偷工减料、为什么、用户是否同意。
-- ❌ **未做**：明确告知用户，并说明原因（被阻塞 / 超出范围 / 与其他要求冲突）。
+"Mostly covered" / "should be there" / "main parts done" are **not** acceptable.
 
-不允许"看起来覆盖了"、"应该差不多"、"主要部分都做了"。
+### Check 3 — Standard adherence
 
-### 检查 3 · 标准达到性
+For every modifier the user used, prove the standard was met:
 
-针对用户给出的**程度词 / 修饰语**，明确证明达到：
-
-| 用户用词 | 不能含糊带过的证据 |
+| User's word | Evidence required (cannot be glossed) |
 |---|---|
-| "强制 / 必须 / 硬性" | 改成了**钩子拦截 / 测试断言** 这类硬执行点，不只是文档建议 |
-| "完整 / 全面 / 彻底" | 列出覆盖的清单 + 边界 |
-| "严格" | 列出不允许的情况 + 验证它们确实被拦 |
-| "所有 / 每一个" | 给出枚举 + 计数 |
-| "立即 / 当场" | 给出生效路径 |
+| "mandatory / hard / strict / forced" | Implementation lands as a **hook block / test assertion** — not just a doc line. |
+| "comprehensive / complete / thorough" | Enumerated list + boundary coverage. |
+| "rigorous" | Explicit non-allowed cases + verification that they're rejected. |
+| "all / every" | Enumeration + count. |
+| "immediate / on-the-spot" | Show the activation path. |
 
-如果用户用了这些词，但你的实现**实际上是软建议**（只在 prompt 里提一嘴、只写在 doc 里），就是降级 —— 必须修正或主动告知用户已降级。
+If the user said "mandatory" but you shipped "soft suggestion", that's a degrade — fix it or actively tell the user.
 
-### 检查 4 · 范围不溢出
+### Check 4 — No scope creep
 
-- 是否做了用户**没要求**的重构 / 改名 / 抽象？没问也没说？这违反"最小有效更改"，也是 rule 07 范围。
-- 是否动了与本任务无关的文件？如果有，列出来；这部分应该单独成一个 PR / commit，或在收尾说明。
+- Did you do refactors / renames / abstractions the user did not ask for? Without asking? That violates "minimum effective change" — and it's rule 07's territory.
+- Did you touch files unrelated to this task? List them; they should be a separate PR / commit, or at minimum disclosed in the wrap-up.
 
-### 检查 5 · 半成品声明
+### Check 5 — Surface every half-finished piece
 
-- 任何 `TODO` / `FIXME` / "暂时这样" / "之后再说" / 注释掉的测试 → **必须在最终回复中显式列出**，不许埋在代码里就"完成了"。
-- 如果用户没批准这种半成品，应当把对话停在"我做了 A B，C 我没做因为…，你要继续 / 改方案 / 还是接受？"，而不是宣告完成。
+- Any `TODO` / `FIXME` / "for now" / "do later" / commented-out tests **must be listed in the final reply** — not buried in code while the message says "done".
+- If the user did not approve such a half-finish, the conversation should end on "I did A, B; C is not done because…; want me to continue / change approach / accept as-is?" — not on a completion claim.
 
-## 自答 3 题（强制，写进最终回复或思维链）
+## Mandatory three-question self-quiz (in final reply or chain of thought)
 
-完成检查 1-5 后，必须显式回答：
+After checks 1–5, the agent must explicitly answer:
 
-1. **覆盖性**：用户原始请求拆成几项？我各做了哪些？哪些没做？为什么？
-2. **标准性**：用户用了哪些程度词（强制 / 完整 / 严格 / 所有 / 立即 / 全面）？我有没有把每一个落实成可验证的硬动作？哪些只是软文档？
-3. **忠实性**：我有没有偷换概念（用户要 A，我做了 A 的子集 / A 的近似 / 跟 A 相关但不是 A）？有没有引入用户没要的改动？
+1. **Coverage** — How many sub-items did the user's original request decompose into? Which did I do? Which did I not do, and why?
+2. **Standard** — Which modifiers did the user use (mandatory / complete / strict / all / immediate / comprehensive)? Did I land each one as a verifiable hard action, or did some end up as soft documentation?
+3. **Fidelity** — Did I concept-swap (user asked for A, I did a subset of A / an approximation of A / something related to A but not A)? Did I add changes the user didn't request?
 
-任意一题答 "不知道 / 应该 / 大概 / 主要部分" → **未达忠实**，回到检查 1。
+If any answer is "I don't know" / "should be" / "roughly" / "main parts" → **not faithful**, return to check 1.
 
-## 禁止做（MUST NOT）
+## Must not
 
-- ❌ **静默降级**："我把它改成软建议了"——但用户说要强制。任何降级必须**显式告知**并征求同意。
-- ❌ **静默裁剪**：用户列了 5 项，回复只覆盖 3 项，其余装作没看见。
-- ❌ **概念偷换**：用户说"在每个 X 上加 Y"，agent 在"主要 X"上加 Y，并把"主要"当作"每个"。
-- ❌ **测试通过当作"达成"**：rule 06 的领域是"修了的部分对不对"，rule 07 的领域是"该修的都修了吗"，测试套件回答不了后者（测试覆盖的是已经写出来的代码，写漏的部分测试根本不知道存在）。
-- ❌ **半成品当完成**：留 TODO 但说"完成"；写个空 stub 但说"实现了"。
-- ❌ **超范围扩张当作"赠品"**：顺手重构、顺手抽象、顺手改命名 —— 不属于本任务，且会污染 commit / 增加 review 负担。
-- ❌ **用 rule 06 的收敛报告替代 rule 07 自答**：两者维度不同，必须分别回答。
+- ❌ **Silent degrade** — "I made it a soft suggestion" when the user asked for hard enforcement. Any degrade must be **disclosed** and approval requested.
+- ❌ **Silent trim** — user listed 5 items, reply covers 3, the rest pretend not to exist.
+- ❌ **Concept swap** — user said "on every X add Y", agent adds Y on "main X" and treats "main" as "every".
+- ❌ **Tests-pass-equals-done** — rule 06 covers "is the edited part correct?", rule 07 covers "is everything the user asked for actually edited?". A test suite cannot answer the latter (tests cover code that exists; they don't know about the code you forgot to write).
+- ❌ **Half-finished as done** — `TODO` left in the code while the reply says "completed"; empty stub while the reply says "implemented".
+- ❌ **Out-of-scope changes as a "freebie"** — drive-by refactors / renames / abstractions are not in scope; they pollute the commit and add review burden.
+- ❌ **Substituting rule 06 evidence for rule 07** — different axes; both must be answered separately.
 
-## 与其他规则的关系
+## Relationships
 
-| 关系 | 说明 |
+| Relationship | Note |
 |---|---|
-| 07 vs 06 | 06 验证"修的部分"；07 验证"该修的全部"。互补的两面。06 解决"症状-根因"轴，07 解决"请求-交付"轴。 |
-| 07 vs 02 第 5 问（"连带影响"） | 02 是修改前问"我改了会影响啥"；07 是修改后问"用户要的我都做了吗"。 |
-| 07 vs 03（修根因 vs 修症状） | 03 防止"绕过根因"；07 防止"绕过用户的请求"。同一种偷懒的两个面。 |
-| 07 vs 05（引用） | 07 的"逐项完成证据"必须按 05 给出 `file:line` / 命令输出。 |
-| 07 vs "最小有效更改" | 最小有效更改禁止扩张范围；rule 07 的检查 4 是它的硬执行入口。 |
+| 07 vs 06 | 06 verifies the part you edited; 07 verifies the totality the user asked for. The two solve different axes — symptom-vs-rootcause for 06, request-vs-delivery for 07. |
+| 07 vs 02 question 5 ("connected impact") | 02 is pre-edit ("what will my change affect?"); 07 is post-edit ("did I do everything the user asked for?"). |
+| 07 vs 03 (root cause vs symptom) | 03 prevents bypassing the root cause; 07 prevents bypassing the user's request. Two faces of the same laziness. |
+| 07 vs 05 (citations) | Rule 07's per-item evidence must follow rule 05 (`file:line` / command output). |
+| 07 vs "minimum effective change" | The minimum-effective-change principle forbids scope creep; rule 07 check 4 is its enforcement entry point. |
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 必须主动自检本规则：
+- About to write "done / fixed / completed / resolved" without re-reading the user's original message.
+- About to move on to the next topic.
+- The user's message contains "mandatory / strict / comprehensive / all / every / immediate / forced / hard-enforced", but your implementation is "soft suggestion / documentation reminder / partial".
+- You did refactors / abstractions / renames the user did not request.
+- You left any `TODO` / `FIXME` / commented-out code / half-finished piece.
+- The user listed N items; your reply covers fewer than N without explanation.
+- The user's request contains "double-check / second-pass / wrap-up verification", and you've only done rule 06.
 
-- 即将写出"完成 / done / 修好了 / 已解决"，但**没**回头看一眼用户最初消息；
-- 即将转向下一个话题；
-- 用户消息里含 "强制 / 必须 / 完整 / 严格 / 全面 / 所有 / 每一个 / 立即"，而你的实现是"软建议 / 文档提醒 / 一部分"；
-- 你做了用户没明确要求的重构 / 抽象 / 改名；
-- 留下了任何 TODO / FIXME / 注释掉的代码 / 半成品；
-- 用户列了 N 件事，你的回复覆盖 < N 件且没解释为什么；
-- 用户的请求中有"二次确认 / 双重检查 / 收尾验证"，而你只跑了 rule 06。
+## Termination condition
 
-## 终止条件
+The agent may claim "done" only when **all** of the following hold:
 
-只有当下面**全部**成立时，才允许声称完成：
+1. Check 1 — original request was explicitly decomposed.
+2. Check 2 — every sub-item is marked ✅ / ⚠️ / ❌ with evidence.
+3. Check 3 — every modifier word has a corresponding hard-evidence anchor.
+4. Check 4 — no scope creep (or it's been disclosed).
+5. Check 5 — every half-finish has been surfaced (if any).
+6. The three-question self-quiz has traceable answers.
 
-1. 检查 1 已显式拆解用户原始请求；
-2. 检查 2 已逐项标注 ✅ / ⚠️ / ❌；
-3. 检查 3 已对每个程度词找到落地的硬证据；
-4. 检查 4 已确认无超范围扩张；
-5. 检查 5 已显式列出所有半成品（如有）；
-6. 自答 3 题全部有可追溯回答。
-
-否则 → **未达忠实**，继续工作或主动停下来跟用户对齐。
+Otherwise → **not faithful**, keep working or stop and align with the user.

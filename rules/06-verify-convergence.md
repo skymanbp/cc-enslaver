@@ -1,114 +1,121 @@
 ---
 id: "06"
-title: "验证收敛"
+title: "Verify-and-converge (post-fix)"
 severity: must
 ---
 
-# 规则 06 — 验证收敛（post-fix verify-and-converge）
+# Rule 06 — Verify-and-converge (post-fix verify-and-converge)
 
-## 原则
+## Principle
 
-**改完不等于解决。** 任何修复、更新、补丁完成后，**必须**主动验证修改真的根除了问题；
-若验证暴露了未解决的部分（症状仍在 / 边界仍坏 / 引入新问题），**禁止**声称完成 ——
-回到规则 02 的"七问"重新分析根源，再修，再验，**直到收敛**。
+**Done editing ≠ problem solved.** After any fix, update, or patch,
+the agent **must** actively verify that the change actually rooted out
+the problem. If verification reveals an unresolved part (symptom
+still reproduces / boundary still broken / new regression introduced),
+**you are forbidden from claiming "done"** — return to rule 02's seven
+questions, re-analyse the root cause, re-fix, re-verify, **until
+convergence**.
 
-> "看着对了"、"应该好了"、"测试通过了"、"本地能跑" —— 都不是收敛。
-> 收敛的标准是：**有可追溯的证据证明原症状不再发生 + 边界场景仍正确 + 没有引入新问题**。
+> "Looks right" / "should be fine" / "tests pass" / "works on my
+> machine" — none of these are convergence.
+>
+> Convergence means: **traceable evidence that the original symptom no
+> longer occurs + boundary cases still behave + no new regressions.**
 
-## 必须做（MUST）
+## Must do
 
-修改完成后，**逐项**完成下面这套检验：
+After modifications, run **every** check below in order:
 
-### 验证 1 · 重触发原症状
+### Check 1 — Re-trigger the original symptom
 
-- 用**用户最初描述失败的同一条命令 / 同一份输入**重新跑一次。
-- 粘贴新输出，明确指出"原报错 / 原异常行为已消失"。
-- 不许只跑相关测试就当作复现 —— 测试的输入未必等同于用户的输入。
+- Re-run the **exact command / input** the user originally reported failing.
+- Paste the new output. Show explicitly that "the original error / behaviour is gone".
+- Running only the related tests is **not** a substitute — test inputs may not match the user's input.
 
-### 验证 2 · 边界与对照
+### Check 2 — Boundaries and counter-examples
 
-- **happy path 之外**：错误路径、空输入、异常类型、并发、资源耗尽、文件不存在、权限拒绝、跨平台路径、CJK / Unicode / null 字节等。
-- 至少跑 **一个反向用例**（明确应该 fail 的场景仍然 fail）。
-- 修复前后做**对照**：能数的就数（latency、count、size、hash），不要只说"看起来快了"。
+- **Beyond the happy path**: error paths, empty inputs, exception types, concurrency, resource exhaustion, file-not-found, permission-denied, cross-platform paths, CJK / Unicode / NUL bytes, etc.
+- Run at least **one negative case** (a scenario that should still fail does still fail).
+- Compare **before vs after**: when measurable, give numbers (latency, count, size, hash) — don't just say "looks faster".
 
-### 验证 3 · 连带不破坏
+### Check 3 — Connected non-breakage
 
-- 跑既有测试套件 / lint / 类型检查；附输出。
-- 检查改动文件被引用的下游：那些下游今天是否还成立？
-- 如果改动了公共契约（函数签名、返回值类型、配置 schema），**列出**所有调用点。
+- Run the existing test suite / lint / type-check; attach output.
+- Inspect the downstream callers of changed files: do they still hold?
+- If the change touched a public contract (function signature, return type, config schema), **list every call site**.
 
-### 验证 4 · 自答 4 题（强制）
+### Check 4 — Mandatory four-question self-quiz
 
-完成上面三步后，**必须**对自己回答（写在思考链或最终回复中）：
+After steps 1–3, the agent must explicitly answer (in the chain of thought or final reply):
 
-1. **是不是真的解决了问题？** —— 我有什么具体证据？这条证据如何排除"巧合 / 缓存 / 环境差异"？
-2. **有没有更好的解决方法？** —— 我的方案在 *简洁性 / 性能 / 可维护性 / 与现有架构契合度* 上是否劣于另一种？为什么不选那种？
-3. **我做的改动有没有经过验证？** —— 哪一行代码 / 哪一个连带项**没**被验证 1-3 触达？为什么不需要？
-4. **这种验证是否合理？** —— 我跑的测试 / 命令 / 对照场景，对应了原问题的哪个机理？是否覆盖了根因（rule 03）的因果链？
+1. **Did I really solve the problem?** What concrete evidence do I have? How does that evidence rule out "coincidence / cache / environment difference"?
+2. **Is there a better way?** Compared on *simplicity / performance / maintainability / fit to existing architecture* — does my approach lose to an alternative? If yes, why am I not picking the alternative?
+3. **Have my changes been verified?** Which line of code / which connected concern was **not** touched by checks 1–3? Why doesn't it need to be?
+4. **Is the verification meaningful?** Do the tests / commands / comparison cases I ran actually exercise the failure mechanism? Do they cover the root-cause causal chain (rule 03)?
 
-任意一题答 "不知道" / "应该可以" / "差不多" → **未收敛**，回到规则 02。
+If any answer is "I don't know" / "should be fine" / "more or less" → **not converged**, return to rule 02.
 
-### 验证 5 · 量化优于定性
+### Check 5 — Quantitative beats qualitative
 
-- "快了" → 跑 benchmark，给数字对比。
-- "对了" → 给具体输入 / 期望输出 / 实际输出。
-- "稳定了" → 重跑 N 次（N ≥ 10 在涉及竞态的修复中），列出失败次数。
-- "兼容了" → 列出测过的具体环境 (OS、版本、配置组合)。
+- "Faster" → benchmark with numbers.
+- "Correct" → specific input → expected output → actual output.
+- "Stable" → re-run N times (N ≥ 10 for race-related fixes), list failure count.
+- "Compatible" → list the specific environments tested (OS, version, config combinations).
 
-## 禁止做（MUST NOT）
+## Must not
 
-- ❌ "改完没报错就算解决" —— 程序运行 ≠ 程序正确。
-- ❌ "测试通过就完成" —— 测试覆盖率 < 100% 是常态；测试可能本身就漏了你正在修的场景。
-- ❌ "本地能跑就 ship" —— 别人的环境 / CI / 用户的机器是不同分布。
-- ❌ "看起来对了" —— 无证据声称是规则 01 + 06 的双重违反。
-- ❌ "我之前修过类似的，应该差不多" —— 记忆依赖 + 跳过验证（违反规则 04 + 06）。
-- ❌ "没时间 / 用户在等 / 先这样吧" —— 半成品交付，未来你会回来重修这个。
-- ❌ 仅靠 agent 自己 review 自己的 diff 来"验证" —— 你的偏见就是不收敛的根源。
+- ❌ "No errors after the change → problem solved" — running ≠ correct.
+- ❌ "Tests pass → done" — coverage < 100% is the norm; tests may miss the very scenario you are fixing.
+- ❌ "Works on my machine → ship it" — other environments, CI, the user's machine are different distributions.
+- ❌ "Looks right" — claiming without evidence is a double rule violation (01 + 06).
+- ❌ "I fixed a similar one before, should be similar" — memory-dependence + verification skip (rule 04 + 06).
+- ❌ "No time / user is waiting / good enough for now" — half-finished delivery; you will return to refix this.
+- ❌ Have the agent self-review its own diff alone as "verification" — your bias is the source of non-convergence.
 
-## 验证证据的形式（rule 05 的延伸）
+## Form of evidence (extending rule 05)
 
-每条 MUST 验证步骤产生的证据，都必须可追溯：
+Every required check produces evidence that must be traceable:
 
-- 命令 + 完整输出（≥ 关键行）：
+- Command + relevant output:
   ```
   $ pytest tests/test_auth.py -v
   ===== 21 passed in 1.12s =====
   ```
-- `file:line` 引用 + 修改前后片段对比。
-- 链接到 commit / PR / CI run。
+- `file:line` references + before/after snippets;
+- Links to commit / PR / CI run.
 
-无证据的"已验证"陈述等同于规则 01 违反。
+A claim of "verified" without evidence is equivalent to a rule-01 violation.
 
-## 与其他规则的关系
+## Relationships with other rules
 
-| 关系 | 说明 |
-|------|------|
-| 06 vs 02 第 7 问（"全局视角下问题是否真的解决"） | 02 是**修改前**的全局思考；06 是**修改后**的全局验证。两者互补。 |
-| 06 vs 03（修根因） | 03 决定**改什么**触达根因；06 验证**改完了**根因是否真被根除。 |
-| 06 vs 01（验证而非猜测） | 01 约束输入端断言；06 约束输出端声称。共享"无证据不陈述"原则。 |
-| 06 vs 05（引用可追溯） | 验证产生的证据本身适用 05 的引用规范。 |
+| Relationship | Note |
+|---|---|
+| 06 vs 02 question 7 ("globally, is the problem solved?") | 02 is *pre-action* global thinking; 06 is *post-action* global verification. Complementary. |
+| 06 vs 03 (root causes) | 03 decides **what to change** to touch the root cause; 06 verifies **after the change** that the root cause has actually been removed. |
+| 06 vs 01 (verify, don't guess) | 01 constrains input-side claims; 06 constrains output-side claims. Both share the "no claim without evidence" principle. |
+| 06 vs 05 (traceable citations) | The evidence produced by verification is itself subject to 05's citation norms. |
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 应主动自检本规则：
+- About to write "solved" / "done" / "should be fine" / "fixed";
+- About to move on to the next task / close the conversation;
+- Tests passed but you did not manually re-trigger the user's original symptom;
+- About to propose a fix without first answering "how will I verify it actually fixes this?";
+- One of checks 1–3 was skipped / "not necessary" without **why**;
+- Any of the four self-questions was answered with a vague hedge.
 
-- 即将写出 "已解决" / "完成了" / "应该好了" / "修好了" / "fixed";
-- 即将转向下一个任务 / 关掉这个对话;
-- 跑了测试通过，但**没有**手动重触发用户最初描述的症状;
-- 给出修复方案前未回答"如何验证它真的修了"这个问题;
-- 验证 1-3 的某一步答 "不必要 / 跳过 / 不适用"，但没说**为什么**不适用;
-- 自答 4 题中任意一题用了模糊词。
+> When triggered, the right move is: **stop**, fill in the evidence; if
+> the evidence shows the problem is unresolved, **acknowledge it** and
+> return to rule 02 to restart.
 
-> 触发时正确的做法：**停下来**，把验证证据补齐；如果证据揭示问题未解决，**承认**并回到规则 02 重启。
+## Convergence = termination condition
 
-## 收敛 = 终止条件
+The agent may claim "done" only when **all** of the following hold:
 
-只有当下面**全部**成立时，才允许声称完成：
+1. Check 1 (re-trigger original symptom) ran; output shows symptom gone.
+2. Check 2 (boundary / counter-examples) covered ≥ 1 boundary + 1 negative.
+3. Check 3 (connected) ran with no new failures.
+4. Check 4's four self-questions all have traceable evidence.
+5. Check 5 — for performance / race / compatibility scenarios, quantitative comparisons are present.
 
-1. 验证 1（重触发原症状）已运行，输出显示症状消失；
-2. 验证 2（边界 / 对照）已覆盖 ≥ 1 个边界 + 1 个反向用例；
-3. 验证 3（连带）已运行，无新增失败；
-4. 验证 4 的 4 个自答全部有可追溯证据；
-5. 验证 5 在涉及性能 / 竞态 / 兼容性的修复里已给出量化对比。
-
-否则 → **未收敛**，继续工作。
+Otherwise → **not converged**, keep working.

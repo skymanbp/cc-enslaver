@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace exposing the cc-enslaver discipline plugin.",
-    "version": "0.20.0"
+    "version": "0.21.0"
   },
   "plugins": [
     {
       "name": "cc-enslaver",
       "source": "./",
-      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.20 collapses the agent's reply skeleton into a fixed YAML schema whose field names ARE the existing Stop-hook detection markers (no detector changed), and adds Stop layer (h): a hard-enforced one-sentence plain-language TL;DR (大白话总结) required on every done-claim reply.",
-      "version": "0.20.0",
+      "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.21 inverts the i18n architecture to English-skeleton: English rules/ + prompts/ live at the root and are the source of truth and default injection, Chinese is a first-class translation under rules/zh/ + prompts/zh/ (CC_ENSLAVER_LANG=zh), any language code falls back to the English skeleton, and drift is CI-blocked by i18n_check.py + test_i18n_sync.py (on drift, English wins).",
+      "version": "0.21.0",
       "author": {
         "name": "skymanbp"
       },

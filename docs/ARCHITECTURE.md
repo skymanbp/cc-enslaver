@@ -253,7 +253,7 @@ benefits from a one-line takeaway just as much as a code edit. It is the
 final gate (reached only after all discipline checks pass) and is
 enforced as a closing readability convention, deliberately **not**
 promoted to a tenth numbered rule (which would require the full
-`rules/*.md` + `rules/en/` + `00-index` + docs fan-out). The v0.20
+`rules/*.md` + `rules/zh/` + `00-index` + docs fan-out). The v0.20
 canonical reply schema is a YAML block whose field names (`改前 / 改中 /
 收敛 / 忠实 / 收尾 / tldr`, English: `before / edits / convergence /
 fidelity / closing / tldr`) ARE the layer markers above — so a
@@ -441,29 +441,31 @@ the agent through the seven systematic-thinking questions from
 
 ## 6. Layer 5 — LLM-agnostic core
 
-**Source of truth:** [`../rules/`](../rules/) (Chinese, canonical) +
-[`../rules/en/`](../rules/en/) (English mirror, v0.6.2).
+**Source of truth:** [`../rules/`](../rules/) (English — the **skeleton** /
+source of truth, at the root) + [`../rules/zh/`](../rules/zh/) (中文
+translation). The skeleton↔translation contract is version-controlled — see
+[`I18N.md`](./I18N.md).
 
 Each rule is plain Markdown with a small YAML frontmatter (`id`, `title`,
-`severity`). Every other layer in this plugin **derives from** the Chinese
-files — the prompt injections in `prompts/` are distillations, the slash
+`severity`). Every other layer in this plugin **derives from** the English
+skeleton — the prompt injections in `prompts/` are distillations, the slash
 commands and skill reference rule IDs, the verifier checks compliance with
-rule 05. The English mirror at `rules/en/` is provided for non-CJK readers
-and for use as a system-prompt fragment with non-Claude agents; if the two
-ever drift, the Chinese version wins.
+rule 05. Translations live in `rules/<lang>/` (e.g. `rules/zh/`) and follow
+the skeleton file-for-file; **if a translation ever drifts from the skeleton,
+the English version wins** (and CI turns red — `i18n_check.py`, see `I18N.md`).
 
 This separation is what makes the plugin **LLM-agnostic**: any agent runtime
 that does not speak Claude Code's plugin protocol can still consume the rules
 directly:
 
 ```bash
-# OpenAI / generic — Chinese:
+# OpenAI / generic — English skeleton (default):
 cat rules/*.md > /tmp/cc-enslaver-system-prompt.txt
 
-# OpenAI / generic — English (v0.6.2):
-cat rules/en/*.md > /tmp/cc-enslaver-system-prompt.txt
+# OpenAI / generic — 中文 translation:
+cat rules/zh/*.md > /tmp/cc-enslaver-system-prompt.txt
 
-# Cursor / Cline / Aider — symlink rules/ or rules/en/ into the project's
+# Cursor / Cline / Aider — symlink rules/ or rules/zh/ into the project's
 # rule directory or copy the index.
 ```
 
@@ -540,8 +542,8 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 
 | If you edit… | Also re-check… |
 |---|---|
-| `rules/<n>-*.md` | `rules/en/<n>-*.md` (English mirror), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/en/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
-| `prompts/*.md` | `hooks/scripts/inject_context.py` (filename mapping), this doc |
+| `rules/<n>-*.md` (English skeleton) | `rules/zh/<n>-*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/zh/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
+| `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table), `tests/test_read_guard.py` (read-before-edit cases + patch-style positive/negative cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |

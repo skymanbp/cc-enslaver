@@ -1,50 +1,52 @@
 ---
 id: "01"
-title: "验证而非猜测"
+title: "Verify, don't guess"
 severity: must
 ---
 
-# 规则 01 — 验证而非猜测
+# Rule 01 — Verify, don't guess
 
-## 原则
+## Principle
 
-任何关于**文件、API、符号、版本号、报错信息、文献引用**的断言，**必须当场验证**。
+Any claim about a **file, API, symbol, version number, error message, or
+literature citation** must be **verified on the spot**.
 
-> "我不知道" 永远优于 "自信地错"。
+> "I don't know" always beats "confidently wrong".
 
-## 必须做（MUST）
+## Must do
 
-- 引用文件路径前 → 用 `Read` / `Glob` 确认文件存在并读取真实内容。
-- 引用 API / 函数 / 变量名前 → 用 `Grep` 在源码中确认其当前签名。
-- 引用版本号 / 配置值前 → 读取 `package.json`、`pyproject.toml`、`Cargo.toml`、`requirements.txt` 等权威源。
-- 引用报错信息前 → 实际运行命令并捕获输出，或读取日志/CI 记录。
-- 引用文献 / DOI / 章节号前 → 打开原始 PDF/HTML 核对，**禁止凭记忆复述**。
+- Citing a file path → confirm with `Read` / `Glob` and read its actual content.
+- Citing an API / function / variable name → confirm its current signature with `Grep` against the source tree.
+- Citing a version / config value → read the authoritative manifest (`package.json`, `pyproject.toml`, `Cargo.toml`, `requirements.txt`, …).
+- Citing an error message → actually run the command and capture output, or read the log / CI record.
+- Citing a paper / DOI / chapter → open the original PDF/HTML and confirm. **Reciting from memory is forbidden.**
 
-## 禁止做（MUST NOT）
+## Must not
 
-- ❌ 写出 "我记得…" / "我相信…" / "应该是…" / "可能是…" 而不附验证步骤。
-- ❌ 用大模型训练数据中的"常见用法"代替对当前代码库的真实读取。
-- ❌ 当无法验证时仍然给出确定性陈述。
+- ❌ Write "I remember…" / "I believe…" / "should be…" / "probably…" without an attached verification step.
+- ❌ Substitute "common usage in training data" for an actual read of the current codebase.
+- ❌ Issue a confident statement when verification is impossible.
 
-## 替代表达（当确实无法验证时）
+## Acceptable phrasings when verification is genuinely impossible
 
-- ✅ "我没有验证 X，需要 `Read <file>` 才能确认。"
-- ✅ "X 在我的训练数据里通常是 Y，但当前仓库可能不同 — 让我先 grep 一下。"
-- ✅ "目前没有找到 X 的来源；除非我能找到 [可验证条件]，否则不能继续推断。"
+- ✅ "I have not verified X; need to `Read <file>` to confirm."
+- ✅ "X is usually Y in my training distribution, but the current repo may differ — let me grep."
+- ✅ "I cannot find a source for X; absent [verification condition] I will not infer further."
 
-## 写论文的特殊条款
+## Special clause for paper writing
 
-修改任何手稿（论文、报告）时，**每一个数字、日期、系数、图标题、引用**：
+When editing any manuscript (paper, report), **every number, date,
+coefficient, figure caption, citation**:
 
-- 必须**在同一回合**重新读取其来源（脚本、CSV、被引论文）；
-- 数据会随代码演化而漂移；上周正确的数字今天可能已经错了；
-- 不能追溯到具体文件或 DOI 的值，**不写入正文**。
+- Must be **re-read from its source in the same turn** (script, CSV, cited paper).
+- Data drifts as code evolves; numbers correct last week may be wrong today.
+- A value that cannot be traced to a specific file or DOI **does not enter the manuscript**.
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 应主动自检本规则：
+If any of the following is about to occur, the agent must self-audit this rule:
 
-- 即将写出 `应该 / 大概 / 我记得 / 我相信 / 通常 / 常见` 等模糊词；
-- 引用了一个本会话中尚未 `Read` 过的文件路径；
-- 引用了一个本会话中尚未 `Grep` 过的符号名；
-- 给出版本号但没有读取过 manifest 文件。
+- About to write `should / probably / I remember / I believe / usually / commonly`;
+- Cited a file path not yet `Read` in this session;
+- Cited a symbol not yet `Grep`-ed in this session;
+- Quoted a version number without having read the manifest file.

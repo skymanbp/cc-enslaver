@@ -308,51 +308,40 @@ def load() -> list[Edict]:
 
 
 # --------------------------------------------------------------------------- #
-# Language resolution (v0.17 — bilingual rendering).
+# Language resolution (v0.17 — multilingual rendering; skeleton-flipped v0.21).
 #
 # Both the soft-layer injection block and the PreToolUse deny reason are
-# user-visible strings. v0.15 already added a CC_ENSLAVER_LANG=en switch
-# for the base prompts/; v0.17 extends that switch to cover edicts
-# rendering so a project running with English injections gets English
-# edict text too. Default lang = "zh" (project canonical, user is
-# Chinese-speaking); explicit "en" → English; anything else → fail-safe
-# fall back to zh, never silently emit a wrong language.
+# user-visible strings. English is the DEFAULT and skeleton language
+# (matches inject_context.py). CC_ENSLAVER_LANG=<code> selects a
+# translation of the UI chrome (headers / footer / deny template); any
+# code is accepted and passes through verbatim. If a code has no chrome
+# translation registered below, render_injection / deny_reason fall back
+# to English via `.get(lang, ...["en"])` — the edict *text* itself is
+# free-form user content in whatever language the user wrote it.
 # --------------------------------------------------------------------------- #
-_SUPPORTED_LANGS = {"zh", "en"}
+DEFAULT_LANG = "en"
 
 
 def _resolved_lang(explicit: str | None = None) -> str:
-    """Pick the active language. Explicit param wins; else env; else zh."""
+    """Pick the active language code. Explicit param wins; else env; else en.
+
+    No membership gate — any non-empty code passes through (lower-cased).
+    Callers index the chrome dicts with `.get(lang, ...["en"])`, so an
+    unregistered code degrades to English chrome, never a crash.
+    """
     if explicit is not None:
         lang = explicit.strip().lower()
     else:
         lang = (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower()
-    return lang if lang in _SUPPORTED_LANGS else "zh"
+    return lang or DEFAULT_LANG
 
 
-# Injection-block strings keyed by language. Keeping all strings here
-# (rather than scattered inline) makes adding a third language a
-# one-table edit, and makes translation drift visible at review time.
+# Injection-block chrome strings keyed by language. English first =
+# skeleton / source of truth. Keeping all strings here (rather than
+# scattered inline) makes adding a language a one-table edit and makes
+# translation drift visible at review time. Unregistered codes fall back
+# to "en" at the call site (`.get(lang, ...["en"])`).
 _INJECT_STRINGS = {
-    "zh": {
-        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 9 条）",
-        "intro": (
-            "> 用户自定义、可热更新。`must` = 物理强制（违反即 DENY）；"
-            "`should` = 软提醒。"
-        ),
-        "th_id": "ID",
-        "th_sev": "Severity",
-        "th_imp": "Imperative",
-        "th_hard": "Hard-enforced",
-        "footer": (
-            "> 违反 must 圣旨的 Edit/Write/Bash 会被 PreToolUse DENY，"
-            "deny reason 会指明具体圣旨 ID。"
-        ),
-        "must": "🚨 **must**",
-        "should": "⚠️ should",
-        "ew_unit": "Edit/Write",
-        "bash_unit": "Bash",
-    },
     "en": {
         "title": "## 🏛️ Imperial Edicts (project hard rules; priority > builtin 9)",
         "intro": (
@@ -366,6 +355,25 @@ _INJECT_STRINGS = {
         "footer": (
             "> Violating a `must` edict on Edit/Write/Bash triggers a "
             "PreToolUse DENY; the deny reason names the offending edict ID."
+        ),
+        "must": "🚨 **must**",
+        "should": "⚠️ should",
+        "ew_unit": "Edit/Write",
+        "bash_unit": "Bash",
+    },
+    "zh": {
+        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 9 条）",
+        "intro": (
+            "> 用户自定义、可热更新。`must` = 物理强制（违反即 DENY）；"
+            "`should` = 软提醒。"
+        ),
+        "th_id": "ID",
+        "th_sev": "Severity",
+        "th_imp": "Imperative",
+        "th_hard": "Hard-enforced",
+        "footer": (
+            "> 违反 must 圣旨的 Edit/Write/Bash 会被 PreToolUse DENY，"
+            "deny reason 会指明具体圣旨 ID。"
         ),
         "must": "🚨 **must**",
         "should": "⚠️ should",
@@ -386,15 +394,16 @@ def render_injection(
     Returns an empty string when there are no edicts so injection hooks
     can simply concatenate this onto their base prompt.
 
-    `lang` defaults to whatever `CC_ENSLAVER_LANG` resolves to (zh / en).
-    Pass an explicit value when the caller has already resolved its own
-    language (e.g. inject_context.py reuses its `_resolved_lang()`
-    result for consistency between the base prompt language and the
-    edict block language).
+    `lang` defaults to whatever `CC_ENSLAVER_LANG` resolves to (English
+    skeleton by default; any code accepted). Pass an explicit value when
+    the caller has already resolved its own language (e.g.
+    inject_context.py reuses its `_resolved_lang()` result for
+    consistency between the base prompt language and the edict block
+    language). An unregistered code falls back to English chrome.
     """
     if not edicts:
         return ""
-    s = _INJECT_STRINGS[_resolved_lang(lang)]
+    s = _INJECT_STRINGS.get(_resolved_lang(lang), _INJECT_STRINGS["en"])
     lines = [
         "",
         "---",
@@ -483,10 +492,29 @@ def find_bash_violation(edicts: list[Edict], command: str) -> EdictHit | None:
 
 
 _DENY_REASON_TEMPLATES = {
-    # The Chinese variant keeps the literal "圣旨" term in the headline
-    # so existing keyword-contract tests (and Chinese-reading users)
-    # still see the original concept name. Body labels stay in English
-    # (they're field names that get programmatic treatment).
+    # English first = skeleton / source of truth. The Chinese variant
+    # keeps the literal "圣旨" term in the headline so existing
+    # keyword-contract tests (and Chinese-reading users) still see the
+    # original concept name. Body labels stay in English (they're field
+    # names that get programmatic treatment). Unregistered codes fall
+    # back to "en" at the call site (`.get(lang, ...["en"])`).
+    "en": (
+        "cc-enslaver · Imperial Edict {id} violation (user-defined hard rule)\n\n"
+        "Edict: {text}\n"
+        "{note_line}"
+        "Tool: {kind}\n"
+        "Target: {target}\n"
+        "Matched pattern: {pattern!r}\n\n"
+        "Snippet:\n{snippet}\n\n"
+        "This is a project-level edict defined in "
+        ".claude/cc-enslaver/edicts.toml. It has severity = 'must',\n"
+        "so the violation is physically blocked (not a soft reminder).\n\n"
+        "To proceed:\n"
+        "  • Comply with the edict (recommended), or\n"
+        "  • Surface the conflict to the user — they may relax the\n"
+        "    edict (`severity = \"should\"`) or remove it.\n"
+        "  • Do NOT silently rewrite the edict or rationalize a bypass.\n"
+    ),
     "zh": (
         "cc-enslaver · 圣旨 {id} violation (user-defined hard edict)\n\n"
         "Edict: {text}\n"
@@ -505,23 +533,6 @@ _DENY_REASON_TEMPLATES = {
         "    the edict (`severity = \"should\"`) or remove it.\n"
         "  • Do NOT silently rewrite the edict or rationalize a bypass.\n"
     ),
-    "en": (
-        "cc-enslaver · Imperial Edict {id} violation (user-defined hard rule)\n\n"
-        "Edict: {text}\n"
-        "{note_line}"
-        "Tool: {kind}\n"
-        "Target: {target}\n"
-        "Matched pattern: {pattern!r}\n\n"
-        "Snippet:\n{snippet}\n\n"
-        "This is a project-level edict defined in "
-        ".claude/cc-enslaver/edicts.toml. It has severity = 'must',\n"
-        "so the violation is physically blocked (not a soft reminder).\n\n"
-        "To proceed:\n"
-        "  • Comply with the edict (recommended), or\n"
-        "  • Surface the conflict to the user — they may relax the\n"
-        "    edict (`severity = \"should\"`) or remove it.\n"
-        "  • Do NOT silently rewrite the edict or rationalize a bypass.\n"
-    ),
 }
 
 
@@ -533,13 +544,14 @@ def deny_reason(
     kind: "Edit" / "Write" / "Bash" — used in the headline.
     tool_or_cmd: file_path for Edit/Write, command for Bash.
     lang: optional override; defaults to CC_ENSLAVER_LANG env var
-    (zh / en). v0.17 — Chinese still says "圣旨" in the headline (the
-    canonical Chinese term, preserves keyword-contract tests); English
-    says "Imperial Edict".
+    (English skeleton by default; any code accepted, unregistered codes
+    fall back to English). v0.17 — Chinese still says "圣旨" in the
+    headline (the canonical Chinese term, preserves keyword-contract
+    tests); English says "Imperial Edict".
     """
     ed = hit.edict
     note_line = f"Note: {ed.note}\n" if ed.note else ""
-    tmpl = _DENY_REASON_TEMPLATES[_resolved_lang(lang)]
+    tmpl = _DENY_REASON_TEMPLATES.get(_resolved_lang(lang), _DENY_REASON_TEMPLATES["en"])
     return tmpl.format(
         id=ed.id,
         text=ed.text,

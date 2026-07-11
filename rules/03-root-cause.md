@@ -1,46 +1,47 @@
 ---
 id: "03"
-title: "修根因，不修症状"
+title: "Fix root causes, not symptoms"
 severity: must
 ---
 
-# 规则 03 — 修根因，不修症状
+# Rule 03 — Fix root causes, not symptoms
 
-## 原则
+## Principle
 
-遇到错误、失败、异常时：**找原因，不掩盖**。绕过检查、屏蔽错误、用 sleep 掩盖竞态都是**技术债务**，不是修复。
+When errors, failures, or exceptions appear: **find the cause, don't
+mask it**. Bypassing checks, silencing errors, or papering over a race
+with `sleep` is **technical debt**, not a fix.
 
-## 禁止的"反模式"清单
+## Forbidden anti-pattern catalogue
 
-| 反模式 | 为什么是偷懒 | 应该做什么 |
-|--------|-------------|-----------|
-| `try: ... except: pass` | 静默吞掉错误，丢失诊断信息 | 让异常上抛 OR 在 except 里**记录并以正确方式处理** |
-| `--no-verify` 跳过 git hooks | 钩子是为了拦住坏提交；跳过 = 提交了坏代码 | 修钩子失败的根本原因 |
-| `time.sleep()` 修竞态 | 在快机器/慢机器上行为不同；治标不治本 | 修同步原语（锁、条件变量、await） |
-| `// @ts-ignore` / `# type: ignore` | 类型系统报警是有原因的 | 修类型 OR 在注释里写**为什么**忽略 |
-| `if (false)` 关闭测试 | 静默移除覆盖率 | 修测试 OR 删除测试并解释 |
-| `pip install --force-reinstall` 解决冲突 | 没解决依赖图 | 解决依赖图，使用锁文件 |
-| `chmod 777` 解决权限 | 制造安全洞 | 找出真正的所属用户/进程 |
-| `rm -rf node_modules && reinstall` 当万能药 | 不知道究竟修了什么 | 找出哪个依赖坏了、为什么坏 |
-| 把超时拉长 10 倍 | 把 latency bug 变成更慢的 latency bug | 找慢的原因 |
-| 把测试的断言放宽 | 测试就此失去意义 | 修产品代码或修测试期望（明确二选一） |
+| Anti-pattern | Why it's lazy | What you should do |
+|---|---|---|
+| `try: ... except: pass` | Silences errors, loses diagnostic info | Let the exception propagate, OR record + handle correctly |
+| `--no-verify` to skip git hooks | Hooks are there to stop bad commits; bypassing = shipping bad code | Fix the actual hook failure |
+| `time.sleep()` to "fix" a race | Behaves differently on fast/slow machines; treats symptom not cause | Fix the synchronisation primitive (lock, condvar, await) |
+| `// @ts-ignore` / `# type: ignore` | The type system is warning for a reason | Fix the type, OR comment **why** the ignore is principled |
+| `if (false)` to disable a test | Silently removes coverage | Fix the test OR delete it with rationale |
+| `pip install --force-reinstall` | Doesn't resolve the dependency graph | Resolve the graph; use a lock file |
+| `chmod 777` | Creates a security hole | Identify the actual owner / process and grant precisely |
+| `rm -rf node_modules && reinstall` as a panacea | You don't know what you actually fixed | Find which dependency broke and why |
+| 10× the timeout | Turns a latency bug into a slower latency bug | Find why it's slow |
+| Loosen the test assertion | The test loses its meaning | Fix product code OR update the expectation explicitly |
 
-## 必须做（MUST）
+## Must do
 
-- 任何 `except` 块中：要么**记录后重抛**，要么**有明确的可恢复处理逻辑**并写一行注释解释 why。
-- 任何 `--no-verify` 的使用：必须有用户**显式授权**（否则这是规则违反）。
-- 任何 sleep / wait：必须**有明确的事件可等**，而不是"等够长"。
-- 任何忽略类型 / lint 的注释：必须解释 **why** 这次忽略是合理的。
+- Inside any `except` block: either **log + re-raise**, or have a **specific recoverable handling path** with a one-line comment explaining why.
+- Any `--no-verify` use: must have explicit user authorisation (otherwise it is a rule violation).
+- Any `sleep` / `wait`: must wait for a specific event, not "long enough".
+- Any type/lint ignore comment: must explain **why** this ignore is justified.
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 应主动自检本规则：
+- About to write `except: pass` / `except Exception: pass`;
+- About to write `time.sleep(N)` in tests or sync code;
+- About to add `--no-verify` / `--force` / `--skip-*`;
+- About to add `@ts-ignore` / `type: ignore` / `# noqa`;
+- About to comment out a failing test;
+- About to "redeploy" or "restart the service" as the fix.
 
-- 即将写 `except: pass` / `except Exception: pass`；
-- 即将写 `time.sleep(N)` 在测试或同步代码里；
-- 即将加 `--no-verify` / `--force` / `--skip-*` 标志；
-- 即将加 `@ts-ignore` / `type: ignore` / `# noqa`；
-- 即将注释掉一个失败的测试；
-- 即将"重新部署"或"重启服务"作为修复。
-
-> 触发时正确的做法：**停下来**，回答规则 02 的"七问"，先理解机理。
+> When triggered, the right move is: **stop**, walk through rule 02's seven
+> questions, understand the mechanism first.

@@ -205,7 +205,7 @@ class TestSoftInjection(_EdictsBase):
             env_overrides=self.env,
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("圣旨", ctx)
+        self.assertIn("Imperial Edicts", ctx)  # v0.21: English is the default banner
         self.assertIn("`E01`", ctx)
         self.assertIn("`E02`", ctx)
         self.assertIn("禁止使用 mongoose", ctx)
@@ -225,7 +225,7 @@ class TestSoftInjection(_EdictsBase):
             env_overrides=self.env,
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("圣旨", ctx)
+        self.assertIn("Imperial Edicts", ctx)  # v0.21: English is the default banner
         self.assertIn("`E01`", ctx)
 
 
@@ -260,7 +260,8 @@ class TestBashEdictDeny(_EdictsBase):
         self.assertIsNotNone(out, msg="must edict must DENY the matching command")
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("E01", out["hookSpecificOutput"]["permissionDecisionReason"])
-        self.assertIn("圣旨", out["hookSpecificOutput"]["permissionDecisionReason"])
+        # v0.21: default deny-reason headline is English ("Imperial Edict ...").
+        self.assertIn("Imperial Edict", out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_should_edict_does_not_deny(self) -> None:
         self.write_edicts(r"""
@@ -349,7 +350,9 @@ class TestEditEdictDeny(_EdictsBase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("E01", reason)
-        self.assertIn("圣旨", reason)
+        # v0.21: default deny-reason headline is English ("Imperial Edict ...").
+        self.assertIn("Imperial Edict", reason)
+        # The edict's own free-form text (any language) is injected verbatim.
         self.assertIn("禁止使用 mongoose", reason)
 
     def test_write_new_file_without_violation_allowed(self) -> None:
@@ -600,17 +603,19 @@ class TestManageCLIGlobalFlag(_ManageCLIBase):
 
 
 class TestBilingualRendering(_EdictsBase):
-    """v0.17 — CC_ENSLAVER_LANG=en switches edict injection + deny reason
-    to English. Default (zh / unset) keeps the Chinese 圣旨 wording.
+    """v0.17 / v0.21 — edict UI chrome (injection banner + deny reason)
+    follows CC_ENSLAVER_LANG. v0.21 inverted the default: **English is
+    the skeleton / runtime default**; Chinese is a first-class
+    translation reached via CC_ENSLAVER_LANG=zh.
 
     Tests cover:
-      - Default (no env) → Chinese 圣旨 banner in injection + deny reason
-      - lang=en          → English "Imperial Edicts" banner in injection
-                           + "Imperial Edict {ID} violation" in deny
-      - Unknown lang     → fail-safe back to Chinese
+      - Default (no env) → English "Imperial Edicts" banner + deny reason
+      - lang=zh          → Chinese 圣旨 banner + "圣旨 {ID} violation" deny
+      - lang=en (explicit) → same English chrome as the default
+      - Unknown lang     → fail-safe to the English skeleton
     """
 
-    def test_injection_default_is_chinese(self) -> None:
+    def test_injection_default_is_english(self) -> None:
         self.write_edicts("""
             [[edicts]]
             id = "E01"
@@ -621,11 +626,34 @@ class TestBilingualRendering(_EdictsBase):
         rc, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
-            env_overrides=self.env,  # no CC_ENSLAVER_LANG
+            env_overrides=self.env,  # no CC_ENSLAVER_LANG → English skeleton
+        )
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Imperial Edicts", ctx)
+        self.assertIn("project hard rules", ctx)
+        self.assertNotIn("项目自定义硬规则", ctx)
+
+    def test_injection_lang_zh_is_chinese(self) -> None:
+        # v0.21 — Chinese chrome is now a translation, reached via zh.
+        # Preserves the Chinese-banner coverage the old default test had.
+        self.write_edicts("""
+            [[edicts]]
+            id = "E01"
+            text = "no mongoose"
+            severity = "must"
+            deny_bash = ["x"]
+        """)
+        env_zh = {**self.env, "CC_ENSLAVER_LANG": "zh"}
+        rc, out, _ = run_hook(
+            [INJECT, "--event", "SessionStart"],
+            stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
+            env_overrides=env_zh,
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("圣旨", ctx)
         self.assertIn("项目自定义硬规则", ctx)
+        self.assertIn("`E01`", ctx)
+        # English banner must not appear in Chinese mode.
         self.assertNotIn("Imperial Edicts", ctx)
 
     def test_injection_lang_en_is_english(self) -> None:
@@ -651,7 +679,9 @@ class TestBilingualRendering(_EdictsBase):
         self.assertNotIn("项目自定义硬规则", ctx)
         self.assertNotIn("用户自定义、可热更新", ctx)
 
-    def test_injection_unknown_lang_falls_back_to_chinese(self) -> None:
+    def test_injection_unknown_lang_falls_back_to_english(self) -> None:
+        # v0.21 — English is the skeleton, so an unknown code falls back
+        # to it (was Chinese pre-v0.21).
         self.write_edicts("""
             [[edicts]]
             id = "E01"
@@ -664,10 +694,10 @@ class TestBilingualRendering(_EdictsBase):
             env_overrides=env_fr,
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("圣旨", ctx)
-        self.assertNotIn("Imperial Edicts", ctx)
+        self.assertIn("Imperial Edicts", ctx)
+        self.assertNotIn("圣旨", ctx)
 
-    def test_bash_deny_reason_default_is_chinese(self) -> None:
+    def test_bash_deny_reason_default_is_english(self) -> None:
         self.write_edicts(r"""
             [[edicts]]
             id = "E01"
@@ -683,10 +713,35 @@ class TestBilingualRendering(_EdictsBase):
                 "tool_name": "Bash",
                 "tool_input": {"command": "npm install mongoose"},
             },
-            env_overrides=self.env,
+            env_overrides=self.env,  # no CC_ENSLAVER_LANG → English skeleton
         )
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-        # Chinese term "圣旨" preserved in headline (default mode).
+        # English headline in default mode.
+        self.assertIn("Imperial Edict E01 violation", reason)
+        self.assertNotIn("圣旨", reason)
+
+    def test_bash_deny_reason_lang_zh_is_chinese(self) -> None:
+        # v0.21 — Chinese deny headline reached via zh (was the default).
+        self.write_edicts(r"""
+            [[edicts]]
+            id = "E01"
+            text = "ban mongoose"
+            severity = "must"
+            deny_bash = ['''npm\s+install\s+mongoose''']
+        """)
+        env_zh = {**self.env, "CC_ENSLAVER_LANG": "zh"}
+        rc, out, _ = run_hook(
+            [BASH_GUARD],
+            stdin_payload={
+                "session_id": "t",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "npm install mongoose"},
+            },
+            env_overrides=env_zh,
+        )
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        # Chinese term "圣旨" preserved in headline (zh mode).
         self.assertIn("圣旨 E01 violation", reason)
 
     def test_bash_deny_reason_lang_en_is_english(self) -> None:

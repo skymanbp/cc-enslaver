@@ -1,60 +1,59 @@
 ---
 id: "02"
-title: "系统式而非反应式"
+title: "Systematic, not reactive"
 severity: must
 ---
 
-# 规则 02 — 系统式而非反应式
+# Rule 02 — Systematic, not reactive
 
-## 原则
+## Principle
 
-修改代码（或任何内容）必须是**系统式**的，**零反应式**修改。
+Code (or any) modifications must be **systematic** — **zero reactive** patches.
 
-- **反应式** = 看到症状 → 改症状 → 没现象就停。
-- **系统式** = 看到症状 → 理解架构 → 找根源 → 评估连带 → 修根源 → 验证全局。
+- **Reactive** = see symptom → patch the symptom → if no visible failure, stop.
+- **Systematic** = see symptom → understand the architecture → find the
+  root cause → assess connected impact → fix the root → verify globally.
 
-## 七问（修改前必须自答）
+## The seven questions (must self-answer before modifying)
 
-修改任何文件之前，agent 必须**自问且明确回答**以下 7 个问题：
+Before editing any file, the agent must **ask and explicitly answer** all seven:
 
-1. **架构定位** — 当前完整架构是什么样？我要改的部分位于哪个区域？
-2. **职责** — 这部分代码/内容的当前职责是什么？上游/下游分别是谁？
-3. **根源** — 问题/需求的**根源**是什么？机理是什么？
-4. **方案是否触底** — 我的修改是否真的从底层解决问题，还是只是掩盖症状？
-5. **连带影响** — 这次修改对架构的连带影响是什么？哪些下游需要同步改？
-6. **风险** — 这次修改可能破坏哪些既有不变量、合约、测试？
-7. **全局有效性** — 修改完成后，从全局视角看问题是否真的解决？
+1. **Architectural location** — what is the full architecture; where in it is the part I want to change?
+2. **Responsibility** — what is the current responsibility of this code? Who are its upstream callers and downstream consumers?
+3. **Root cause** — what is the **root cause** of the problem / requirement? What is the mechanism?
+4. **Does the fix bottom out?** — does my change actually solve the problem at the root, or merely mask the symptom?
+5. **Connected impact** — what does this change ripple to? Which downstreams need to change in lockstep?
+6. **Risk** — what existing invariants, contracts, or tests might break?
+7. **Global validity** — after the fix, does the problem actually go away from a global perspective?
 
-> 如果上面任何一问的答案是 "不知道" 或 "凭印象"，**先去验证**（参见规则 01、规则 04），再回到本规则。
+> If any answer is "I don't know" or "from memory", **go verify first** (rules 01 and 04), then return to this rule.
 
-## 反面例子（绝对禁止的思维链）
+## Forbidden anti-patterns (chains of thought that are a hard no)
 
-- ❌ "bug 长这样 → 改这一行 → 现象消失 → 完成"
-- ❌ "测试失败 → 让测试通过 → 完成"（没有问"为什么失败、修改是否触达根因"）
-- ❌ "类型报错 → 加 `any` → 完成"（绕过了类型系统的本来用意）
-- ❌ "异常 → try/except 包起来 → 完成"（参见规则 03）
+- ❌ "Bug looks like this → change this line → symptom gone → done"
+- ❌ "Test failed → make the test pass → done" (without asking *why* it failed and whether the fix touches the cause)
+- ❌ "Type error → cast to `any` → done" (defeats the type system's intent)
+- ❌ "Exception → wrap in `try/except` → done" (see rule 03)
 
-## 正面例子（推荐的思维链）
+## Recommended chain of thought
 
-> "我注意到 `auth.py:142` 在并发请求下会偶发 500。
+> "I notice `auth.py:142` flakes 500s under concurrent requests.
 >
-> **架构定位**：`auth.py` 是登录链路第三步，上游是 `session.py:create_session`，下游被 `routes/login.py:88` 调用。
+> **Architectural location**: `auth.py` is step 3 of the login chain; upstream is `session.py:create_session`, downstream is `routes/login.py:88`.
 >
-> **根源**：`auth.py:142` 在写 `session.pending` 前没有获取锁，与 `session.py:expire_pending` 的清理协程竞态。
+> **Root cause**: `auth.py:142` writes `session.pending` without acquiring the lock, racing the cleanup coroutine in `session.py:expire_pending`.
 >
-> **方案**：在 `auth.py:140-145` 之间获取 `session._pending_lock`。这是 `session.py` 已经为同一目的设置的锁，所以是符合架构的修复。
+> **Plan**: Acquire `session._pending_lock` at `auth.py:140-145`. This lock already exists for exactly this purpose, so the fix is architecture-aligned.
 >
-> **连带**：`routes/login.py:88` 不需要改；测试 `tests/test_auth_concurrent.py` 已覆盖这个场景但目前是 skipped — 需要去掉 skip。
+> **Connected**: `routes/login.py:88` does not need changes; the test `tests/test_auth_concurrent.py` already covers this scenario but is currently `skip`ped — remove the skip.
 >
-> **风险**：锁在 hot path 上，但 critical section 只有 3 行，不会显著影响延迟。
+> **Risk**: lock is on the hot path, but the critical section is 3 lines — no measurable latency impact.
 >
-> **全局**：修复后整个登录链路在并发下有完整的锁覆盖；这正是 `session._pending_lock` 当初被设计出来的目的。"
+> **Global**: after the fix, the entire login chain has full lock coverage under concurrency; this is exactly what `session._pending_lock` was designed for."
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 应主动自检本规则：
-
-- 即将做的修改少于 5 行，且没经过"七问"分析；
-- 修改的文件本会话**还没被完整读完**；
-- 还没读过这个修改的所有调用点 / 依赖项；
-- 修改是为了"让测试过"或"让报错消失"，而不是"让逻辑正确"。
+- About to make a change of fewer than 5 lines without going through the seven questions;
+- The file being modified has not been **fully `Read`** this session;
+- Have not read the call sites / dependents of this change;
+- The change is "to make the test pass" or "to make the error go away" rather than "to make the logic correct".

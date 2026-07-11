@@ -65,43 +65,52 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = PLUGIN_ROOT / "prompts"
 
 # --------------------------------------------------------------------------- #
-# Language switch (v0.15).
+# Language switch (v0.15; skeleton-flipped v0.21).
 #
-# Default prompts are Chinese (the user's primary language). Set
-# CC_ENSLAVER_LANG=en to inject the English mirror under prompts/en/.
-# Any other value falls back to Chinese — fail-safe to the canonical
-# language, never silently miss the injection.
+# English is the DEFAULT and the "skeleton" (source-of-truth) language:
+# the root prompts/*.md files are English. Set CC_ENSLAVER_LANG=<code>
+# to inject a translation from prompts/<code>/ (e.g. CC_ENSLAVER_LANG=zh
+# → prompts/zh/). ANY code is accepted — a new language ships by adding
+# its prompts/<code>/ + rules/<code>/ dirs, no code change here. If the
+# translation file is missing, load_prompt() falls back to the English
+# skeleton — fail-safe to the source-of-truth language, never silently
+# miss the injection.
 # --------------------------------------------------------------------------- #
-SUPPORTED_LANGS = {"zh", "en"}
+DEFAULT_LANG = "en"
 
 
 def _resolved_lang() -> str:
-    """Return the active language. Defaults to 'zh'; 'en' if explicitly set."""
-    lang = (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower()
-    if lang in SUPPORTED_LANGS:
-        return lang
-    return "zh"
+    """Return the active language code.
+
+    Defaults to the English skeleton (DEFAULT_LANG); any non-empty
+    CC_ENSLAVER_LANG value passes through verbatim (lower-cased). No
+    membership gate — resolution + fallback happen in load_prompt() /
+    edicts, so an unregistered code degrades gracefully to English.
+    """
+    return (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower() or DEFAULT_LANG
 
 
 def load_prompt(filename: str) -> str:
-    """Read prompt content from prompts/<filename>. Fail loudly on missing file.
+    """Read prompt content for the active language. Fail loudly on missing file.
 
     Failing loudly (rather than returning '') is itself a cc-enslaver
     measure: a silent empty injection would mask broken configuration.
 
-    v0.15: when CC_ENSLAVER_LANG=en, reads from prompts/en/<filename>
-    first; if missing, falls back to prompts/<filename> (Chinese
-    canonical) with a stderr warning. The fallback prevents a missing
-    English translation from blanking the injection.
+    Skeleton-flipped (v0.21): the English skeleton lives at
+    prompts/<filename> (root). When CC_ENSLAVER_LANG names a non-default
+    language, read prompts/<lang>/<filename> first; if that translation
+    is missing, fall back to the root English skeleton with a stderr
+    warning. The fallback prevents a missing / partial translation from
+    blanking the injection.
     """
     lang = _resolved_lang()
-    if lang == "en":
-        en_path = PROMPTS_DIR / "en" / filename
-        if en_path.is_file():
-            return en_path.read_text(encoding="utf-8")
+    if lang != DEFAULT_LANG:
+        translated = PROMPTS_DIR / lang / filename
+        if translated.is_file():
+            return translated.read_text(encoding="utf-8")
         sys.stderr.write(
-            f"[cc-enslaver] CC_ENSLAVER_LANG=en but missing {en_path}; "
-            f"falling back to Chinese canonical.\n"
+            f"[cc-enslaver] CC_ENSLAVER_LANG={lang} but missing {translated}; "
+            f"falling back to English skeleton.\n"
         )
     path = PROMPTS_DIR / filename
     if not path.is_file():
@@ -166,8 +175,9 @@ def main() -> int:
     #
     # v0.17: pass the already-resolved language so the edict block and
     # the base prompt always speak the same language (CC_ENSLAVER_LANG
-    # is the single switch the user toggles — base prompts/en/*.md and
-    # the edict block flip together).
+    # is the single switch the user toggles — the base prompt (English
+    # skeleton at prompts/*.md, or a translation at prompts/<lang>/*.md)
+    # and the edict block flip together).
     try:
         loaded = edicts_lib.load()
         block = edicts_lib.render_injection(loaded, lang=_resolved_lang())

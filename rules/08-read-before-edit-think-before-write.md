@@ -1,90 +1,88 @@
 ---
 id: "08"
-title: "改前必读，写前必想"
+title: "Read before edit, think before write"
 severity: must
 ---
 
-# 规则 08 — 改前必读，写前必想（read-before-edit · think-before-write）
+# Rule 08 — Read-before-edit · think-before-write
 
-## 原则
+## Principle
 
-> **"改"和"写"必须分别被前置纪律约束。**
+> **Editing and writing are separately bound by pre-action discipline.**
 >
-> - **改前必读** — 任何 `Edit` 之前，必须**完整 Read** 目标文件、`Read` 其调用点上下文、`Grep` 影响面。
-> - **写前必想** — 任何 `Edit` / `Write` 之前，必须在思维链或最终回复里**显式回答**"我为什么这样写"（根因 + 影响 + 方案对比）。
+> - **Read before edit** — Before any `Edit`, you must have **fully Read** the target file, `Read` the surrounding context of every call site, and `Grep` the blast radius.
+> - **Think before write** — Before any `Edit` / `Write`, you must **explicitly state in chain-of-thought or the final reply** *why* you are writing what you are writing (root cause + impact + alternatives compared).
 
-rule 04 已经规定了"完整阅读"；rule 02 已经规定了"七问"。rule 08 把它们**合并为一条修改前置硬纪律**，并附**物理强制**（hooks）：
+Rule 04 governs "read fully"; rule 02 governs the "seven questions". Rule 08 **combines them into a single pre-action hard discipline** and adds **physical enforcement** (hooks):
 
-- `PreToolUse(Read|Edit|Write)` 已强制"目标已 Read"才允许 Edit/Write（v0.3.2+）。
-- `PreToolUse(Edit|Write)` 内容层检测"补丁标记"（rule 09）。
-- **Stop hook layer (e)** 在收尾时检查：本轮如果做过 `Edit`/`Write`，最终回复中**必须有"系统式自答"标记**（根因 / 影响 / 方案 至少 3 个 rule-02 七问关键词）—— 否则 block。
+- `PreToolUse(Read|Edit|Write)` already enforces "target file was Read in this session" before allowing Edit/Write (v0.3.2+).
+- `PreToolUse(Edit|Write)` content-layer detects "patch-style" markers (see rule 09).
+- **Stop hook layer (e)**: at end-of-turn, if any `Edit`/`Write` happened this turn, the final reply **must include a "systematic self-answer" marker** (≥ 3 keywords from rule-02's seven questions: architecture / responsibility / root cause / solution / impact / risk / global). Otherwise → block.
 
-## 必须做（MUST）
+## Must do (MUST)
 
-### 改前（read-before-edit）
+### Pre-edit (read-before-edit)
 
-1. **完整 Read 目标文件** — 不是 diff 上下文、不是 grep 命中行，是**整个文件**。文件过大时分段读完所有相关函数/区段。
-2. **完整 Read 调用点** — `Grep` 找到目标符号被引用的所有位置，对每个引用点 `Read` 至少前后 20 行上下文。
-3. **完整 Read 同步文件** — 修改 rules/*.md → 必须同时 Read `prompts/`、`commands/`、`docs/ARCHITECTURE.md` §8 表格里列出的所有连带文件。
-4. **核对当前状态而非记忆** — 上次会话读过的版本可能已变；Edit 前确认本会话已 Read 当前内容。
+1. **Read the target file completely** — not the diff context, not the grep hit line, the **whole file**. For oversized files, partition and read every relevant function / section.
+2. **Read the call sites completely** — `Grep` every reference to the symbol; `Read` ≥ 20 surrounding lines for each.
+3. **Read connected files** — Editing `rules/*.md` requires Reading `prompts/`, `commands/`, the entries in `docs/ARCHITECTURE.md` §8 connected-files map.
+4. **Trust the current file state over memory** — what you Read last session may have changed; re-Read in this session before editing.
 
-### 写前（think-before-write）
+### Pre-write (think-before-write)
 
-任何 `Edit` / `Write` 提交前，**在思维链或最终回复中显式回答**：
+Before any `Edit` / `Write`, explicitly answer in chain-of-thought or final reply:
 
-1. **根因** — 我为什么要做这次修改？问题/需求的机理是什么？（rule 02 第 3 问）
-2. **架构定位** — 待改部分在架构哪个区域？职责是什么？（rule 02 第 1-2 问）
-3. **方案触底** — 我的修改是否真的从底层解决问题？还是只是掩盖症状？（rule 02 第 4 问）
-4. **连带影响** — 哪些下游/调用点/测试需要同步改？（rule 02 第 5 问）
-5. **风险** — 可能破坏哪些既有不变量、合约、测试？（rule 02 第 6 问）
-6. **方案对比** — 我考虑过哪些替代方案？为什么选这个？
+1. **Root cause** — Why am I making this change? What is the mechanism behind the problem / requirement? (rule 02 Q3)
+2. **Architecture location** — Where in the architecture does the modified part sit? What is its responsibility? (rule 02 Q1-2)
+3. **Bottom-out solution** — Does my change actually solve the problem at its base, or merely mask a symptom? (rule 02 Q4)
+4. **Impact** — Which downstream / call sites / tests need to change in sync? (rule 02 Q5)
+5. **Risk** — Which invariants, contracts, tests might break? (rule 02 Q6)
+6. **Alternatives compared** — Which alternative approaches did I consider? Why this one?
 
-> 上述任意一项答 **"不知道 / 凭感觉 / 应该是"** → **先 Read / Grep / 验证**，再回到本规则。
+> If any of the six answers is **"I don't know / on instinct / probably"** → **Read / Grep / verify first**, then return.
 
-## 物理强制（hooks）
+## Physical enforcement (hooks)
 
-| 阶段 | 钩子 | 触发条件 | 动作 |
+| Stage | Hook | Trigger | Action |
 |---|---|---|---|
-| 改前 | `PreToolUse(Edit\|Write)` | 目标文件存在但本会话未 Read | **DENY**（v0.3.2 read_guard） |
-| 写前（new_string 内容层） | `PreToolUse(Edit\|Write)` | new_string 含未注释的 `try:...except:pass` / `# noqa` / `@ts-ignore` 等补丁标记 | **DENY**（v0.11 patch-style detector，参见 rule 09） |
-| 写后收尾 | `Stop` layer (e) | 本轮 `turn_count == last_edit_turn` 但 last assistant message 缺"系统式自答"标记（< 3 个 rule-02 关键词）| **BLOCK**（v0.11） |
+| pre-edit | `PreToolUse(Edit\|Write)` | target file exists but was not Read in this session | **DENY** (v0.3.2 read_guard) |
+| pre-write (content layer) | `PreToolUse(Edit\|Write)` | `new_string` contains patch-style markers (un-justified `try:...except:pass` / `# noqa` / `@ts-ignore`) | **DENY** (v0.11 patch-style detector, see rule 09) |
+| post-write (closing) | `Stop` layer (e) | `turn_count == last_edit_turn` but last assistant message lacks "systematic self-answer" markers (< 3 rule-02 keywords) | **BLOCK** (v0.11) |
 
-## 禁止做（MUST NOT）
+## Must not (MUST NOT)
 
-- ❌ **看到 grep 命中就改**：grep 是定位工具，不是理解工具。
-- ❌ **凭记忆改**："上次会话里我读过" / "我记得这里是这样写的" ≠ "本会话已经 Read 过当前内容"。
-- ❌ **不读连带文件就改**：改 `rules/0X-*.md` 但没读 `prompts/` 与 `docs/RULES.md`，会立即破坏同步契约。
-- ❌ **写完不答"为什么"**：交出 `Edit` / `Write` 时，思维链或最终回复里没有根因 / 影响 / 方案的显式记录，违反"写前必想"。
-- ❌ **绕过 read_guard 的 DENY 然后用 register_read 注册一个并未真读的文件**：这违背 hash 闸门设计本意，参见 [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §2 read-cache escape hatch。
+- ❌ **Edit on grep hits**: grep is a locator, not an understanding tool.
+- ❌ **Edit from memory**: "I read this last session" ≠ "I have re-Read the current content in this session".
+- ❌ **Edit without reading connected files**: changing `rules/0X-*.md` without Reading `prompts/` and `docs/RULES.md` immediately breaks the sync contract.
+- ❌ **Submit Edit without recording "why"**: if chain-of-thought / final reply has no explicit root cause / impact / solution, you violate think-before-write.
+- ❌ **Bypass read_guard's DENY then call register_read with a hash you didn't actually read**: defeats the hash gate.
 
-## 与其他规则的关系
+## Relationships
 
-| 关系 | 说明 |
+| Relationship | Note |
 |---|---|
-| 08 vs 04 | 04 描述"完整阅读"的语义层要求；08 是其**前置物理强制**入口（read-before-edit 钩子）。 |
-| 08 vs 02 | 02 是修改前的"七问"完整版；08 是其**最低必答子集**（六问），并把"必须显式记录"硬性化。 |
-| 08 vs 09 | 08 解决"改之前/写之前要走完前置纪律"；09 解决"改的内容本身不能是补丁式"。两者前置 / 内容两轴互补。 |
-| 08 vs 06 | 06 是改完后的收敛验证；08 是改之前的准备纪律。`修改前 → 修改中 → 修改后` 三段都被规则覆盖。 |
-| 08 vs 07 | 07 在收尾验"用户要的全做了吗"；08 在前置验"我为这次改进做的准备够吗"。 |
+| 08 vs 04 | 04 specifies "read fully" semantically; 08 is its **pre-action physical-enforcement** entry point (read-before-edit hook). |
+| 08 vs 02 | 02 is the full "seven questions"; 08 is its **minimum required subset** (six questions) plus a "must record explicitly" hard requirement. |
+| 08 vs 09 | 08 governs "did you complete pre-edit discipline?"; 09 governs "is the content itself patch-style?". Pre-action vs content; complementary. |
+| 08 vs 06 | 06 is post-edit convergence; 08 is pre-edit preparation. `before → during → after` are now fully covered. |
+| 08 vs 07 | 07 verifies "did you deliver everything the user asked for?" at closing; 08 verifies "did you prepare sufficiently before editing?" up front. |
 
-## 自检触发器
+## Self-check triggers
 
-下列任一情况出现，agent 必须主动自检本规则：
+- About to `Edit` a file you have not Read **completely** in this session.
+- About to `Edit` without Grep'ing the blast radius / Reading call sites.
+- About to submit `Edit` without having recorded root cause + impact + solution in chain-of-thought.
+- Editing `rules/*.md` without Reading `prompts/session-start.md` and `prompts/user-prompt.md`.
+- Editing a hook script without Reading `hooks/hooks.json`, `docs/ARCHITECTURE.md` §8, and the corresponding `tests/test_*.py`.
+- About to do a "quick fix" of < 5 lines (easy to skip pre-action discipline).
 
-- 即将 `Edit` 一个本会话**未 Read 过完整内容**的文件；
-- 即将 `Edit` 但**没** Grep 影响面 / 没读调用点；
-- 即将提交 `Edit` 但思维链里**没有写明根因 + 影响 + 方案**；
-- 改 `rules/*.md` 但没 Read `prompts/session-start.md` 与 `prompts/user-prompt.md`；
-- 改 hook 脚本但没 Read `hooks/hooks.json`、`docs/ARCHITECTURE.md` §8、对应 `tests/test_*.py`；
-- 即将做"快速修复"且 < 5 行（容易跳过前置纪律）。
+## Termination condition
 
-## 终止条件
+`Edit` / `Write` is allowed only when **all** of the following hold:
 
-只有当下面**全部**成立时，才允许 `Edit` / `Write`：
+1. The target file has been Read in this session (read_guard does not DENY).
+2. All call sites / connected files have been Read (manual self-check + Stop layer (e) backstop).
+3. At least 3 of the six items (root cause / architecture / solution / impact / risk / alternatives) are explicitly recorded in chain-of-thought or final reply.
+4. `new_string` contains no patch-style markers (see rule 09 physical interception).
 
-1. 目标文件本会话已 `Read`（read_guard 不 DENY）；
-2. 所有调用点 / 连带文件已 Read（人工自查 + Stop layer (e) 兜底）；
-3. 思维链或最终回复中已显式回答根因 / 架构定位 / 方案触底 / 连带 / 风险 / 方案对比中**至少 3 项**；
-4. new_string 中无补丁式标记（参见 rule 09 物理拦截）。
-
-否则 → **未达"改前必读 / 写前必想"**，回到 Read / Grep / 验证步骤。
+Otherwise → **read-before-edit / think-before-write not met**, return to Read / Grep / verify.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — 圣旨 CRUD helper.
+"""cc-enslaver — Imperial Edicts (圣旨) CRUD helper.
 
 Used by the /cc-enslaver:edict slash command and by users editing the
 edicts.toml file from the command line.
@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import edicts as edicts_lib  # noqa: E402
 
 
-_HEADER = """# cc-enslaver — 圣旨 (Imperial Edicts) file
+_HEADER = """# cc-enslaver — Imperial Edicts (圣旨) file
 #
 # This file defines project-specific hard rules that the cc-enslaver
 # plugin enforces on top of the built-in 9 rules.
@@ -253,7 +253,7 @@ def main() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description="cc-enslaver 圣旨 (Imperial Edicts) CRUD helper",
+        description="cc-enslaver Imperial Edicts (圣旨) CRUD helper",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

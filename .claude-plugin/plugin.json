@@ -1,7 +1,7 @@
 {
   "name": "cc-enslaver",
-  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.20 collapses the agent's reply skeleton into a fixed YAML schema (cc-enslaver: block whose field names ARE the existing Stop-hook detection markers, so no detector changed) and adds Stop layer (h): a hard-enforced one-sentence plain-language TL;DR (大白话总结) required on every done-claim reply, plus a 大白话 line on every block reason. v0.19 adds cwd-fallback for project edicts path resolution when CLAUDE_PROJECT_DIR fails to propagate.",
-  "version": "0.20.0",
+  "description": "A Claude Code plugin and LLM-agnostic rule pack that enforces systematic thinking, verified citations, and root-cause analysis — eliminating reactive, lazy AI behavior. v0.21 inverts the i18n architecture: English is now the skeleton / source-of-truth language (rules/ + prompts/ at the root, default runtime injection), Chinese is a first-class translation (rules/zh/ + prompts/zh/, via CC_ENSLAVER_LANG=zh), any language code is accepted (falls back to the English skeleton), and drift is CI-blocked by hooks/scripts/i18n_check.py + tests/test_i18n_sync.py — on drift, English wins. v0.20 collapses the agent's reply skeleton into a fixed YAML schema whose field names ARE the existing Stop-hook detection markers (no detector changed) and adds Stop layer (h): a hard-enforced one-sentence plain-language TL;DR required on every done-claim reply.",
+  "version": "0.21.0",
   "author": {
     "name": "skymanbp"
   },

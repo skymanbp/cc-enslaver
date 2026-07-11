@@ -3,7 +3,7 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.20.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.21.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -25,8 +25,10 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 8 Stop-hook gates** (v0.20.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **9 built-in rules + user-defined Imperial Edicts (圣旨) + 8 Stop-hook gates** (v0.21.0):
 
+> **New in v0.21** — 🌍 **English is now the skeleton language**: the plugin's rule + prompt surface flipped from Chinese-canonical to **English-as-source-of-truth**. English lives at the root (`rules/*.md`, `prompts/*.md`); each translation lives in a language subdir (`rules/zh/`, `prompts/zh/`, and any `rules/<code>/`). Injection defaults to English (`CC_ENSLAVER_LANG` unset / `en`); set `CC_ENSLAVER_LANG=zh` for Chinese, or any code for a partial translation (missing files fall back to the English skeleton). **Language version control is a hard, CI-enforced gate**: [`hooks/scripts/i18n_check.py`](hooks/scripts/i18n_check.py) (run via `/cc-enslaver:i18n`) asserts every translation tracks the skeleton file-for-file and section-for-section; [`tests/test_i18n_sync.py`](tests/test_i18n_sync.py) turns CI red on any drift. **On drift, English wins.** See [`docs/I18N.md`](docs/I18N.md).
+>
 > **New in v0.20** — 📋 **Structured YAML reporting + plain-language TL;DR**: every reply now ends with a fixed ```yaml `cc-enslaver:` block (`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`; English mirror `before / edits / convergence / fidelity / closing / tldr`) — the audit trail is **scannable at a glance** instead of drifting free-form prose. A new **Stop layer (h)** hard-enforces a one-sentence `tldr` (大白话总结) on every done-claim reply, and every block reason now carries a `大白话:` takeaway. The schema's field names ARE the existing Stop-hook detection markers, so no detector changed — old emoji-markdown and new YAML reply forms both pass.
 >
 > **From v0.18** — 🧹 **Opt-in auto-GC on SessionStart**: set `CC_ENSLAVER_AUTO_GC_DAYS=30` and the SessionStart hook automatically prunes session-state files older than N days. Rate-limited to once per 24h via a marker file so rapid session restarts don't re-scan. Default off (backward-compatible); the manual `/cc-enslaver:gc` slash command still works and shares the same `prune_old_sessions()` deletion routine.
@@ -35,7 +37,7 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 >
 > **From v0.16** — 🕵️ **Stop Layer (g) file-claim verification**: read_guard captures per-file mtime baselines on first encounter; stop_guard parses `I edited X.py` / `我修改了 Y.md` claims and BLOCKs the Stop when the on-disk mtime contradicts. Conservative-by-design (no baseline / any ambiguity → pass). Escape hatch: `CC_ENSLAVER_DISABLE_LAYER_G=1`.
 >
-> **From v0.15** — 🌍 **English prompts mirror**: set `CC_ENSLAVER_LANG=en` and the hook injects `prompts/en/{session-start,user-prompt}.md` instead of the Chinese canonical.
+> **From v0.15** — 🌍 **Switchable prompt language**: `CC_ENSLAVER_LANG` selects which translation the hook injects. (v0.21 flipped the default — English is now the skeleton at `prompts/{session-start,user-prompt}.md`; `CC_ENSLAVER_LANG=zh` injects the Chinese translation under `prompts/zh/`, and any unknown code falls back to the English skeleton.)
 >
 > **From v0.14** — ⚡ **Three more Bash bypass patterns** (`git rebase --skip`, `--break-system-packages`, `rm -rf` on root/`$HOME`/`~`) get `PreToolUse(Bash)` DENY. 🏛️ **Edicts `--global` flag**: `add --global` writes to `~/.claude/cc-enslaver/edicts.toml` for personal cross-project rules.
 >
@@ -69,7 +71,7 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
    - **`/cc-enslaver:edict`** (v0.12) — Imperial Edicts CRUD (`list / add / remove / reload / path`); `add --global` (v0.14) writes to `~/.claude` instead of project.
 5. **Subagent layer** — the `verifier` subagent independently re-reads any file:line citations the agent has produced and reports whether they're real.
 6. **Skill layer** — `systematic-debug` auto-invokes when debugging language is detected, forcing a root-cause walk-through before any fix is proposed (v0.10 adds Step 0 = build a reproducible feedback loop with 10 concrete loop patterns).
-7. **LLM-agnostic core** — every rule lives as plain Markdown in [`rules/`](rules/) (Chinese canonical) and [`rules/en/`](rules/en/) (English mirror, synced through rule 09). v0.15 added matching [`prompts/en/`](prompts/en/) so the soft-layer injection itself can run in English (`CC_ENSLAVER_LANG=en`); v0.17 extended the same switch to cover Imperial Edicts injection + deny reasons. The discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
+7. **LLM-agnostic core** — every rule lives as plain Markdown, with **English as the skeleton (source of truth)** at [`rules/`](rules/) and translations in language subdirs ([`rules/zh/`](rules/zh/), and any `rules/<code>/`). The soft-layer prompts follow the same layout ([`prompts/`](prompts/) = English skeleton, `prompts/<code>/` = translation), so injection can run in any language via `CC_ENSLAVER_LANG` — the switch also covers Imperial Edicts injection + deny reasons. Translations are kept in lock-step with the skeleton by a CI-enforced check ([`docs/I18N.md`](docs/I18N.md)). The discipline pack works as a system-prompt fragment for ChatGPT, Gemini, local models, or anything else.
 
 > **Future (roadmap):** Per-session ephemeral edicts (`/cc-enslaver:edict add --session ...`); Layer (g) content-hash escalation for same-second mtime edge cases. (Auto-GC on SessionStart — delivered in v0.18.)
 
@@ -87,28 +89,30 @@ cc-enslaver/
 ├── docs/
 │   ├── ARCHITECTURE.md          # How the layers fit together
 │   ├── RULES.md                 # Catalog of every rule
-│   └── EDICTS.md                # Imperial Edicts (圣旨) user guide (v0.12)
+│   ├── EDICTS.md                # Imperial Edicts (圣旨) user guide (v0.12)
+│   └── I18N.md                  # Language version control — English is the skeleton (v0.21)
 ├── rules/                       # ★ LLM-agnostic source of truth (plain Markdown)
-│   ├── 00-index.md ~ 09-systematic-modification.md  # Chinese canonical
-│   └── en/                      # English mirror (v0.6.2+)
+│   ├── 00-index.md ~ 09-systematic-modification.md  # English skeleton (source of truth)
+│   └── zh/                      # 中文 translation (any rules/<code>/; v0.21)
 ├── prompts/                     # Distilled injection text (consumed by hooks)
-│   ├── session-start.md         # SessionStart injection (zh)
-│   ├── user-prompt.md           # UserPromptSubmit injection (zh)
-│   └── en/                      # English mirror (v0.15; CC_ENSLAVER_LANG=en)
+│   ├── session-start.md         # SessionStart injection (English skeleton)
+│   ├── user-prompt.md           # UserPromptSubmit injection (English skeleton)
+│   └── zh/                      # 中文 translation (CC_ENSLAVER_LANG=zh; v0.21)
 ├── hooks/
 │   ├── hooks.json               # Hook registration (4 events)
 │   └── scripts/
-│       ├── inject_context.py    # Soft-layer injection (zh/en switchable)
+│       ├── inject_context.py    # Soft-layer injection (English skeleton; any lang via CC_ENSLAVER_LANG)
 │       ├── read_guard.py        # PreToolUse(Read|Edit|Write) — rule 04+08+09 + edicts + baseline
 │       ├── bash_guard.py        # PreToolUse(Bash) — rule 03+09 + edicts
 │       ├── stop_guard.py        # Stop — 7-layer status table
 │       ├── register_read.py     # Read-cache escape hatch (v0.4)
 │       ├── gc_state.py          # Manual session-state GC (v0.6.1)
 │       ├── manage_edicts.py     # Imperial Edicts CRUD CLI (v0.12)
+│       ├── i18n_check.py        # Language version-control sync check (v0.21)
 │       └── lib/
 │           ├── state.py         # Per-session JSON state (read_files / edits_per_file / baseline_mtimes / ...)
 │           └── edicts.py        # Edicts loader / matcher / bilingual renderer (v0.12 + v0.17)
-├── commands/                    # /cc-enslaver:{checklist,verify,gc,edict}
+├── commands/                    # /cc-enslaver:{checklist,verify,gc,edict,i18n}
 ├── agents/verifier.md           # Independent citation verifier subagent
 ├── skills/systematic-debug/     # Auto-invoked debug discipline skill
 └── tests/                       # 174 black-box subprocess tests (run with python -m unittest discover tests)
@@ -144,14 +148,14 @@ To verify: `/plugin` → "Installed" tab should list `cc-enslaver@cc-enslaver`.
 
 ### As a rule pack for any other LLM
 
-You don't need Claude Code at all. The actual rules live in [`rules/`](rules/) as plain Markdown. The Chinese sources at [`rules/`](rules/) are canonical; an English mirror lives at [`rules/en/`](rules/en/) (added in v0.6.2).
+You don't need Claude Code at all. The actual rules live in [`rules/`](rules/) as plain Markdown. **English is the skeleton (source of truth)** at [`rules/`](rules/); the Chinese translation lives at [`rules/zh/`](rules/zh/) (any other language goes in `rules/<code>/`, kept in sync with the skeleton — see [`docs/I18N.md`](docs/I18N.md)).
 
 ```bash
-# Chinese (canonical):
+# English (skeleton / default):
 cat rules/*.md > /tmp/cc-enslaver.txt
 
-# English (mirror; for non-CJK readers or non-Claude agents):
-cat rules/en/*.md > /tmp/cc-enslaver.txt
+# Chinese (translation):
+cat rules/zh/*.md > /tmp/cc-enslaver.txt
 
 # Then feed that to your agent of choice as system prompt / pre-context.
 ```
@@ -166,7 +170,7 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 
 | Event | Matcher | Behavior | Implementation |
 |---|---|---|---|
-| `SessionStart` | — | Inject 9-rule discipline summary + standard response skeleton + Imperial Edicts block (zh / en switchable via `CC_ENSLAVER_LANG`) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
+| `SessionStart` | — | Inject 9-rule discipline summary + standard response skeleton + Imperial Edicts block (English skeleton by default; any language via `CC_ENSLAVER_LANG`) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `UserPromptSubmit` | — | Re-inject per-turn decision triggers + Imperial Edicts (defends against context compaction) | [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | Record on Read/Write; capture mtime baseline (v0.16); deny Edit/Write of unread existing file (rule 04+08); deny patch-style `new_string` (rule 09 v0.11); deny 4th small Edit without systematic rewrite (rule 09 v0.13); deny on Imperial Edict `deny_edit` regex hit (v0.12); stamp `last_edit_turn` | [`hooks/scripts/read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Deny on bypass patterns (rule 03+09: `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` root paths); process `register_read.py`; deny on Imperial Edict `deny_bash` regex hit | [`hooks/scripts/bash_guard.py`](hooks/scripts/bash_guard.py) |
@@ -174,14 +178,14 @@ For specific integration patterns (OpenAI, Gemini, local llama.cpp, etc.) see th
 
 Hook scripts (8 total under [`hooks/scripts/`](hooks/scripts/)):
 
-- **`inject_context.py`** — soft layer. Emits `hookSpecificOutput.additionalContext` from prompt files in [`prompts/`](prompts/) (or [`prompts/en/`](prompts/en/) when `CC_ENSLAVER_LANG=en`); appends Imperial Edicts block via `lib/edicts.render_injection()`. Always allows.
+- **`inject_context.py`** — soft layer. Emits `hookSpecificOutput.additionalContext` from prompt files in [`prompts/`](prompts/) (the English skeleton) — or `prompts/<lang>/` when `CC_ENSLAVER_LANG=<lang>`, falling back to the skeleton for any file a translation is missing; appends Imperial Edicts block via `lib/edicts.render_injection()`. Always allows.
 - **`read_guard.py`** — hard layer (file context). Read-before-edit (rule 04+08); patch-style content scan (rule 09 content axis); rolling-patch counter (rule 09 frequency axis, v0.13); Imperial Edicts content scan (v0.12); mtime baseline capture for Stop layer (g) (v0.16); `last_edit_turn` stamp. Failing-open.
 - **`bash_guard.py`** — hard layer (command discipline). Static bypass-pattern catalog (rule 03+09); `register_read.py` interception; Imperial Edicts command scan (v0.12). Built-in patterns always run before Edicts so a project edict can't whitelist `--no-verify`. Failing-open.
 - **`stop_guard.py`** — hard layer (rule 06+07+08+09+01 at turn boundary). 7-layer decision tree + uniform status-table block reason (v0.12) + file-claim verification (v0.16). One-shot guard via `last_blocked_turn` with 3-turn grace window. Layers (e)+(f)+(g) scoped to edit turns. Failing-open.
 - **`register_read.py`** — user-facing CLI for the read-cache escape hatch (v0.4). State mutation lives in `bash_guard.py` after a SHA-256 hash match.
 - **`gc_state.py`** — manual garbage collection of stale session state files (v0.6.1; dry-run by default).
 - **`manage_edicts.py`** — Imperial Edicts CRUD CLI (v0.12; `--global` flag v0.14; UTF-8 stdout v0.17). Used by the `/cc-enslaver:edict` slash command and directly from the shell.
-- **`lib/state.py`** + **`lib/edicts.py`** — shared per-session-state library and Imperial Edicts loader / matcher / **bilingual renderer** (zh canonical / en when `CC_ENSLAVER_LANG=en`, v0.17).
+- **`lib/state.py`** + **`lib/edicts.py`** — shared per-session-state library and Imperial Edicts loader / matcher / **multilingual renderer** (English default; `zh` — or any code — via `CC_ENSLAVER_LANG`, with English fallback for unknown codes; v0.17 + v0.21).
 
 All scripts are covered by **174 black-box subprocess tests** in [`tests/`](tests/) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13.
 
@@ -202,7 +206,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output 
 
 | Variable | Effect |
 |---|---|
-| `CC_ENSLAVER_LANG=en` | Switch SessionStart / UserPromptSubmit injections AND Imperial Edicts injection + deny reason to English. Default (unset / `zh` / unknown) = Chinese canonical. |
+| `CC_ENSLAVER_LANG=<code>` | Choose the injection language for SessionStart / UserPromptSubmit AND Imperial Edicts injection + deny reason. Default (unset / `en`) = **English skeleton**; `zh` = Chinese; any other code reads `<dir>/<code>/` and falls back to the English skeleton for missing files. |
 | `CC_ENSLAVER_DISABLE_LAYER_G=1` | Disable Stop layer (g) file-claim verification (escape hatch for false positives in unusual workflows; the other 6 layers still apply). |
 | `CC_ENSLAVER_AUTO_GC_DAYS=N` | **v0.18 opt-in.** Auto-prune session-state files older than N days on SessionStart. Rate-limited to once per 24h via a marker file. Unset / `0` / non-numeric → disabled. |
 | `CLAUDE_PLUGIN_DATA` | Session-state base dir. Set by Claude Code; falls back to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/` then `~/.claude/local/cc-enslaver/`. |
@@ -244,11 +248,13 @@ MIT — see [`LICENSE`](LICENSE).
 | 根因绕过 | 用 `sleep` 掩盖竞态、用 `--no-verify` 跳过钩子 |
 | 半成品 | 写到"应该能工作"就停手，留 TODO，不验证整条链路 |
 
-### 防御分层（**v0.20.0**：9 内置规则 + 用户自定义圣旨 + Stop 钩子 8 层闸门）
+### 防御分层（**v0.21.0**：9 内置规则 + 用户自定义圣旨 + Stop 钩子 8 层闸门）
 
+> **v0.21 新增** — 🌍 **英文成为骨架语言**：插件的规则 + 注入文案从"中文 canonical"翻转为**英文 = source of truth**。英文放在根层（`rules/*.md`、`prompts/*.md`），每种翻译放语言子目录（`rules/zh/`、`prompts/zh/`、任意 `rules/<code>/`）。注入**默认英文**（`CC_ENSLAVER_LANG` 未设 / `en`）；设 `CC_ENSLAVER_LANG=zh` 用中文，或任意语言码用部分翻译（缺失文件自动回退英文骨架）。**语言版本控制是硬性、CI 强制的闸门**：[`hooks/scripts/i18n_check.py`](hooks/scripts/i18n_check.py)（`/cc-enslaver:i18n` 调用）断言每种翻译逐文件、逐章节跟随骨架；[`tests/test_i18n_sync.py`](tests/test_i18n_sync.py) 一旦漂移就让 CI 变红。**漂移时以英文为准。** 详见 [`docs/I18N.md`](docs/I18N.md)。
+>
 > **v0.20 新增** — 📋 **结构化 YAML 汇报 + 大白话总结**：每次回复末尾输出固定的 ```yaml `cc-enslaver:` 块（`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`），把审计轨迹从飘忽的自由文本变成**一眼可扫的固定 schema**。新增 **Stop layer (h)** 硬强制每条 done-claim 回复必含一句 `tldr`（大白话总结），每条拦截理由也附一行 `大白话:`。schema 的字段名**本身就是**现有 Stop 检测 marker，所以检测层一行未改——新旧两种回复格式都通过。
 
-1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则 + 圣旨注入 agent 上下文。**v0.15 起**默认中文；设 `CC_ENSLAVER_LANG=en` 切到英文（注入主体 + 圣旨 deny reason 同步切换，v0.17 闭环）。**v0.20** 把"标准回复骨架"改为上面的 YAML schema。
+1. **软提醒层**：会话启动 + 每轮用户提问前，把纪律规则 + 圣旨注入 agent 上下文。**v0.21 起**默认英文骨架（`CC_ENSLAVER_LANG` 未设 / `en`）；设 `CC_ENSLAVER_LANG=zh` 切到中文，或任意语言码用部分翻译、缺失文件回退英文（注入主体 + 圣旨 deny reason 同步切换）。**v0.20** 把"标准回复骨架"改为上面的 YAML schema。
 2. **硬拦截层**：agent 调用 `Edit` / `Write` / `Bash` 或 Stop 时，插件在工具/回合边界做拦截：
    - **Edit/Write 改前必读**（v0.2 + v0.11 rule 08）：目标文件已存在但本会话未 `Read` 过 → DENY。新文件创建放行。
    - **Edit/Write 反补丁内容**（**v0.11 rule 09**）：new_string 含未带 why 注释的 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `// eslint-disable` / `time.sleep(...) # race` → DENY。
@@ -262,7 +268,7 @@ MIT — see [`LICENSE`](LICENSE).
 3. **主动调用层**：4 个 slash 命令 —— `/cc-enslaver:checklist`、`/cc-enslaver:verify`、`/cc-enslaver:gc`（v0.6.1）、`/cc-enslaver:edict`（**v0.12** CRUD；**v0.14** 加 `--global` 写到 `~/.claude`）。
 4. **子代理验证层**：`verifier` 独立重读 agent 给出的 `file:line` 引用，检查是否真实。
 5. **技能层**：`systematic-debug` 在 debug 语境下自动唤起，强制走根因分析流程（v0.10 加 Step 0 = build feedback loop）。
-6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放在 [`rules/`](rules/)（中文 canonical）/ [`rules/en/`](rules/en/)（英文镜像）/ [`prompts/en/`](prompts/en/)（v0.15 英文注入），可作为任意 LLM 的 system prompt 片段使用。
+6. **LLM-agnostic 核心**：所有规则以纯 Markdown 形式存放，**英文为骨架（source of truth）**放在 [`rules/`](rules/) 根层，翻译放语言子目录 [`rules/zh/`](rules/zh/) / 任意 `rules/<code>/`；注入文案同布局（[`prompts/`](prompts/) = 英文骨架，`prompts/<code>/` = 翻译）。翻译由 CI 硬门锁定跟随骨架（见 [`docs/I18N.md`](docs/I18N.md)）。整包可作为任意 LLM 的 system prompt 片段使用。
 
 > **当前路线图**：会话级临时圣旨（`--session`）、Layer (g) 的 content-hash 同秒精度升级。（SessionStart 自动 GC 已在 v0.18 交付。）
 
@@ -287,9 +293,10 @@ git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
 #### 作为通用 LLM 规则包
 
 ```bash
-cat rules/*.md > cc-enslaver-rules.txt
-# 或英文版（v0.6.2 新增）：
-cat rules/en/*.md > cc-enslaver-rules-en.txt
+# 英文骨架（默认 / source of truth）：
+cat rules/*.md > cc-enslaver-rules-en.txt
+# 或中文翻译：
+cat rules/zh/*.md > cc-enslaver-rules-zh.txt
 ```
 
 把这段文本作为 system prompt 喂给任何 LLM 即可。
@@ -306,6 +313,6 @@ cat rules/en/*.md > cc-enslaver-rules-en.txt
 
 | 变量 | 作用 |
 |---|---|
-| `CC_ENSLAVER_LANG=en` | 切换 SessionStart / UserPromptSubmit 注入 + 圣旨注入 + DENY reason 为英文（默认/未知值/`zh` → 中文 canonical） |
+| `CC_ENSLAVER_LANG=<code>` | 选择 SessionStart / UserPromptSubmit 注入 + 圣旨注入 + DENY reason 的语言。默认（未设 / `en`）= **英文骨架（source of truth）**；`zh` = 中文翻译；其它语言码读 `<dir>/<code>/`，缺失文件自动回退英文骨架。语言版本控制契约见 [`docs/I18N.md`](docs/I18N.md)。 |
 | `CC_ENSLAVER_DISABLE_LAYER_G=1` | 禁用 Stop layer (g) 文件声明验证（false-positive 时的 escape hatch；其余 6 层仍有效） |
 | `CC_ENSLAVER_AUTO_GC_DAYS=N` | **v0.18 opt-in**：SessionStart 时自动清理 ≥ N 天未触碰的 state 文件。24h 速率限制。未设置 / `0` / 非数字 → 关闭。 |

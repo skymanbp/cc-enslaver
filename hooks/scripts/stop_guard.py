@@ -502,7 +502,7 @@ def _has_rule09_marker_or_triplet(text: str) -> bool:
 # summary.
 #
 # It is enforced as a closing *convention* (a Stop layer), deliberately NOT
-# promoted to a tenth numbered rule, to avoid the rules/*.md + rules/en/ +
+# promoted to a tenth numbered rule, to avoid the rules/*.md + rules/zh/ +
 # 00-index + docs fan-out that a real rule would require.
 # --------------------------------------------------------------------------- #
 TLDR_MARKERS = [

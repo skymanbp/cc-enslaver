@@ -17,6 +17,78 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.21.0] — 2026-07-11
+
+**i18n architecture inverted to English-skeleton + hard, CI-enforced language
+version control.**
+
+Until now the plugin was **Chinese-canonical**: `rules/*.md` + `prompts/*.md`
+were the source of truth, `rules/en/` + `prompts/en/` were best-effort mirrors,
+the runtime default was `zh`, and ~6 docs declared "on drift, Chinese wins".
+v0.21 flips this to **English is the skeleton (source-of-truth) language, any
+language is a translation, and drift is blocked by CI** — while keeping the
+enforcement machinery and every human doc's prose language exactly as they were.
+
+### Changed — English is now the skeleton
+
+- **Directory layout inverted** (via `git mv`, structure-preserving):
+  - `rules/en/{00..09}-*.md` → `rules/*.md` (English skeleton, at the root).
+  - `rules/*.md` → `rules/zh/*.md` (中文 translation).
+  - `prompts/en/{session-start,user-prompt}.md` → `prompts/*.md` (English skeleton).
+  - `prompts/*.md` → `prompts/zh/*.md` (中文 translation).
+  - Removed the now-empty `rules/en/` + `prompts/en/`.
+- **Runtime default flipped to English.** `DEFAULT_LANG = "en"` added to
+  [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) and
+  [`hooks/scripts/lib/edicts.py`](hooks/scripts/lib/edicts.py). Unset /
+  `CC_ENSLAVER_LANG=en` → read the root English skeleton;
+  `CC_ENSLAVER_LANG=<code>` → read `<dir>/<code>/<file>`, **falling back to the
+  root English skeleton** (with a stderr note) when that translation is missing.
+  The old hardcoded `{zh,en}` gate is gone — **any** language code passes through.
+- **Edict UI chrome (`_INJECT_STRINGS` / `_DENY_REASON_TEMPLATES`)** now defaults
+  to `en` and `.get(lang, en)` for unknown codes; edict *text* stays free-form
+  (any language). On drift between skeleton and translation, **English wins**.
+
+### Added — language version control (the hard deliverable)
+
+- **[`hooks/scripts/i18n_check.py`](hooks/scripts/i18n_check.py)** —
+  `check_sync() -> list[Drift]` + `main()` CLI. For each translation subdir under
+  `rules/` and `prompts/` it verifies (1) **file-set parity** vs the root skeleton
+  (missing / orphan files) and (2) **ATX-header level-sequence parity** per shared
+  file (structure, not translated text; fenced code blocks skipped). Exits non-zero
+  on any drift and names it.
+- **[`tests/test_i18n_sync.py`](tests/test_i18n_sync.py)** (7 tests) —
+  `assertEqual(check_sync(), [])`, auto-discovered by `unittest discover` → runs in
+  the existing GitHub Actions matrix (ubuntu + windows, Python 3.13) on every
+  push/PR. This makes "语言版本控制" a *hard action*, not soft docs (rule 07).
+- **[`commands/i18n.md`](commands/i18n.md)** — `/cc-enslaver:i18n` runs the check.
+- **[`docs/I18N.md`](docs/I18N.md)** — manifest: declares English as the skeleton,
+  the translatable surface, how to add a language (`rules/<code>/` +
+  `prompts/<code>/` [+ an optional UI-string block]), the sync contract, and the
+  on-drift winner.
+
+### Tests
+
+- Inverted the default-mode assertions in
+  [`tests/test_inject_context.py`](tests/test_inject_context.py) and
+  [`tests/test_edicts.py`](tests/test_edicts.py) from Chinese needles to the
+  English skeleton, and **re-homed** (not deleted) the Chinese assertions onto
+  `CC_ENSLAVER_LANG=zh` counterpart tests — coverage preserved on both languages.
+- Full suite **216 → 225** (+7 `test_i18n_sync`, +2 net from inject/edict
+  bilingual restructure). Guard scripts (`stop_guard` / `read_guard` /
+  `bash_guard`) and their **bilingual** marker lists were left untouched, so
+  physical enforcement is unaffected by the flip.
+
+### Docs
+
+- Reconciled the *structural* facts (source-of-truth designation, `rules/en/` ↔
+  `rules/` ↔ `rules/zh/` paths, on-drift winner) across
+  [`README.md`](README.md), [`CLAUDE.md`](CLAUDE.md),
+  [`docs/RULES.md`](docs/RULES.md), and
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the Chinese prose bodies of the
+  human docs were **kept Chinese** ("content can be any language").
+
+---
+
 ## [0.20.0] — 2026-06-07
 
 **YAML reply schema + hard-enforced plain-language TL;DR (Stop layer (h)).**

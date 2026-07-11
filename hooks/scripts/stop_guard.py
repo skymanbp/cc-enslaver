@@ -552,7 +552,7 @@ def _has_tldr(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 # Match a file-path token: optional Windows drive letter (C:) + at
-# least one alnum char + extension. Allows /, \, ., -, _ as path
+# least one alnum char + extension. Allows /, \, ., -, _, ~ as path
 # chars. Excludes whitespace, quotes, brackets, parens. The extension
 # restriction is what keeps casual phrases ("I think it's done") from
 # looking like file paths.
@@ -560,7 +560,15 @@ def _has_tldr(text: str) -> bool:
 # v0.17: drive-letter prefix added so Windows absolute paths
 # (C:\Users\...\x.py, D:/Projects/foo.md) match. Linux/macOS paths
 # (/tmp/foo.py, ./bar.py) still match because the prefix is optional.
-_PATH_TOKEN = r"(?:[A-Za-z]:)?[\w./\\-]+\.[A-Za-z][A-Za-z0-9_]{0,15}"
+#
+# v0.21.1: '~' added to the char class because the GitHub Windows runner's
+# TEMP is a DOS 8.3 short path (C:\Users\RUNNER~1\AppData\Local\Temp\...).
+# Without '~' the class stopped at the tilde, the whole token failed to
+# match, and _extract_file_claims returned [] on every runner path — so
+# layer (g) silently no-op'd there while passing on tilde-free dev machines
+# (the pre-existing windows-latest CI red). The trailing extension anchor
+# is unchanged, so '~' cannot make casual prose (e.g. "~5 seconds") match.
+_PATH_TOKEN = r"(?:[A-Za-z]:)?[\w./\\~-]+\.[A-Za-z][A-Za-z0-9_]{0,15}"
 
 # English claim verbs. Restricted to verbs that unambiguously assert
 # the agent did the action: created / wrote / edited / modified. "updated"

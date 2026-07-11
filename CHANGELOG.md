@@ -17,6 +17,49 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.21.1] — 2026-07-11
+
+**Hotfix: Stop layer (g) silently no-op'd on the GitHub Windows runner (pre-existing CI red).**
+
+Layer (g) (file-claim verification, v0.16) extracts claimed paths from the
+agent's done-claim with `_PATH_TOKEN`. Its character class was `[\w./\\-]`,
+which **excludes the tilde `~`**. The GitHub `windows-latest` runner's `$TEMP`
+is a DOS 8.3 short path whose user segment carries a tilde
+(`C:\Users\RUNNER~1\AppData\Local\Temp\...`). The regex broke at the `~`, the
+whole path token failed to match, and `_extract_file_claims` returned `[]` for
+**every** path on the runner — so layer (g) silently did nothing there, while
+working normally on tilde-free developer machines (e.g. `C:\Users\skyma\...`).
+
+Effect: the three `TestRule10FileClaimVerification` "must block" cases
+(edit / create / Chinese) went red **only on windows-latest** from v0.16
+onward, passing on local Windows and on ubuntu CI. This was **not** introduced
+by v0.21 (which only changed a one-line comment in `stop_guard.py`); it was
+latent since v0.16.
+
+Severity is low for real users: layer (g) is deliberately conservative (it is
+designed never to false-*block*), so the failure mode is a false-*negative*
+(a dishonest file-claim about a tilde-path file could slip through) — the safe
+direction. The main cost was the misleading red CI badge.
+
+### Fixed
+
+- **Root cause (one char):** `_PATH_TOKEN` character class `[\w./\\-]` →
+  `[\w./\\~-]` in [`hooks/scripts/stop_guard.py`](hooks/scripts/stop_guard.py).
+  The trailing extension anchor (`\.[A-Za-z]...`) is unchanged, so `~` cannot
+  make casual prose (e.g. "~5 seconds") match as a file path. A `why` comment
+  documenting the 8.3-short-name rationale is placed adjacent to the regex.
+
+### Tests
+
+- **225 → 229.** Added `TestTildePathClaimRegression` (4 tests) in
+  [`tests/test_stop_guard.py`](tests/test_stop_guard.py). It calls
+  `_extract_file_claims` directly with a hardcoded tilde path, so the
+  regression reproduces **deterministically on any machine** (RED on the old
+  regex, GREEN on the new), independent of what the local `$TEMP` happens to
+  be. Includes a non-tilde control to guard against over-narrowing.
+
+---
+
 ## [0.21.0] — 2026-07-11
 
 **i18n architecture inverted to English-skeleton + hard, CI-enforced language

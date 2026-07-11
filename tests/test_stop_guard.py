@@ -715,6 +715,60 @@ class TestRule10FileClaimVerification(_StopBase):
         self.assertIsNone(out, msg=f"non-edit turn must not trip (g), got {out!r}")
 
 
+class TestTildePathClaimRegression(unittest.TestCase):
+    """v0.21.1 — 8.3 short-name (tilde) paths must extract as file claims.
+
+    Root cause of the pre-existing windows-latest CI red: the GitHub
+    Windows runner's TEMP is a DOS 8.3 short path whose user segment
+    carries a tilde (C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\...). The
+    _PATH_TOKEN character class did not include the tilde, so any claim
+    whose path contained one produced ZERO extractions. Layer (g) then
+    silently no-op'd, so the three TestRule10 block-cases returned None
+    (no block) and failed — but only on the runner. Developer machines
+    with a tilde-free temp (e.g. C:\\Users\\skyma\\...) extracted fine and
+    passed, masking the bug.
+
+    These call _extract_file_claims directly with a hardcoded tilde path
+    so the regression reproduces deterministically on ANY machine,
+    independent of what the local TEMP happens to be.
+    """
+
+    def _claims(self, message):
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard
+        return stop_guard._extract_file_claims(message)
+
+    def test_tilde_english_edit_claim_extracts(self) -> None:
+        claims = self._claims(
+            r"I edited C:\Users\RUNNER~1\AppData\Local\Temp\t\x.py."
+        )
+        self.assertTrue(
+            claims, "8.3 short-name (tilde) path must extract — GH runner temp",
+        )
+        verb, path, ctype = claims[0]
+        self.assertIn("~", path, "the tilde must be preserved in the path")
+        self.assertTrue(path.endswith("x.py"))
+        self.assertEqual(ctype, "edit")
+
+    def test_tilde_create_claim_extracts(self) -> None:
+        claims = self._claims(
+            r"I created C:\Users\RUNNER~1\AppData\Local\Temp\t\new.py."
+        )
+        self.assertTrue(claims, "tilde create claim must extract")
+        self.assertEqual(claims[0][2], "create")
+
+    def test_tilde_chinese_edit_claim_extracts(self) -> None:
+        claims = self._claims("我修改了 `C:\\Users\\RUNNER~1\\Temp\\y.py`。")
+        self.assertTrue(claims, "tilde path (zh) must extract")
+        self.assertIn("~", claims[0][1])
+
+    def test_non_tilde_path_still_extracts(self) -> None:
+        # Guard against over-narrowing: ordinary paths keep working.
+        claims = self._claims(r"I edited C:\Users\skyma\Temp\t\x.py.")
+        self.assertTrue(claims)
+        self.assertNotIn("~", claims[0][1])
+
+
 class TestTldrLayerH(_StopBase):
     """v0.20 — Layer (h): plain-language TL;DR (大白话) closing requirement.
 

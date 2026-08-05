@@ -38,6 +38,31 @@ After modifications, run **every** check below in order:
 - Run at least **one negative case** (a scenario that should still fail does still fail).
 - Compare **before vs after**: when measurable, give numbers (latency, count, size, hash) — don't just say "looks faster".
 
+### Check 2b — Aggregate-equal is not unchanged
+
+A scalar summary holding steady is **not** evidence that nothing moved.
+Totals, pass counts, file sizes and issue counts stay constant while the
+*composition* underneath them flips.
+
+- **Diff the item set, not the count.** Category names, test IDs, the
+  identity of each failing assertion, per-file hashes — those are the
+  comparison. `N` is a lossy projection of the thing you actually care
+  about.
+- **A real instance.** A validator printed `Total issues: 754` both
+  before and after a ~9,500-substitution refactor — byte-identical
+  totals. A per-category diff showed one category had flipped from
+  `OK …: INFO:1` to `X …: CRITICAL:1`. A totals-only comparison would
+  have shipped that CRITICAL as "no change".
+- **Same for test runs.** Record the *set of failing test IDs*, not
+  "N failed". An unchanged `N` with different members is a regression
+  and a fix cancelling each other out inside the summary line.
+- **Scope of evidence ≠ scope of claim.** When an automated gate
+  validates only part of an artifact, a green result says nothing about
+  the rest of it. Hand-audit the ungated remainder before claiming the
+  whole artifact survived. (Observed: a plan-replacement gate that
+  guarded the `steps` list passed cleanly while two entries of the
+  ungated `success_criteria` list were silently dropped.)
+
 ### Check 3 — Connected non-breakage
 
 - Run the existing test suite / lint / type-check; attach output.
@@ -68,6 +93,8 @@ If any answer is "I don't know" / "should be fine" / "more or less" → **not co
 - ❌ "Tests pass → done" — coverage < 100% is the norm; tests may miss the very scenario you are fixing.
 - ❌ "Works on my machine → ship it" — other environments, CI, the user's machine are different distributions.
 - ❌ "Looks right" — claiming without evidence is a double rule violation (01 + 06).
+- ❌ "The total is the same → nothing changed" — a matching scalar is not a matching set (Check 2b).
+- ❌ "The gate is green → the artifact is intact" — the gate is green about *what it checks*; the rest is unverified (Check 2b).
 - ❌ "I fixed a similar one before, should be similar" — memory-dependence + verification skip (rule 04 + 06).
 - ❌ "No time / user is waiting / good enough for now" — half-finished delivery; you will return to refix this.
 - ❌ Have the agent self-review its own diff alone as "verification" — your bias is the source of non-convergence.
@@ -102,6 +129,8 @@ A claim of "verified" without evidence is equivalent to a rule-01 violation.
 - Tests passed but you did not manually re-trigger the user's original symptom;
 - About to propose a fix without first answering "how will I verify it actually fixes this?";
 - One of checks 1–3 was skipped / "not necessary" without **why**;
+- About to claim "unchanged / neutral / no regression" on the strength of a matching **total** rather than a per-item set diff;
+- An automated gate went green and you are about to generalize that to the parts it does not check;
 - Any of the four self-questions was answered with a vague hedge.
 
 > When triggered, the right move is: **stop**, fill in the evidence; if
@@ -114,6 +143,7 @@ The agent may claim "done" only when **all** of the following hold:
 
 1. Check 1 (re-trigger original symptom) ran; output shows symptom gone.
 2. Check 2 (boundary / counter-examples) covered ≥ 1 boundary + 1 negative.
+2b. Check 2b — any "unchanged" claim rests on a set diff, not a scalar; anything an automated gate does not cover was hand-audited.
 3. Check 3 (connected) ran with no new failures.
 4. Check 4's four self-questions all have traceable evidence.
 5. Check 5 — for performance / race / compatibility scenarios, quantitative comparisons are present.

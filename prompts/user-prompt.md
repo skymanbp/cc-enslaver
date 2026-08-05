@@ -19,6 +19,9 @@
 | About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into **code** | rule 11 | **PreToolUse(Edit\|Write) DENY** (unless adjacent why; prose-doc/lockfile exempt) |
 | About to run `--no-verify` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf /` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
 | About to say "done / fixed" with no `$ command + output` evidence (missing **convergence**) | rule 06 (a) | Stop layer (a) BLOCK |
+| About to claim "unchanged / neutral / no regression" from a matching **total** (issue count, pass count, size) instead of a per-item **set diff** | rule 06 Check 2b | Stop layer (c) BLOCK |
+| A gate went green and you are generalizing that to the parts it does **not** check (scope of evidence ≠ scope of claim) | rule 06 Check 2b | Stop layer (c) BLOCK |
+| About to run a bulk rename / codemod / sed without a survey of the token's real neighbourhoods, an allowlist, and a refusal report | rule 09 bulk edits | — |
 | Have evidence but no explicit answers to 4 questions (really solved / better solution / what's not verified / verification reasonable; rule 06 **convergence**) | rule 06 (c) | Stop layer (c) BLOCK |
 | Passed rule 06 but didn't re-check against the user's original request per-item | rule 07 (d) | Stop layer (d) BLOCK |
 | Modifier words "mandatory / strict / complete / all" implemented as "soft suggestion / doc reminder" | rule 07 standard degradation | Stop layer (d) BLOCK |

@@ -17,6 +17,9 @@
 | 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进**代码** | rule 11 | **PreToolUse(Edit\|Write) DENY**（除非紧邻 why；散文文档/锁文件豁免）|
 | 即将跑 `--no-verify` / `git push --force` / `chmod 777` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
 | 即将说 "完成 / 修好了 / done" 但无 `$ 命令 + 输出` 证据（缺**收敛**）| rule 06 (a) | Stop layer (a) BLOCK |
+| 即将凭一个**总数相同**（问题数 / 通过数 / 体积）而非逐项**集合比对**声称"没变 / 中性 / 无回归" | rule 06 验证 2b | Stop layer (c) BLOCK |
+| 某道门变绿，你却把结论推广到它**并不检查**的部分（证据覆盖面 ≠ 结论覆盖面）| rule 06 验证 2b | Stop layer (c) BLOCK |
+| 即将跑批量改名 / codemod / sed，而没有勘察 token 真实上下文、没有白名单、没有拒绝报告 | rule 09 批量替换 | — |
 | 有证据但没显式答 4 题（真解决 / 更好方案 / 哪些没验 / 验证合理；rule 06 **收敛**）| rule 06 (c) | Stop layer (c) BLOCK |
 | 走完 rule 06 但没回看用户原始请求逐项核对 | rule 07 (d) | Stop layer (d) BLOCK |
 | 程度词"强制 / 完整 / 严格 / 所有"实现成"软建议 / 文档提醒" | rule 07 标准性降级 | Stop layer (d) BLOCK |

@@ -17,6 +17,71 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.22.1] — 2026-08-05
+
+**Two rules sharpened from real field failures. No new detector, no new Stop layer — this is why it is a patch, not a minor.**
+
+Both additions come from one large refactor session where the existing rules were
+followed and *still* let two defects through. They are written as rule text +
+injection rows because the failure mode is a reasoning shortcut, not a syntactic
+pattern a hook can match.
+
+### Added
+
+- **rule 06 → Check 2b — "aggregate-equal is not unchanged"**
+  ([`rules/06-verify-convergence.md`](rules/06-verify-convergence.md) +
+  [`rules/zh/06-verify-convergence.md`](rules/zh/06-verify-convergence.md)).
+  A scalar summary holding steady is not evidence that nothing moved. The
+  comparison must be over the **item set** — category names, test IDs, the
+  identity of each failing assertion, per-file hashes — never over a count.
+  Field evidence: a validator printed `Total issues: 754` both before and after a
+  ~9,500-substitution refactor, byte-identical, while a per-category diff showed
+  one category had flipped `OK …: INFO:1` → `X …: CRITICAL:1`. A totals-only
+  comparison would have shipped that CRITICAL as "no change".
+  The same check carries the corollary **scope of evidence ≠ scope of claim**: a
+  gate that validates part of an artifact says nothing about the rest, so the
+  ungated remainder must be hand-audited. Field evidence: a plan-replacement gate
+  guarding a `steps` list passed cleanly while two entries of the ungated
+  `success_criteria` list were silently dropped.
+- **rule 09 → bulk mechanical edits (rename / codemod / sed)**
+  ([`rules/09-systematic-modification.md`](rules/09-systematic-modification.md) +
+  [`rules/zh/09-systematic-modification.md`](rules/zh/09-systematic-modification.md)).
+  Six-step discipline: survey what actually surrounds every occurrence *before*
+  writing the rule; rewrite only allowlisted forms; emit a **refusal report** of
+  everything declined; reconcile `total = rewritten + skipped + refused`; expect
+  shapes the pattern is structurally blind to (the token inside a regex
+  alternation, as a standalone argument, and the symbol named after it); and
+  **never rewrite a path that addresses history** (`git show <fixed-rev>:<path>`
+  resolves against a tree where the old layout is still correct).
+  Field evidence: in one directory rename a blind sed would have corrupted an API
+  version in a URL, a DB table version, a schema range, a math variable, a
+  function parameter and a report id.
+- **rule 09 → closed-set guards**: when an invariant is specified as "only these
+  names are legal", enumerate the legal set and reject everything else. A
+  blacklist of stray shapes lets the next shape through — observed on a gate's
+  own first live run, where two non-dot-prefixed stray directories walked past a
+  dot-prefix blacklist.
+
+### Changed
+
+- Both per-turn and session-start injections carry the new material:
+  three new rows in [`prompts/user-prompt.md`](prompts/user-prompt.md) (+ zh
+  mirror), and the rule 06 / rule 09 one-liners in
+  [`prompts/session-start.md`](prompts/session-start.md) (+ zh mirror) now name
+  Check 2b and the bulk-edit discipline.
+- rule 06's termination condition gains item 2b; rule 09's "after modification"
+  step now explicitly routes through Check 2b, since a bulk edit is precisely the
+  case where totals stay equal while composition shifts.
+
+### Verified
+
+- `python hooks/scripts/i18n_check.py` → `all translations in sync with the
+  English skeleton` (exit 0) — the en/zh header structures stay aligned after the
+  new `###` subsections.
+- `python -m unittest discover -s tests -q` → `Ran 248 tests … OK`.
+
+---
+
 ## [0.22.0] — 2026-07-11
 
 **Two new write-time content detectors: rule 10 (no non-essential hardcoding) + rule 11 (no non-essential path dependency).**

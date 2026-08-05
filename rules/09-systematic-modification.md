@@ -38,9 +38,41 @@ These are not "fixes" — they **defer** problems. Rule 09 elevates them to a ha
 7. **Do not introduce patch markers** — see "Physical interception" below.
 8. **Record new invariants** — if the change establishes a new invariant ("X is never None" / "must acquire the lock first"), declare it explicitly in code or docs.
 
+### Bulk mechanical edits (rename / codemod / sed)
+
+A regex that matches your intent also matches its homographs, and a bulk
+rewrite is the one edit shape where a single bad rule corrupts hundreds
+of files at once. Before running one:
+
+1. **Survey first, write the rule second.** Enumerate what actually
+   surrounds every occurrence of the target token and *read that list*.
+   Homographs found this way in one real directory rename: an API
+   version inside a URL (`…/v3/me`), a DB table version
+   (`agent_subtypes v3/613`), a schema range (`Mesh v3/v4`), a **math
+   variable** (`v3 = v2 * v1 + …`), a function parameter, and a report
+   id (`DIV-V3`). A blind sed would have corrupted all six.
+2. **Rewrite only allowlisted forms.** Never "replace everything that
+   matches" — replace what the survey proved is the thing you mean.
+3. **Emit a refusal report.** Every occurrence the allowlist declined is
+   printed for a human to read. A silent skip is indistinguishable from
+   a site you missed.
+4. **Reconcile the arithmetic.** total occurrences = rewritten + skipped
+   + refused. If it does not add up, the rule is wrong, not the count.
+5. **Expect shapes the pattern is structurally blind to.** The token
+   inside a regex alternation (`^(?:v3|docs)/` — followed by `|`, not by
+   the separator you keyed on); the token as a standalone argument
+   (`join(root, "v3", "assets")`); and the *symbol* named after it
+   (`V3_DIR`). Each needs its own survey pass.
+6. **Never rewrite a path that addresses history.**
+   `git show <fixed-rev>:<path>` resolves against an old tree in which
+   the old layout is still the correct one. Worktree paths move;
+   history-addressing paths must not.
+
 ### After modification
 
-9. Run rule 06 convergence; run rule 07 task fidelity.
+9. Run rule 06 convergence — including Check 2b, since a bulk edit is
+   exactly the case where totals stay equal while composition shifts;
+   run rule 07 task fidelity.
 
 ## Physical interception (hooks)
 
@@ -106,6 +138,9 @@ A bare marker without justification = laziness, intercepted.
 - ❌ **Commenting out failing tests**: deleting / commenting / `@skip` to declare "done".
 - ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation. As of v0.13 this is physically intercepted by the `PreToolUse(Edit|Write)` frequency layer, not just soft discipline.
 - ❌ **Fix one and leave three TODOs**: "I'll patch the rest later" is not allowed; one pass must cover the full root-cause impact.
+- ❌ **Blind bulk replace**: running a rename / codemod / sed without first surveying the token's real neighbourhoods, without an allowlist, or without a refusal report of what it declined.
+- ❌ **Rewriting history-addressing paths** during a move: a path handed to a fixed git rev must keep the layout that rev actually has.
+- ❌ **Pattern blacklists where the invariant is a closed set**: if only a known list of names is legal, enumerate that list and reject everything else. Blacklisting the stray shapes you happen to have seen lets the next shape walk straight through — including on the gate's own first live run.
 
 ## Relationships
 
@@ -126,6 +161,8 @@ A bare marker without justification = laziness, intercepted.
 - About to loosen a test assertion / extend a timeout.
 - Commenting out / `@skip`-ing any failing test.
 - Already made ≥ 3 small Edits on the same file this session and still patching, not rewriting.
+- About to run a rename / codemod / sed across many files without a survey, an allowlist and a refusal report.
+- About to write a guard that enumerates *bad* shapes for an invariant whose specification is a *closed set of good ones*.
 - Chain-of-thought lacks the "root cause + impact + alternatives" triplet.
 
 ## Termination condition

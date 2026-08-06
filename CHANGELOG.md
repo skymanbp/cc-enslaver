@@ -17,6 +17,69 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.22.2] — 2026-08-05
+
+**v0.22.1 shipped broken, and its own new rule is what should have caught it.**
+
+`plugin.json` was bumped to `0.22.1`. `.claude-plugin/marketplace.json` — the file
+the Claude Code plugin installer reads — was not, in **either** of its two version
+fields. So the installed plugin reported `0.22.0`, and the release was invisible on
+the one surface a user looks at. The 248-test suite was green, CI was green, the tag
+was pushed. Nothing was wrong with any of that evidence; it simply never opened those
+two files. That is exactly the corollary rule 06 Check 2b had just been written to
+name — **scope of evidence ≠ scope of claim** — committed by the release that
+introduced it.
+
+Second, separate defect found the same way: **a git tag is not a release**. The
+`v0.22.1` tag was pushed to the remote, but no GitHub Release object was created, so
+`gh release list` still showed `v0.22.0` as `Latest`. "Released" had been treated as
+"tagged + pushed".
+
+### Added
+
+- **Version-drift gate** ([`tests/test_version_sync.py`](tests/test_version_sync.py),
+  5 checks). `.claude-plugin/plugin.json` is the single version authority; everything
+  else is compared **to it**, never site-to-site (a pair can drift together).
+  Pinned: both manifest version fields, the README shields badge, and the newest
+  *released* `## [X]` heading in this file. Deliberately **not** pinned: prose. The
+  README's "New in vX.Y.Z" sections and the changelog bodies are history and must be
+  free to name old versions.
+- **Closed-set guard on the manifest sites** — the direct application of the
+  closed-set discipline added to rule 09 in v0.22.1. The gate does not check a
+  hand-listed pair of paths; it walks both manifests recursively for *every*
+  `"version"` key and asserts the discovered JSON-pointer set equals the registered
+  set (`EXPECTED_VERSION_POINTERS`). A version field added to a manifest later fails
+  the test until it is registered — with a checklist of two paths, that new field
+  would have escaped silently, which is the same shape as the original bug.
+- **Release checklist** in [`CLAUDE.md`](CLAUDE.md) §4.1, ending at
+  `gh release create` rather than `git push --tags`, with the version-drift gate as
+  its first step.
+
+### Fixed
+
+- `.claude-plugin/marketplace.json`: `metadata.version` and `plugins[0].version`
+  `0.22.0` → `0.22.2`, and the storefront `description` (which had also stopped at
+  the v0.22.0 feature set) brought current through v0.22.2.
+- Backfilled the missing GitHub Release for `v0.22.1`, so the releases page stops
+  claiming `v0.22.0` is the newest tag with a release.
+
+### Verification
+
+Red-before-green, on the unfixed tree:
+
+```
+$ python -m unittest discover -s tests -p "test_version_sync.py" -v
+FAIL: test_every_manifest_version_matches_plugin_json
+AssertionError: version drift: plugin.json says 0.22.1, but
+  {'.claude-plugin/marketplace.json/metadata/version': '0.22.0',
+   '.claude-plugin/marketplace.json/plugins/0/version': '0.22.0'}
+```
+
+The gate names both drifted pointers by JSON pointer, which is the evidence that it
+would have blocked the v0.22.1 release.
+
+---
+
 ## [0.22.1] — 2026-08-05
 
 **Two rules sharpened from real field failures. No new detector, no new Stop layer — this is why it is a patch, not a minor.**

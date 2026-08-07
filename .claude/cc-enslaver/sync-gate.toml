@@ -1,0 +1,33 @@
+# cc-enslaver — repo-wide sync gate config (rule 12, v0.23)
+#
+# Co-update groups for THIS repo (dogfood: the plugin's own development is
+# governed by its own gate). Semantics per group: if any file edited this
+# session matches a `when` glob, at least one edited file must match a
+# `require` glob — otherwise Stop layer (i) blocks the done-claim unless
+# the reply carries an explicit sync marker (同步核对 / sync-check /
+# rule 12) explaining why the require side needs no change.
+#
+# Globs are matched against project-relative paths with fnmatch; `*`
+# crosses path separators (so "rules/*.md" also covers rules/zh/).
+# `mode = "any"` (default): one require-side edit satisfies the group.
+# `mode = "all"`: EVERY require glob needs an edited match — use for
+# lock-step invariants where one stale sibling is the failure mode.
+
+[[groups]]
+name = "rules-fanout"
+when = ["rules/*.md"]
+require = ["prompts/*.md", "docs/RULES.md", "commands/checklist.md"]
+note = "Editing a rule fans out to at least one of: injected prompts / docs/RULES.md index / checklist. Full co-update map: CLAUDE.md §4 — the gate is a floor, not the ceiling."
+
+[[groups]]
+name = "hooks-tests"
+when = ["hooks/scripts/*.py"]
+require = ["tests/*.py"]
+note = "Every hook-script change needs its black-box test file re-checked (ARCHITECTURE.md §8)."
+
+[[groups]]
+name = "version-manifests"
+when = [".claude-plugin/plugin.json"]
+require = [".claude-plugin/marketplace.json", "CHANGELOG.md"]
+mode = "all"
+note = "plugin.json is the version authority; BOTH marketplace.json AND CHANGELOG must move with it (§4.1 — updating only one of them is exactly the v0.22.1 shipping failure)."

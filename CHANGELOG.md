@@ -17,6 +17,144 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.23.0] — 2026-08-07
+
+**Rule 12 (repo-wide sync: 全库更新) + a hard TL;DR length contract.**
+
+Two field complaints drove this minor: (1) the v0.20 `tldr` field kept growing
+into paragraphs, defeating its purpose; (2) nothing — soft or hard — forced an
+edit to carry the rest of the repository with it (references, downstream code,
+docs, tests, translations), so stale siblings kept shipping.
+
+### Added
+
+- **rule 12 — repo-wide sync**
+  ([`rules/12-repo-wide-sync.md`](rules/12-repo-wide-sync.md) +
+  [`rules/zh/12-repo-wide-sync.md`](rules/zh/12-repo-wide-sync.md)). "Done"
+  now means "every repo-wide reference of the changed content is co-updated or
+  explicitly verified current", with the sweep reported via a `同步核对:` /
+  `sync-check:` closing line. Two halves:
+  - **Passive — sync gate (per-project 代码门禁)**. Projects register known
+    co-update invariants in `.claude/cc-enslaver/sync-gate.toml`
+    (`[[groups]]` with `when` / `require` globs; fnmatch on project-relative
+    paths, `*` crosses separators; optional `mode = "all"` demands *every*
+    require glob be matched — the lock-step semantics that catches the
+    v0.22.1 "one stale sibling" shape, which any-of would wave through). New
+    [`hooks/scripts/lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py) loads
+    and evaluates it; [`read_guard.py`](hooks/scripts/read_guard.py) records
+    every ACCEPTED Edit/Write into a new per-session `edited_files` state set;
+    **Stop layer (i)** blocks an edit-turn done-claim whose `when` group
+    matched with its `require` side unsatisfied and no sync-acknowledgement
+    marker in the reply. Marker escape is by design: "checked, no change
+    needed" is a legitimate outcome that must be *said*, not silently
+    assumed — and escaped groups are persisted per session
+    (`sync_acked_groups`), so one explicit answer per group suffices (the
+    cumulative `edited_files` set would otherwise re-block the same group on
+    every post-grace edit turn for the rest of the session). `sync-gate` is
+    deliberately NOT a marker — it is the config file's name, not a claim.
+    No config → the layer never fires (opt-in); loader/evaluator
+    failing-open. This repo dogfoods its own gate:
+    [`.claude/cc-enslaver/sync-gate.toml`](.claude/cc-enslaver/sync-gate.toml)
+    (rules→prompts/docs/checklist, hooks→tests, plugin.json→marketplace+CHANGELOG
+    with `mode = "all"`).
+  - **Active — `repo-refresh` skill**
+    ([`skills/repo-refresh/SKILL.md`](skills/repo-refresh/SKILL.md)),
+    auto-invoked on "全库更新 / stale scan / audit the repo" language: a
+    systematic whole-repo sweep (docs **and** code) across five defect
+    categories — stale (陈旧) / outdated (过时) / redundant (冗余) / wrong
+    (错误) / drifted (漂移) — every finding with `file:line` evidence,
+    deletions gated on user confirmation, closing with a nudge to register
+    recurring pairs as sync-gate groups.
+- **TL;DR length contract (layer (h) part 2)**. Each `tldr` item must be one
+  sentence — cause, action, outcome — within **160 characters**
+  (`TLDR_MAX_ITEM_CHARS`); several things → one item per line, each within
+  the cap. Extraction is line-based and conservative, and (after an
+  adversarial review pass) covers the natural forms: `tldr: value` with
+  optional list / ATX-heading prefix and emphasis wrappers (`**tldr:**`),
+  value-less `tldr:` followed by more-indented *or same-indent* `- ` list
+  items (the legal YAML block sequence), and the colon-less `## TL;DR`
+  heading followed by a paragraph. Deliberately NOT measured (fail open):
+  blockquoted lines, non-YAML code fences (fixtures/examples — the canonical
+  ```yaml schema fence stays measurable), and nested list detail under a
+  marker line that already carried its sentence. An overlong item blocks at
+  Stop layer (h) with a dedicated `overlong` table note + recovery
+  (`_RECOVERY_H_LONG`).
+- Docs/prompts fan-out: rule tables + trigger rows + closing-schema length
+  note in all four injected prompts (en + zh), checklist section **H
+  (全库同步)** + item **G4 (tldr length)**, `docs/RULES.md`,
+  `rules/00-index.md` (+ zh), `docs/ARCHITECTURE.md` §2/§5/§8, `CLAUDE.md`
+  §2.14 / §3 / §6.
+
+### Fixed
+
+- **Edit-gated Stop layers had NEVER fired in production (pre-existing since
+  v0.11, HIGH — found by a live-state E2E audit).** Production hook payloads
+  carry no `turn_count`: a real session with 27 edits recorded in
+  `edited_files` had no `last_edit_turn` key at all, proving every
+  `record_edit_turn` stamp had silently no-op'd — so layers (e)/(f)/(g)/(i)
+  only ever ran inside the test suite (which always passes a turn_count),
+  and the one-shot grace window was equally vacuous
+  (`was_just_blocked(sid, None)` can never match). Root-cause fix:
+  `record_edit_turn` now unconditionally sets an `edited_since_last_stop`
+  flag (`did_edit_this_turn` honors flag OR exact turn match — existing
+  tests unbroken); stop_guard synthesizes a monotonic turn number from a
+  per-session `stop_counter` when the payload lacks one (Stop fires once
+  per turn, so the counter IS a turn number and the [last+1, last+3] grace
+  arithmetic is restored); every ALLOWED Stop clears the flag (turn
+  boundary), blocked Stops keep it (the recovery reply is the same logical
+  turn). A production-shape E2E harness (no turn_count, transcript-only
+  Stop messages, full Read→Edit→Stop lifecycle chains, 11 scenarios) went
+  red-then-green and is pinned as `TestProductionShapePayloads`.
+- **Session-state lost-update race (pre-existing, HIGH; blast radius widened
+  by this release).** Every hook invocation is a separate OS process and
+  Claude Code fires parallel tool calls as concurrent hook subprocesses
+  sharing one session JSON; the unlocked load→mutate→save cycle lost
+  measured **2-3 of 10** recorded paths per 10-way-parallel round. Visible
+  symptom: a false rule-04 DENY ("file not Read this session") immediately
+  after the file WAS read — reproduced live during this release's own
+  development; since v0.23 a lost `edited_files` entry could also corrupt
+  the layer-(i) verdict in either direction. Root-cause fix in
+  [`lib/state.py`](hooks/scripts/lib/state.py): every mutator now holds a
+  per-session cross-process file lock (`msvcrt.locking` / `fcntl.flock` on a
+  sibling `<sid>.json.lock`; acquisition failure degrades failing-open with
+  a stderr diagnostic) and `save()` writes atomically (unique temp file +
+  `os.replace`, so a reader can never see torn JSON that load() would
+  silently "repair" into amnesia). After the fix: 5 × 10-parallel rounds,
+  **0 lost**; pinned by `TestConcurrentStateRecording` (12-way).
+- Full-debug probe round: `## TL;DR:` (value-less heading marker WITH a
+  colon) was not measured (silent false negative — now falls through to
+  paragraph collection); a `~~~` line inside a ``` fence mis-toggled the
+  fence state (false-positive block on the quoted fixture — fences now
+  close only on their own opening marker, same contract as `i18n_check`);
+  a `./`-prefixed sync-gate glob could never match a project-relative path,
+  leaving a `require` side permanently unsatisfiable (loader now
+  normalizes); `docs/EDICTS.md` + `commands/edict.md` + the edicts.py
+  injection titles still said "11 rules", and the EDICTS.md language table
+  still described the pre-v0.21 default-Chinese mapping (both brought
+  current).
+
+### Verification
+
+Red-before-green on the version gate (marketplace ×2 + README badge +
+CHANGELOG heading all named at `0.22.2` after the plugin.json bump); an
+injection probe proved the new markers actually reach
+`hookSpecificOutput.additionalContext` (11/11 needles); a pre-release
+adversarial review (12 findings, each reproduced by executing the shipped
+code) drove the extraction-form matrix, the session acknowledgement, the
+`mode = "all"` semantics, and the marker tightening above; a full-debug
+round (race probe 10-parallel × 5, edge-probe matrix 7 cases, repo-wide
+staleness grep) drove the Fixed section above and re-converged at 0 losses
+and 7/7 probes; a live-state + production-shape E2E round (11 scenarios)
+exposed and fixed the dormant edit-gated layers. Full suite **253 → 310**
+green + i18n gate green; new tests: `TestProductionShapePayloads`,
+`TestTldrLengthLayerH` (incl. form matrix + heading-colon + mixed-fence),
+`TestSyncGateLayerI` (incl. ack-stickiness, mode=all, filename-non-escape
+regressions), `TestEditedFilesRecording`, `TestConcurrentStateRecording`,
+`tests/test_sync_gate.py` unit coverage (incl. `./`-glob normalization),
+plus (i)-row status-table contract rows.
+
+---
+
 ## [0.22.2] — 2026-08-05
 
 **v0.22.1 shipped broken, and its own new rule is what should have caught it.**

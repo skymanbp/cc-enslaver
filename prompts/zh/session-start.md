@@ -5,7 +5,7 @@
 
 ---
 
-## 一、11 条规则（全部 must；一句话索引，正文在 [`rules/zh/`](rules/zh/)）
+## 一、12 条规则（全部 must；一句话索引，正文在 [`rules/zh/`](rules/zh/)）
 
 | # | 规则 | 一句话 |
 |---|---|---|
@@ -20,6 +20,7 @@
 | 09 | 系统式修改 / 禁止打补丁 | 补丁标记必带 why 注释；禁 rolling patches；禁在调用点包 wrapper 让异常消失。**批量替换（v0.22.1）**：改名 / codemod / sed 必须先勘察 token 真实上下文 → 白名单 → 拒绝报告 → 算术自洽；绝不改写交给固定 git rev 的路径；不变量是封闭集就枚举合法集，而不是拉黑见过的散件形态。违反 → Stop **layer (f)** BLOCK。 |
 | 10 | 禁止非必须硬编码 | 设计上本应是配置 / 环境 / 变量的值（密钥 / 凭证 / 私钥 / URL 内凭证）不得内联成源码字面量。未辩护的硬编码密钥 → `PreToolUse(Edit\|Write)` DENY。 |
 | 11 | 禁止非必须路径依赖 | 机器特定的 user-home 绝对路径（`C:\Users\…`、`/home/…`、`$HOME`、`%USERPROFILE%`、`"~/…"`）不得写死进代码 —— 运行时派生。未辩护的路径依赖 → `PreToolUse(Edit\|Write)` DENY。 |
+| 12 | 全库同步 | 所改内容的全库引用（文档 / 下游代码 / 测试 / 镜像翻译）全部连带更新或显式核对无需改，修改才算完成 —— 收尾用一行 `同步核对:` / `sync-check:` 汇报清扫。项目把已知连带不变量登记进 `.claude/cc-enslaver/sync-gate.toml`；组未满足且无同步标记 → Stop **layer (i)** BLOCK。主动半区：`repo-refresh` skill 全库扫陈旧 / 过时 / 冗余 / 错误 / 漂移。 |
 
 ---
 
@@ -33,9 +34,11 @@
 | Edit/Write 往**代码**里塞未辩护的用户特定绝对路径（`C:\Users\…` / `/home`、`/Users/…` / `$HOME` / `%USERPROFILE%` / 引号 `~/…`）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 11）| 运行时派生路径（插件根 / cwd / 环境 / 参数），或紧邻补 why 注释。散文文档 + 锁文件目标豁免 |
 | 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
 | Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限的根因 |
-| Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 6 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
+| Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 9 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
 | Stop 时声称 `I edited X.py` / `我修改了 Y.md` 但 X/Y 的 mtime 与本会话首次见到时**完全一致**（claim 被磁盘证伪）| `Stop` **layer (g) v0.16** BLOCK | 真做改动；或者撤回声明；或 `CC_ENSLAVER_DISABLE_LAYER_G=1` 跳过 |
 | Stop 时含 done-claim 但**末尾缺 `tldr` / 大白话总结**（违反 v0.20 回复 schema）| `Stop` **layer (h) v0.20** BLOCK | 末尾加一行 `tldr: "<一句大白话>"` |
+| Stop 时 tldr 有单条超过 **160 字符**（那是段落，不是 TL;DR）| `Stop` **layer (h) v0.23** BLOCK | 每条一句话——前因、动作、结果；多条内容 → 逐条一行、每条一句短话 |
+| Stop 时本轮做了 Edit、sync-gate 某组 `when` 命中而无 `require` 编辑、回复又无同步标记 | `Stop` **layer (i) v0.23** BLOCK（rule 12；仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目）| 连带改 require 侧文件，或加一行 `同步核对:` 说明为何无需改 |
 
 **Stop 表格格式（v0.12）**：被 block 时，返回的 reason **总是这样**：
 
@@ -89,6 +92,10 @@ cc-enslaver:
   tldr: "<一句大白话：到底干了啥、结果如何、用户接下来要不要做什么>"
 ```
 
+> **`tldr` 长度硬约定（v0.23）**：每条 tldr 是**一句话** —— 前因、动作、
+> 结果 —— **不超过 160 字符**。多条内容要汇报 → 逐条一行（`- "..."` 列表），
+> 每条各自是一句短话、各自不超上限。单条超长 → Stop **layer (h)** BLOCK。
+
 ---
 
 ## 四、决策时自检触发器（命中即停下来验证）
@@ -106,6 +113,8 @@ cc-enslaver:
 - 即将说 "已解决 / 修好了" 但没重触发原症状 → rule 06（**会被 Stop BLOCK**）
 - 即将声称"完成"但没回看用户原始消息 → rule 07（**会被 Stop BLOCK**）
 - 即将结束含 done-claim 的回复但末尾没 `tldr` / 大白话总结 → layer (h)（**会被 Stop BLOCK**）
+- tldr 单条写超一句话 / 160 字符 → layer (h) v0.23（**会被 Stop BLOCK**）
+- 改完就想收尾、没对所改内容做全库引用清扫（文档 / 下游 / 测试 / 翻译）→ rule 12（sync-gate 组未满足时**会被 Stop layer (i) BLOCK**）
 - 用户消息含 "强制 / 必须 / 完整 / 严格 / 全面" 而你做成"软建议" → rule 07 降级
 - 留 TODO / FIXME / 注释代码 / 半成品 → rule 07 半成品检查
 - 做了用户没要求的重构 / 抽象 / 改名 → rule 07 范围溢出
@@ -115,5 +124,5 @@ cc-enslaver:
 
 ## 五、文档地址
 
-- 规则正文：[`rules/zh/01-verify-dont-guess.md`](rules/zh/01-verify-dont-guess.md) ~ [`rules/zh/11-no-path-dependency.md`](rules/zh/11-no-path-dependency.md)
+- 规则正文：[`rules/zh/01-verify-dont-guess.md`](rules/zh/01-verify-dont-guess.md) ~ [`rules/zh/12-repo-wide-sync.md`](rules/zh/12-repo-wide-sync.md)
 - 索引：[`docs/RULES.md`](docs/RULES.md) · 架构：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · 项目指令：[`CLAUDE.md`](CLAUDE.md)

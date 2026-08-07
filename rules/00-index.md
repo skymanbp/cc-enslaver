@@ -38,13 +38,14 @@ severity: info
 | 09  | `09-systematic-modification.md`                 | Systematic modification, no patch-style                    | must     |
 | 10  | `10-no-hardcoding.md`                           | No non-essential hardcoding                                | must     |
 | 11  | `11-no-path-dependency.md`                      | No non-essential path dependency                           | must     |
+| 12  | `12-repo-wide-sync.md`                          | Repo-wide sync — co-update every reference                 | must     |
 
 ## Numbering convention
 
 - Format `<two-digit>-<kebab-case>.md`.
 - Numbers are **never reused** once published (even if a rule is
   retired, its number stays — frontmatter gets `status: deprecated`).
-- Current range: `01–11`.
+- Current range: `01–12`.
 
 ## Relationships
 
@@ -77,3 +78,11 @@ severity: info
   paths that should be derived at runtime). Both share a why-comment
   escape hatch operationalizing "non-essential", and both exempt
   prose-doc + lockfile targets.
+- **12** — *output-side (after the change, repo-graph)* constraint: the
+  edit is only done when every repo-wide reference of the changed
+  content is co-updated or explicitly cleared. Passive half = per-edit
+  co-update discipline + the per-project sync gate
+  (`.claude/cc-enslaver/sync-gate.toml`, Stop layer (i)); active half =
+  the `repo-refresh` whole-repo stale/outdated/redundant/wrong/drift
+  sweep skill. Complements 06 (converge the part) and 07 (cover the
+  request) with "carry the rest of the repo along".

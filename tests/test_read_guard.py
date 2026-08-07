@@ -522,6 +522,66 @@ class TestRecordEditTurn(_GuardTestBase):
             msg="missing turn_count must not produce a stamp",
         )
 
+    def test_no_turn_count_still_sets_edit_flag(self) -> None:
+        # v0.23 E2E finding: production payloads have no turn_count, so
+        # the edit signal the Stop hook actually consumes is the
+        # edited_since_last_stop flag — it must be set unconditionally
+        # on every accepted Edit/Write.
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(target, "x = 1\n")
+        self.assertIsNone(out)
+        self.assertTrue(
+            self._state().get("edited_since_last_stop"),
+            msg="accepted Edit without turn_count must still set the flag",
+        )
+
+
+class TestEditedFilesRecording(_GuardTestBase):
+    """v0.23 — accepted Edits/Writes land in the session's edited_files set.
+
+    This set is what Stop layer (i) (rule 12 sync gate) matches against
+    the project's co-update groups. Denied edits must NOT be recorded —
+    a denied edit never landed, so it creates no co-update obligation.
+    """
+
+    def _edited(self) -> list[str]:
+        state = self._state()
+        if not state:
+            return []
+        return state.get("edited_files") or []
+
+    def test_successful_edit_records_edited_file(self) -> None:
+        import os
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(target, "x = 1\n")
+        self.assertIsNone(out, msg="clean Edit must allow")
+        norm = os.path.normcase(os.path.realpath(target))
+        self.assertIn(norm, self._edited())
+
+    def test_write_new_file_records_edited_file(self) -> None:
+        import os
+        target = str(self.tmpdir / "fresh_module.py")
+        rc, out, _ = self._pre_write_with_content(target, "def f(): pass\n")
+        self.assertIsNone(out, msg="clean Write of new file must allow")
+        norm = os.path.normcase(os.path.realpath(target))
+        self.assertIn(norm, self._edited())
+
+    def test_denied_edit_is_not_recorded(self) -> None:
+        target = self._existing_file()
+        self._pre("Read", target)
+        rc, out, _ = self._pre_edit_with_new_string(
+            target,
+            "try:\n    risky()\nexcept Exception:\n    pass\n",
+        )
+        self.assertIsNotNone(out, msg="patch-style edit must DENY")
+        self.assertEqual(self._edited(), [])
+
+    def test_read_alone_is_not_recorded(self) -> None:
+        self._pre("Read", self._existing_file())
+        self.assertEqual(self._edited(), [])
+
 
 class TestRollingPatchInterception(_GuardTestBase):
     """v0.13 — rule 09 rolling-patch hard interception.
@@ -728,6 +788,62 @@ class TestRollingPatchInterception(_GuardTestBase):
         self.assertIn("edits_per_file", state)
         self.assertEqual(len(state["edits_per_file"]), 1)
         self.assertEqual(list(state["edits_per_file"].values()), [1])
+
+
+class TestConcurrentStateRecording(_GuardTestBase):
+    """v0.23 — parallel hook processes must not lose state updates.
+
+    Claude Code fires parallel tool calls as concurrent hook
+    subprocesses sharing one session file. Before the v0.23 cross-
+    process lock + atomic save, the unlocked load→mutate→save cycle
+    lost 20-30% of recorded paths at 10-way parallelism (measured:
+    2-3 of 10 per round), whose visible symptom was a false rule-04
+    DENY right after the file WAS read — and, since v0.23, a corrupted
+    layer-(i) edited_files verdict. This test launches 12 truly
+    concurrent recorders and demands zero loss.
+    """
+
+    def test_parallel_reads_all_recorded(self) -> None:
+        import subprocess
+        n = 12
+        targets = []
+        for i in range(n):
+            f = self.tmpdir / f"conc_{i}.py"
+            f.write_text(f"# {i}\n", encoding="utf-8")
+            targets.append(str(f))
+        env = {**__import__("os").environ, **self.env}
+        procs = []
+        for t in targets:
+            payload = json.dumps({
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": t},
+            }).encode("utf-8")
+            p = subprocess.Popen(
+                [sys.executable, GUARD],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            procs.append((p, payload))
+        # Feed stdin only after ALL processes exist, maximizing overlap.
+        for p, payload in procs:
+            p.stdin.write(payload)
+            p.stdin.close()
+        for p, _ in procs:
+            p.wait(timeout=120)
+        state = self._state()
+        self.assertIsNotNone(state, msg="state file must exist")
+        recorded = state.get("read_files", [])
+        self.assertEqual(
+            len(recorded), n,
+            msg=(
+                f"lost update: only {len(recorded)}/{n} parallel reads "
+                f"survived — the session-lock / atomic-save fix regressed"
+            ),
+        )
 
 
 class TestPathNormalization(_GuardTestBase):

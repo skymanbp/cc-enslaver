@@ -40,7 +40,7 @@ catches the lazy behaviour, often via a different signal.
 - Read-before-edit guard: [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) + [`../hooks/scripts/lib/state.py`](../hooks/scripts/lib/state.py)
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
-- Stop guard (v0.6.0 → v0.7.0 → v0.8.0, rule 06 + rule 07 enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py)
+- Stop guard (v0.6.0 → … → v0.23.0, rule 01 + 06 + 07 + 08 + 09 + 12 + TL;DR enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) + [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py)
 
 Five hook entries across four events:
 
@@ -48,9 +48,9 @@ Five hook entries across four events:
 |---|---|---|---|
 | `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
-| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09), hardcoded secret (rule 10), or user-home path dependency (rule 11) in code targets; stamp `last_edit_turn` for Stop layers (e)+(f) |
+| `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09), hardcoded secret (rule 10), or user-home path dependency (rule 11) in code targets; record the edit-turn signal for Stop layers (e)/(f)/(g)/(i) — `edited_since_last_stop` flag always, plus `last_edit_turn` when the payload supplies a turn_count (v0.23: production payloads do NOT); record accepted edits into `edited_files` for Stop layer (i) (rule 12, v0.23) |
 | `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (rule 03 + 09); also register file-as-read on `register_read.py` invocation |
-| `Stop` | — | `stop_guard.py` | Six-layer block: (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking (edit turns only) / (f) missing rule-09 triplet (edit turns only) |
+| `Stop` | — | `stop_guard.py` | Nine-layer block: (a) no-evidence / (b) hedged-completion / (c) missing rule-06 quiz / (d) missing rule-07 fidelity / (e) missing rule-08 system-thinking (edit turns only) / (f) missing rule-09 triplet (edit turns only) / (g) file-claim contradicted (edit turns only) / (h) missing or overlong TL;DR / (i) rule-12 sync-gate group unmet (edit turns only, opt-in per project) |
 
 #### Why everything in `PreToolUse` (and not split with `PostToolUse`)
 
@@ -134,13 +134,27 @@ State files are git-ignored (`.gitignore` line 26). Paths within state are
 canonicalised via `os.path.realpath` + `os.path.normcase` so case-insensitive
 filesystems (Windows) compare correctly.
 
+**Concurrency (v0.23)**: every hook invocation is a separate OS process, and
+Claude Code fires parallel tool calls as concurrent hook subprocesses sharing
+one session file. Every state *mutation* therefore holds a per-session
+cross-process advisory lock (`_session_lock`: `msvcrt.locking` on Windows /
+`fcntl.flock` on POSIX, on a sibling `<sid>.json.lock` file) across its
+load→mutate→save cycle, and `save()` is atomic (unique temp file +
+`os.replace`) so readers can never observe a torn JSON. Measured before the
+fix: 10 parallel `PreToolUse(Read)` hooks lost 2-3 of 10 recorded paths per
+round — the visible symptom was a false rule-04 DENY immediately after the
+file WAS read. Lock acquisition failure degrades to the old unlocked
+behavior with a stderr diagnostic (failing-open, never a bricked agent).
+`gc_state.py` prunes `*.json` only, so lock files are never deleted out
+from under a holder.
+
 #### Failing-open
 
 Any unhandled exception in `read_guard.py` is caught, logged to stderr, and
 the script exits 0 (allow). A bug in the guard cannot be permitted to brick
 the agent — discipline enforcement must never become an obstacle to actual work.
 
-#### `Stop` guard (rule 06 + 07 + 08 + 09 + TL;DR enforcement, v0.6.0 → v0.7.0 → v0.8.0 → v0.11.0 → v0.16.0 → v0.20.0)
+#### `Stop` guard (rule 01 + 06 + 07 + 08 + 09 + 12 + TL;DR enforcement, v0.6.0 → v0.7.0 → v0.8.0 → v0.11.0 → v0.16.0 → v0.20.0 → v0.23.0)
 
 `stop_guard.py` (event `Stop`, no matcher — Stop fires unconditionally per
 Claude Code spec) inspects `payload.assistant_message` (or falls back to
@@ -150,17 +164,19 @@ the last assistant entry in `payload.transcript_path`).
 
 | Step | Condition | Action |
 |------|-----------|--------|
-| 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`) | Allow |
+| 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`; **v0.23**: production Stop payloads carry no turn_count — verified live — so a monotonic turn number is synthesized from the per-session `stop_counter`, which restores the grace arithmetic in production) | Allow |
 | 1 | No done-claim regex matched | Allow |
 | 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (`HEDGED_DONE_REASON`) |
 | 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
 | 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
 | 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
-| 6 | `last_edit_turn == turn_count` AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**) | **Block** (layer (e)) |
-| 7 | `last_edit_turn == turn_count` AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
-| 8 | `last_edit_turn == turn_count` AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
+| 6 | edit turn (`edited_since_last_stop` flag, or `last_edit_turn == turn_count` when supplied) AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**; edit signal fixed for production in **v0.23**) | **Block** (layer (e)) |
+| 7 | edit turn AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
+| 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
 | 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
-| 10 | All gates passed | Allow |
+| 10 | A tldr item longer than `TLDR_MAX_ITEM_CHARS` (160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
+| 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enslaver/sync-gate.toml` — no config, never fires). A marker escape records the pending groups as acknowledged for the session, so one explicit answer per group suffices. | **Block** (layer (i)) |
+| 12 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
 `完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
@@ -264,13 +280,46 @@ one-line plain-language takeaway (`大白话: ...`) before the one-shot
 footer, so cc-enslaver's own output is symmetric with the layer-(h)
 requirement it imposes on the agent.
 
+**v0.23.0 layer (h) length cap**: beyond mere presence, each tldr item
+must stay within `TLDR_MAX_ITEM_CHARS` (160) characters. Extraction is
+line-based and conservative (only lines attributable to a tldr marker —
+the marker line's value plus more-indented continuation / `- ` list
+lines — are measured; anything ambiguous is not measured, failing open).
+The block reuses layer (h) with an "overlong" table note and its own
+recovery text (`_RECOVERY_H_LONG`).
+
+**v0.23.0 layer (i) — rule 12 repo-wide sync gate**: `read_guard.py`
+records every ACCEPTED Edit / Write path into the session's
+`edited_files` set; at Stop, `lib/sync_gate.py` loads the project's
+`.claude/cc-enslaver/sync-gate.toml` (resolution: payload cwd →
+`CLAUDE_PROJECT_DIR` → process cwd with a project-root marker; no
+home-level fallback — groups are inherently per-repo) and evaluates each
+`[[groups]]` entry: `when` globs matched by an edited project-relative
+path with the `require` side unsatisfied (any-of by default;
+`mode = "all"` demands every require glob be matched) → violation. The
+reply passes anyway if it carries a sync marker (SYNC_MARKERS), making
+"checked, no change needed" an explicit, legitimate outcome — and the
+escaped groups are persisted as `sync_acked_groups`, so the cumulative
+edited-file set cannot re-block an already-answered group on later
+unrelated edits. fnmatch semantics: `*` crosses path separators;
+matching is normcased. No config → the layer never fires (per-project
+opt-in). Loader and evaluator are failing-open.
+
 **Why layers (e)+(f) are scoped to edit turns**: a pure analysis /
 answer turn should not be forced to surface think-before-write or
 root-cause/impact/solution markers — there was nothing modified for
-those to apply to. `read_guard.py` stamps `state.last_edit_turn =
-turn_count` on every accepted Edit / Write; layer (e) and (f) check
-`state_lib.did_edit_this_turn(session_id, turn_count)` and silently
-allow on read-only turns. The one-shot guard still applies.
+those to apply to. **Edit-turn signal (reworked in v0.23)**: the
+original v0.11 design stamped `last_edit_turn = turn_count` and
+compared it at Stop — but a live-state E2E audit found production hook
+payloads carry NO `turn_count` (a real session with 27 recorded edits
+had no `last_edit_turn` key at all), so layers (e)/(f)/(g)/(i) had
+never fired outside the test suite. `read_guard.py` now always sets an
+`edited_since_last_stop` flag on every accepted Edit / Write;
+`did_edit_this_turn` honors the flag OR the exact turn match (test
+harnesses / future payloads). stop_guard clears the flag on every
+ALLOWED Stop (a turn boundary) and keeps it on blocks — the recovery
+reply is the same logical turn. The one-shot guard still applies, via
+the synthesized `stop_counter` turn number when the payload has none.
 
 **Why detection is heuristic and lightweight**: same rationale as
 layers (c)(d). A careful agent who genuinely did the rule-08/09
@@ -465,7 +514,8 @@ It carries `Read`, `Grep`, `Glob` tools — explicitly **no** `Edit`, `Write`, o
 
 ## 5. Layer 4 — Skill (contextually auto-invoked)
 
-**Wired in:** [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md).
+**Wired in:** [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md)
++ [`../skills/repo-refresh/SKILL.md`](../skills/repo-refresh/SKILL.md) (v0.23).
 
 Skills are auto-invoked by Claude Code based on the YAML `description` matching
 the user's prompt. `systematic-debug` triggers on debugging language ("debug",
@@ -473,6 +523,14 @@ the user's prompt. `systematic-debug` triggers on debugging language ("debug",
 the agent through the seven systematic-thinking questions from
 [`../rules/02-systematic-not-reactive.md`](../rules/02-systematic-not-reactive.md)
 **before** proposing any code change.
+
+`repo-refresh` (v0.23) triggers on whole-repo audit language ("全库更新",
+"repo refresh", "stale scan", "audit the repo") and executes rule 12's
+active half: a systematic sweep of the entire repository — docs and code
+— for stale / outdated / redundant / wrong / drifted content, every
+finding carrying `file:line` evidence, deletions gated on user
+confirmation, closing with a suggestion to register recurring co-update
+pairs as sync-gate groups.
 
 ---
 
@@ -583,7 +641,10 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
-| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
+| `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn` + `record_edited_file`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn` + `get_edited_files`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
+| `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` (sync-gate cases) |
+| `.claude/cc-enslaver/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
+| `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5 |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
 | `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers + `did_edit_this_turn`), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases; rule 08 / rule 09 layer (e)+(f) cases) |
 | `hooks/scripts/gc_state.py` | `commands/gc.md` (`/cc-enslaver:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |

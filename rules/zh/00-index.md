@@ -28,13 +28,14 @@ severity: info
 | 09  | `09-systematic-modification.md`                 | 系统式修改，禁止打补丁   | must     |
 | 10  | `10-no-hardcoding.md`                           | 禁止非必须硬编码         | must     |
 | 11  | `11-no-path-dependency.md`                      | 禁止非必须路径依赖       | must     |
+| 12  | `12-repo-wide-sync.md`                          | 全库同步 —— 连带更新每一处引用 | must     |
 
 ## 编号规则
 
 - 编号格式 `<两位数>-<kebab-case>.md`；
 - 一旦发布**永不复用**编号；
 - 废弃的规则保留文件，frontmatter 加 `status: deprecated` 字段。
-- 当前编号区间：`01–11`。
+- 当前编号区间：`01–12`。
 
 ## 关系
 
@@ -56,3 +57,10 @@ severity: info
   凭证 / 私钥 / URL 内凭证）。**11** 禁止非必须路径依赖（本应运行时派生
   的机器特定 user-home 绝对路径）。两者共享一个把"非必须"操作化的
   why 注释逃生舱，且都豁免散文文档 + 锁文件目标。
+- **12** —— *输出侧（改完之后，仓库引用图轴）*约束：只有所改内容的
+  全库引用都被连带更新或显式确认无需改，修改才算完成。被动半区 =
+  每次修改的连带更新纪律 + 项目级同步门禁
+  （`.claude/cc-enslaver/sync-gate.toml`，Stop layer (i)）；主动半区 =
+  `repo-refresh` 全库陈旧/过时/冗余/错误/漂移扫描 skill。与 06
+  （收敛被改部分）、07（覆盖用户请求）互补，补上"带着仓库其余部分
+  一起走"这一轴。

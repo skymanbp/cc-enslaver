@@ -56,15 +56,33 @@ laziness signals appear in proximity to a "done" claim:
       "I edited X" / "我修改了 Y" claims and blocks when the on-disk
       mtime contradicts the claim. Edit-turn only.
 
-  (h) [v0.20.0 NEW] Plain-language TL;DR (大白话总结) closing
-      requirement. Fires on EVERY done-claim turn (not just edit turns):
-      the reply must surface a one-line takeaway via the canonical
-      schema's `tldr:` field or a 大白话 / TL;DR marker. This is the
-      final gate — reaching it means every discipline check passed; (h)
-      only asks for a readable summary. Enforced as a closing convention,
-      deliberately not promoted to a tenth numbered rule.
+  (h) [v0.20.0; length check v0.23.0] Plain-language TL;DR (大白话总结)
+      closing requirement. Fires on EVERY done-claim turn (not just edit
+      turns): the reply must surface a one-line takeaway via the
+      canonical schema's `tldr:` field or a 大白话 / TL;DR marker.
+      v0.23 adds a HARD LENGTH CAP: each tldr item (the marker line's
+      value plus any continuation / list-item line) must stay within
+      TLDR_MAX_ITEM_CHARS characters — one sentence covering cause,
+      action, and outcome. Multiple items are fine (one per line, each
+      within the cap); a paragraph-length "tldr" is not a TL;DR and
+      blocks with a dedicated recovery. Enforced as a closing
+      convention, deliberately not promoted to a numbered rule.
 
-When any of (a)-(h) hold, the hook returns
+  (i) [v0.23.0 NEW] Rule 12 — repo-wide sync gate. Edit turns only, and
+      only in projects that committed a co-update config at
+      .claude/cc-enslaver/sync-gate.toml (per-project opt-in; see
+      lib/sync_gate.py). For each configured group: if a file edited
+      this session matches a `when` glob but no edited file matches any
+      `require` glob, AND the reply carries no sync-acknowledgement
+      marker (SYNC_MARKERS — e.g. `同步核对` / `sync-check` / `rule 12`),
+      the Stop is blocked. The marker escape makes "checked the
+      co-update set, nothing else needs changing" a legitimate,
+      explicit outcome rather than a silent omission. Escaped groups
+      are recorded per session (`sync_acked_groups`) so one explicit
+      answer suffices — the cumulative edited-file set cannot re-block
+      an already-acknowledged group on later unrelated edits.
+
+When any of (a)-(i) hold, the hook returns
 `{"decision": "block", "reason": <appropriate reminder>}`. The agent
 gets one corrective turn.
 
@@ -146,6 +164,8 @@ from pathlib import Path
 # Make `lib/` importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
+from lib import sync_gate as sync_gate_lib  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -526,6 +546,209 @@ def _has_tldr(text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# v0.23.0 — TL;DR length cap (layer (h) part 2).
+#
+# Field failure that motivated this: the schema's `tldr` field kept
+# growing into a paragraph, defeating its purpose. The contract is now:
+# each tldr ITEM is one sentence — cause, action, outcome — within
+# TLDR_MAX_ITEM_CHARS characters. Reporting several things is fine:
+# one item per line (YAML list items or continuation lines), each within
+# the cap. The cap is generous on purpose (a full English sentence fits;
+# a Chinese sentence is far shorter) so only genuine paragraphs trip it
+# — the repo's "prefer false negatives" detector philosophy.
+#
+# Extraction is line-based and conservative: only lines attributable to
+# a tldr marker are measured. Measurable forms (v0.23.1 hardened after
+# adversarial review):
+#   - `tldr: value` / `大白话: value` / `TL;DR: value`, with optional
+#     list (`- `) or ATX-heading (`## `) prefix and optional emphasis
+#     wrappers (`**tldr:**`, `**tldr**:`).
+#   - Continuation / list items under a value-less `tldr:` line: lines
+#     that are more-indented than the marker's prefix, or `- ` list
+#     items at the same indent (the legal YAML block-sequence form).
+#   - A colon-less heading (`## TL;DR`): the first following paragraph
+#     is measured line-by-line.
+# NOT measured (failing open, deliberately):
+#   - Blockquoted lines (`> tldr: ...`) — usually quoting someone else.
+#   - Content inside non-YAML code fences — usually a fixture/example.
+#     The canonical reply schema lives in a ```yaml fence, so yaml/yml
+#     fences REMAIN measurable.
+#   - Continuations under a marker line that already carried a value
+#     when they are sibling/nested list items (a nested markdown list
+#     under a short 大白话 bullet is detail, not more tldr).
+# A YAML block scalar (`tldr: |`) is measured per physical line, which
+# matches the "one item per line" reporting convention.
+# --------------------------------------------------------------------------- #
+TLDR_MAX_ITEM_CHARS = 160
+
+_TLDR_ITEM_LINE = re.compile(
+    r"^(?P<prefix>[ \t]*(?:(?:[*+-]|#{1,6})[ \t]+)?)"
+    r"[*_`]{0,3}(?:tldr|大白话|一句话总结|一句总结|TL;?DR)[*_`]{0,3}"
+    r"[ \t]*[:：](?P<rest>.*)$",
+    re.IGNORECASE,
+)
+
+# Colon-less heading form: `## TL;DR` alone on a line; the following
+# paragraph is the tldr content.
+_TLDR_HEADING_LINE = re.compile(
+    r"^[ \t]*#{1,6}[ \t]+[*_`]{0,3}(?:tldr|大白话|一句话总结|一句总结|TL;?DR)"
+    r"[*_`]{0,3}[ \t]*$",
+    re.IGNORECASE,
+)
+
+_YAML_BLOCK_SCALAR_INDICATORS = {"|", "|-", "|+", ">", ">-", ">+"}
+
+_LIST_PREFIXES = ("- ", "* ", "+ ")
+
+
+def _strip_item_decorations(s: str) -> str:
+    """Trim whitespace, list dashes, emphasis marks, and quotes."""
+    s = s.strip()
+    while s[:2] in _LIST_PREFIXES:
+        s = s[2:].strip()
+    s = s.strip("*_`").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
+def _is_fence(stripped_line: str) -> bool:
+    return stripped_line.startswith("```") or stripped_line.startswith("~~~")
+
+
+def _tldr_items(text: str) -> list[str]:
+    """Collect every measurable tldr item from `text` (see note above)."""
+    items: list[str] = []
+    lines = text.splitlines()
+    n = len(lines)
+    in_fence = False
+    fence_marker = ""
+    fence_measurable = False
+    idx = 0
+
+    def _collect_paragraph(start: int) -> int:
+        """Measure the first paragraph at/after `start`; return next idx."""
+        j = start
+        while j < n and not lines[j].strip():
+            j += 1
+        while j < n:
+            s = lines[j].strip()
+            if not s or _is_fence(s) or s.startswith("#"):
+                break
+            items.append(_strip_item_decorations(s))
+            j += 1
+        return j
+
+    while idx < n:
+        line = lines[idx]
+        stripped_line = line.strip()
+        if _is_fence(stripped_line):
+            # A fence closes only on the SAME marker that opened it —
+            # a `~~~` line inside a ``` block is content, not a fence
+            # toggle (same contract as i18n_check's fence tracking).
+            marker = stripped_line[:3]
+            if not in_fence:
+                in_fence = True
+                fence_marker = marker
+                info = stripped_line.lstrip("`~").strip().lower()
+                # The canonical reply schema is a ```yaml block — keep it
+                # measurable; every other fence is a fixture/example.
+                fence_measurable = info.startswith(("yaml", "yml"))
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = ""
+                fence_measurable = False
+            idx += 1
+            continue
+        if in_fence and not fence_measurable:
+            idx += 1
+            continue
+        m = _TLDR_ITEM_LINE.match(line)
+        heading = _TLDR_HEADING_LINE.match(line) if m is None else None
+        if m is None and heading is None:
+            idx += 1
+            continue
+        if m is not None:
+            base = len(m.group("prefix"))
+            rest = m.group("rest").strip()
+            rest_empty = (
+                not rest
+                or rest in _YAML_BLOCK_SCALAR_INDICATORS
+                or not rest.strip("*_`").strip()
+            )
+            if rest_empty and "#" in m.group("prefix"):
+                # `## TL;DR:` — a value-less HEADING marker. The content
+                # is the following paragraph, exactly like the colon-less
+                # heading form (an indent-based continuation scan would
+                # never collect it: body text sits at indent 0).
+                idx = _collect_paragraph(idx + 1)
+                continue
+            if not rest_empty:
+                items.append(_strip_item_decorations(rest))
+            j = idx + 1
+            while j < n:
+                nxt = lines[j]
+                s = nxt.strip()
+                if not s or _is_fence(s):
+                    break
+                nxt_indent = len(nxt) - len(nxt.lstrip(" \t"))
+                is_list = s[:2] in _LIST_PREFIXES
+                # Deeper-indented lines continue the value; same-indent
+                # list items only continue a VALUE-LESS marker (the YAML
+                # block-sequence form). A nested list under a marker
+                # line that already carried its sentence is detail, not
+                # more tldr — `base` includes the marker line's list
+                # prefix, so such nested items compare <= base and stop.
+                if nxt_indent > base or (
+                    is_list and nxt_indent >= base and rest_empty
+                ):
+                    items.append(_strip_item_decorations(s))
+                    j += 1
+                    continue
+                break
+            idx = j
+            continue
+        # Colon-less heading form: measure the first paragraph after it.
+        idx = _collect_paragraph(idx + 1)
+    return items
+
+
+def _find_overlong_tldr(text: str) -> tuple[str, int] | None:
+    """Return (snippet, length) for the first over-cap tldr item, else None."""
+    for item in _tldr_items(text):
+        if len(item) > TLDR_MAX_ITEM_CHARS:
+            snippet = item if len(item) <= 120 else item[:117] + "..."
+            return snippet, len(item)
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# v0.23.0 — Layer (i): rule 12 (repo-wide sync gate) marker escape.
+#
+# A single marker suffices to pass layer (i) even when a configured
+# co-update group is unmet: the agent explicitly acknowledging the sync
+# check ("checked the co-update set; the require side needs no change
+# because ...") is a legitimate outcome — the gate forces the check to
+# be SAID, not the files to be touched unconditionally.
+# --------------------------------------------------------------------------- #
+# NOTE: `sync-gate` is deliberately NOT a marker — it is the config
+# file's NAME, so any reply merely mentioning `sync-gate.toml` would
+# pass the gate without making any claim. Markers must be claim-shaped.
+SYNC_MARKERS = [
+    re.compile(r"\brule\s*12\b", re.IGNORECASE),
+    re.compile(r"全库同步"),
+    re.compile(r"同步核对"),
+    re.compile(r"连带核对"),
+    re.compile(r"repo[\s-]?wide\s+sync", re.IGNORECASE),
+    re.compile(r"sync[\s-]?check", re.IGNORECASE),
+]
+
+
+def _has_sync_marker(text: str) -> bool:
+    return any(p.search(text) for p in SYNC_MARKERS)
+
+
+# --------------------------------------------------------------------------- #
 # v0.16.0 — Layer (g): file-claim verification (rule 01 + 06).
 #
 # Detects "I edited X" / "I created Y" / "我修改了 Z" claims in the
@@ -761,6 +984,12 @@ LAYER_META: list[dict[str, str]] = [
         "label": "TL;DR — 大白话总结 missing",
         "recovery_keyword": "TL;DR 大白话",
     },
+    {
+        "id": "(i)",
+        "rule": "12",
+        "label": "rule 12 — repo-wide sync gate (v0.23)",
+        "recovery_keyword": "rule 12 sync-gate",
+    },
 ]
 
 # Per-layer short "note" rendered in the status table when that layer is
@@ -774,6 +1003,7 @@ _LAYER_FAIL_NOTE = {
     "(f)": "rule-09 marker / triplet incomplete",
     "(g)": "file-edit claim contradicts disk state",
     "(h)": "tldr / 大白话 absent",
+    "(i)": "sync-gate group unmet",
 }
 
 # v0.20 — per-layer one-line plain-language takeaway ("大白话"). Appended to
@@ -788,18 +1018,24 @@ _LAYER_TLDR = {
     "(f)": "改了文件但缺「根因 + 影响 + 方案」三件套——补全再收尾。",
     "(g)": "你说改了某文件但磁盘没变——要么真去改，要么撤回这句声明。",
     "(h)": "结尾少了一句大白话——加一行 tldr: \"...\" 就放行。",
+    "(i)": "改了 A 类文件但没动它的连带 B 类——要么一起改，要么写一行「同步核对: 为什么不用改」。",
 }
 
 
-def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
-    """Render the 6-row status table as a markdown table string.
+def _render_status_table(
+    fail_layer_id: str, edit_turn: bool, fail_note: str | None = None,
+) -> str:
+    """Render the per-layer status table as a markdown table string.
 
-    fail_layer_id is one of "(a)" .. "(f)" — the layer that just failed.
+    fail_layer_id is one of "(a)" .. "(i)" — the layer that just failed.
     edit_turn is True iff the agent actually ran Edit/Write this turn:
-        - False → layers (e) and (f) display "— n/a (non-edit turn)"
+        - False → layers (e)/(f)/(g)/(i) display "— n/a (non-edit turn)"
         - True  → layers > fail_layer_id display "⏸  pending"
+    fail_note optionally overrides the failing row's default note (used
+    by the v0.23 tldr length check, which fails (h) for a different
+    reason than a missing marker).
     """
-    # Build rows. Layer order is fixed (a)-(f).
+    # Build rows. Layer order is fixed (a)-(i).
     fail_idx = next(
         i for i, meta in enumerate(LAYER_META) if meta["id"] == fail_layer_id
     )
@@ -807,12 +1043,12 @@ def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
     for i, meta in enumerate(LAYER_META):
         lid = meta["id"]
         rule = meta["rule"]
-        # e/f/g only apply on edit turns — show n/a on non-edit turns
+        # e/f/g/i only apply on edit turns — show n/a on non-edit turns
         # regardless of position relative to the failing layer. (Needed
         # since v0.20: layer (h) fires after the edit-only block, so on a
         # non-edit (h) failure, e/f/g would otherwise be mislabelled "Pass"
         # despite never being evaluated.)
-        if lid in ("(e)", "(f)", "(g)") and not edit_turn:
+        if lid in ("(e)", "(f)", "(g)", "(i)") and not edit_turn:
             status = "—  n/a"
             note = "(non-edit turn)"
         elif i < fail_idx:
@@ -820,7 +1056,7 @@ def _render_status_table(fail_layer_id: str, edit_turn: bool) -> str:
             note = ""
         elif i == fail_idx:
             status = "❌ **FAIL**"
-            note = _LAYER_FAIL_NOTE.get(lid, "")
+            note = fail_note or _LAYER_FAIL_NOTE.get(lid, "")
         else:
             # Layer not evaluated yet (gated by earlier fail).
             status = "⏸  pending"
@@ -849,19 +1085,22 @@ def _build_block_reason(
     *,
     matched_phrase: str | None = None,
     extra_kv: dict[str, str] | None = None,
+    fail_note: str | None = None,
 ) -> str:
     """Compose: headline + status table + recovery + one-shot footer.
 
     The headline always names the failed layer's rule via the keyword
     string `recovery_keyword` so downstream consumers (tests, agents
     skimming the block reason) can locate the failed discipline gate.
+    `fail_note` overrides the failing row's table note (v0.23 — used by
+    the tldr length check to distinguish "overlong" from "absent").
     """
     meta = next(m for m in LAYER_META if m["id"] == fail_layer_id)
     headline = (
         f"cc-enslaver · Stop check FAILED at Layer {fail_layer_id} "
         f"[{meta['label']}]"
     )
-    table = _render_status_table(fail_layer_id, edit_turn)
+    table = _render_status_table(fail_layer_id, edit_turn, fail_note)
     parts: list[str] = [headline, "", table, ""]
     if matched_phrase is not None:
         parts.append(f"Done-claim matched: {matched_phrase!r}")
@@ -1028,6 +1267,46 @@ Example:
   tldr: "改完了 Stop hook 加了 tldr 强制层，203 个测试全绿，可以直接 ship。"
 """
 
+_RECOVERY_H_LONG = """Your reply has a TL;DR, but at least one of its items is
+too long to be a TL;DR:
+
+  item ({length} chars > {cap} cap): {snippet!r}
+
+Per the v0.23 length contract, each tldr item is ONE sentence — cause,
+action, outcome — within {cap} characters:
+
+  tldr: "<前因 + 做了什么 + 结果如何，一句话>"
+
+If you have several things to report, report them one per line, each a
+single short sentence within the cap:
+
+  tldr:
+    - "修了 X：根因是 A，现在测试全绿。"
+    - "顺带把 B 的引用同步了，无行为变化。"
+
+Do not compress by dropping the outcome — drop the process detail
+instead; the body of the reply already carries the detail."""
+
+_RECOVERY_I = """One or more of this project's co-update groups
+(.claude/cc-enslaver/sync-gate.toml) are unmet for this session's edits:
+
+{violations}
+
+Per rule 12 (rules/12-repo-wide-sync.md), editing a file that has
+registered downstream/reference siblings requires either:
+
+  (1) editing at least one file matching the group's `require` globs in
+      the same session (co-update the references, docs, tests,
+      translations that depend on what you changed), or
+  (2) explicitly acknowledging the check in your reply with a sync
+      marker — e.g. a line like:
+        同步核对: <require 侧为什么无需变更>
+        sync-check: <why the require side needs no change>
+
+Silently editing only the `when` side is exactly the stale-reference
+laziness rule 12 exists to stop. Check each listed group now: update
+the co-files, or say out loud why they are already correct."""
+
 
 def _emit_block(reason_text: str) -> None:
     """Write a `decision: block` response and exit 0.
@@ -1121,9 +1400,25 @@ def main() -> int:
 
         session_id = payload.get("session_id") or "default"
         turn_count = payload.get("turn_count")
+        if turn_count is None:
+            # v0.23 E2E finding: production hook payloads carry NO
+            # turn_count (verified live — a session with 27 recorded
+            # edits had no last_edit_turn key, i.e. every stamp had
+            # no-op'd and the edit-gated layers + the one-shot grace
+            # window were both vacuous in production). Synthesize a
+            # monotonic turn number from the per-session Stop counter:
+            # Stop fires once per turn, so the counter IS a turn number
+            # and the grace arithmetic below works unchanged. The
+            # edit-turn signal itself comes from the
+            # `edited_since_last_stop` flag (see lib/state.py).
+            turn_count = state_lib.next_stop_turn(session_id)
 
-        # One-shot guard: if we just blocked, allow this Stop unconditionally.
+        # One-shot guard: if we just blocked, allow this Stop
+        # unconditionally. Every ALLOWED Stop is a turn boundary →
+        # clear the edit flag so the next turn starts clean; blocked
+        # Stops keep it (the recovery reply is the same logical turn).
         if state_lib.was_just_blocked(session_id, turn_count):
+            state_lib.clear_edit_flag(session_id)
             return 0
 
         # Get the message text, preferring the direct payload field.
@@ -1133,10 +1428,12 @@ def main() -> int:
                 payload["transcript_path"]
             )
         if not message:
+            state_lib.clear_edit_flag(session_id)
             return 0  # nothing to inspect
 
         matched = _has_done_claim(message)
         if matched is None:
+            state_lib.clear_edit_flag(session_id)
             return 0  # no done-claim → don't block
 
         # Compute edit-turn status up front: layer (e)/(f) applicability
@@ -1253,8 +1550,7 @@ def main() -> int:
 
         # v0.20 Layer (h): plain-language TL;DR (大白话总结) closing
         # requirement. Fires on EVERY done-claim turn (edit or not) — the
-        # reader deserves a one-line takeaway regardless. This is the final
-        # gate; reaching it means all discipline checks already passed.
+        # reader deserves a one-line takeaway regardless.
         if not _has_tldr(message):
             state_lib.record_stop_block(session_id, turn_count)
             _emit_block(_build_block_reason(
@@ -1264,7 +1560,74 @@ def main() -> int:
             ))
             return 0
 
-        # All eight gates passed — allow.
+        # v0.23 Layer (h) part 2: the tldr must actually BE a TL;DR —
+        # each item within TLDR_MAX_ITEM_CHARS. A paragraph-length
+        # "summary" defeats the field's purpose.
+        overlong = _find_overlong_tldr(message)
+        if overlong is not None:
+            state_lib.record_stop_block(session_id, turn_count)
+            snippet, length = overlong
+            _emit_block(_build_block_reason(
+                "(h)", edited_this_turn,
+                _RECOVERY_H_LONG.format(
+                    snippet=snippet, length=length, cap=TLDR_MAX_ITEM_CHARS,
+                ),
+                matched_phrase=matched,
+                fail_note=f"tldr item overlong ({length} > {TLDR_MAX_ITEM_CHARS})",
+            ))
+            return 0
+
+        # v0.23 Layer (i): rule 12 — repo-wide sync gate. Edit turns
+        # only, and only when the project committed a sync-gate.toml
+        # (per-project opt-in; no config → sync_gate.evaluate returns []
+        # and this layer never fires). A sync-acknowledgement marker in
+        # the reply passes the gate even when a group is unmet — the
+        # check must be said, the files need not be touched blindly.
+        #
+        # Session-level acknowledgement: `edited_files` is cumulative,
+        # so an unmet group would otherwise re-block every post-grace
+        # edit turn for the rest of the session even after the agent
+        # explicitly answered it. When a marker escape covers a pending
+        # group, the group is recorded as acknowledged (sync_acked_groups)
+        # and never blocks again this session — one explicit answer per
+        # group is the contract.
+        if edited_this_turn:
+            violations = sync_gate_lib.evaluate(
+                state_lib.get_edited_files(session_id), payload.get("cwd"),
+            )
+            if violations:
+                acked = set(state_lib.get_sync_acked_groups(session_id))
+                pending = [v for v in violations if v.group.name not in acked]
+                if pending and _has_sync_marker(message):
+                    state_lib.ack_sync_groups(
+                        session_id, [v.group.name for v in pending],
+                    )
+                    pending = []
+                if pending:
+                    state_lib.record_stop_block(session_id, turn_count)
+                    detail_lines = []
+                    for v in pending:
+                        hits = ", ".join(v.when_hits[:5])
+                        if len(v.when_hits) > 5:
+                            hits += f", … (+{len(v.when_hits) - 5} more)"
+                        line = (
+                            f"  • group '{v.group.name}': edited [{hits}] "
+                            f"(matched when={list(v.group.when)}) but "
+                            f"require={list(v.group.require)} is not "
+                            f"satisfied (mode={v.group.mode})."
+                        )
+                        if v.group.note:
+                            line += f"\n    Note: {v.group.note}"
+                        detail_lines.append(line)
+                    _emit_block(_build_block_reason(
+                        "(i)", edited_this_turn,
+                        _RECOVERY_I.format(violations="\n".join(detail_lines)),
+                        matched_phrase=matched,
+                    ))
+                    return 0
+
+        # All nine gates passed — allow. Turn boundary → clear the flag.
+        state_lib.clear_edit_flag(session_id)
     except Exception:
         # Failing open: log to stderr but never block by accident.
         sys.stderr.write("[cc-enslaver] stop_guard exception:\n")

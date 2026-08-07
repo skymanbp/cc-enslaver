@@ -902,6 +902,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
             # 圣旨 check (v0.12) — applies to new files too.
             _check_edicts(content)
             state_lib.record_edit_turn(session_id, turn_count)
+            # v0.23: record into the session's edited-file set for the
+            # rule-12 repo-wide sync gate (Stop layer (i)).
+            state_lib.record_edited_file(session_id, file_path)
             return
         # Existing file: agent must have seen it before (Read or Write).
         if not state_lib.has_read(session_id, file_path):
@@ -934,6 +937,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
         _check_rolling_patch("", content)
         state_lib.add_read(session_id, file_path)
         state_lib.record_edit_turn(session_id, turn_count)
+        # v0.23: rule-12 edited-file set (Stop layer (i) sync gate).
+        state_lib.record_edited_file(session_id, file_path)
         return
 
     if tool == "Edit":
@@ -979,6 +984,8 @@ def _handle_pre_tool_use(payload: dict) -> None:
         # We do NOT add_read here because Edit is downstream of a prior
         # Read/Write that already recorded.
         state_lib.record_edit_turn(session_id, turn_count)
+        # v0.23: rule-12 edited-file set (Stop layer (i) sync gate).
+        state_lib.record_edited_file(session_id, file_path)
 
 
 # --------------------------------------------------------------------------- #

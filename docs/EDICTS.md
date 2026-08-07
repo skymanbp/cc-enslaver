@@ -1,13 +1,13 @@
 # 圣旨 — User-Defined Imperial Edicts
 
 > Project-specific hard rules that ride on top of cc-enslaver's built-in
-> 11 rules. v0.12 introduces this as a layer-0 customisation mechanism.
+> 12 rules. v0.12 introduces this as a layer-0 customisation mechanism.
 
 ---
 
 ## 1. Why 圣旨
 
-The built-in 11 rules cover general AI laziness patterns (verify don't
+The built-in 12 rules cover general AI laziness patterns (verify don't
 guess, root cause not symptom, etc.). But every project has its own red
 lines that no general rule can cover:
 
@@ -82,16 +82,17 @@ severity = "should"                         # soft layer only: injected as remin
 | Hard (`PreToolUse(Edit\|Write)`) | When agent calls Edit / Write | For each `must` edict with `deny_edit`: scan `new_string` / `content`. First match → DENY with reason naming the edict id. |
 | Hard (`PreToolUse(Bash)`) | When agent calls Bash | For each `must` edict with `deny_bash`: scan `command`. First match → DENY. |
 
-### Bilingual rendering (v0.17)
+### Bilingual rendering (v0.17; default flipped to English in v0.21)
 
 Both the soft-layer injection block and the hard-layer DENY reason
 honor the `CC_ENSLAVER_LANG` env var that v0.15 introduced for the
-base prompts:
+base prompts. Since the v0.21 skeleton flip, English is the default and
+unknown codes fall back to English:
 
 | `CC_ENSLAVER_LANG` | Injection banner | DENY headline |
 |---|---|---|
-| unset / `zh` / unknown | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 11 条）` | `cc-enslaver · 圣旨 E01 violation` |
-| `en` | `🏛️ Imperial Edicts (project hard rules; priority > builtin 11)` | `cc-enslaver · Imperial Edict E01 violation` |
+| unset / `en` / unknown | `🏛️ Imperial Edicts (project hard rules; priority > builtin 12)` | `cc-enslaver · Imperial Edict E01 violation` |
+| `zh` | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 12 条）` | `cc-enslaver · 圣旨 E01 violation` |
 
 The edict `text` / `note` strings themselves are passed through
 verbatim — they're whatever you wrote in `edicts.toml`. Only the

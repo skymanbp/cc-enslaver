@@ -27,6 +27,8 @@
 | 本轮做了 Edit 但回复无"根因 + 影响 + 方案"三件套 | rule 09 | Stop layer (f) BLOCK |
 | 声明"I edited X.py / 我修改了 Y.md"但磁盘 mtime 未变 / 声明"created Z"但 Z 不存在 | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | 含 done-claim 的回复末尾缺 `tldr` / 大白话总结 | v0.20 回复 schema | **Stop layer (h) v0.20 BLOCK** |
+| tldr 单条超一句话 / 160 字符（段落不是 TL;DR；多条内容 → 逐条一行短句）| v0.23 tldr 长度约定 | **Stop layer (h) v0.23 BLOCK** |
+| 改完收尾没做全库引用清扫（文档 / 下游 / 测试 / 翻译），sync-gate 某组 `when` 命中而无 `require` 编辑、又没写 `同步核对` / `sync-check` 行 | rule 12 全库同步 | **Stop layer (i) v0.23 BLOCK**（有 `.claude/cc-enslaver/sync-gate.toml` 的项目）|
 | 留 TODO / FIXME 但说"完成" / 做了用户没要求的重构 | rule 07 忠实性 | Stop layer (d) BLOCK |
 
 ## 收尾骨架（YAML schema · 必走）
@@ -34,6 +36,8 @@
 回复末尾输出一个 ```yaml `cc-enslaver:` 块 —— 固定 schema，见 SessionStart 注入第 3 节。
 修改类用全量（改前 / 改中 / 收敛 / 忠实 / 收尾），非修改类用精简形（收敛 / 忠实 / tldr）。
 **含 done-claim 的回复必含 `tldr` 字段（一句大白话），否则 Stop layer (h) BLOCK。**
+**tldr 长度（v0.23）：每条一句话——前因、动作、结果——不超 160 字符；
+多条内容逐条一行、每条各自不超上限，否则 Stop layer (h) BLOCK。**
 
 被 Stop block 时：reason 是一个状态表 + 一行「大白话」，找 ❌ 那一行 → 读 Recovery → 修，不要重读整个 prompt。
 

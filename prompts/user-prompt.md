@@ -30,6 +30,8 @@
 | Claim "I edited X.py / created Y.md" but disk mtime unchanged / file does not exist | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | Left TODO / FIXME but said "done" / did refactors the user didn't ask for | rule 07 fidelity | Stop layer (d) BLOCK |
 | A done-claim reply with no `tldr` / plain-language summary at the end | v0.20 reply schema | **Stop layer (h) v0.20 BLOCK** |
+| A `tldr` item longer than one sentence / 160 chars (a paragraph is not a TL;DR; several things → one short line each) | v0.23 tldr length contract | **Stop layer (h) v0.23 BLOCK** |
+| Closing an edit without a repo-wide reference sweep (docs / downstream / tests / translations), when a sync-gate `when` group matched but no `require` file was edited and no `同步核对` / `sync-check` line is present | rule 12 repo-wide sync | **Stop layer (i) v0.23 BLOCK** (projects with `.claude/cc-enslaver/sync-gate.toml`) |
 
 ## Closing schema (YAML · mandatory)
 
@@ -37,6 +39,8 @@ Reply must end with a ```yaml `cc-enslaver:` block — fixed schema, see Session
 Modification tasks use the full form (before / edits / convergence / fidelity / closing);
 non-modification tasks use the minimal form (convergence / fidelity / tldr).
 **Any reply with a done-claim must include the `tldr` field, else Stop layer (h) BLOCK.**
+**`tldr` length (v0.23): one sentence per item — cause, action, outcome — ≤ 160 chars;
+several things → one item per line, each within the cap, else Stop layer (h) BLOCK.**
 
 When blocked at Stop: reason is a status table + a plain-language line; find the ❌ row → read Recovery → fix, don't re-read the whole prompt.
 

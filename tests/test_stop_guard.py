@@ -851,6 +851,520 @@ class TestTldrLayerH(_StopBase):
         self.assertIn("FAILED at Layer (h)", out["reason"])
 
 
+class TestTldrLengthLayerH(_StopBase):
+    """v0.23 — layer (h) part 2: each tldr item must stay within
+    TLDR_MAX_ITEM_CHARS (160). Presence alone no longer suffices; a
+    paragraph-length "tldr" blocks with a dedicated overlong recovery.
+    Multiple items are fine when each line stays within the cap.
+    """
+
+    def _compliant_non_edit(self) -> str:
+        return (
+            "已修复并验证。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求一项，已完成，无降级、无遗漏。"
+        )
+
+    def test_overlong_single_line_tldr_blocks(self) -> None:
+        msg = self._compliant_non_edit() + "\ntldr: " + "改" * 200
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="200-char tldr item must block at (h)")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("FAILED at Layer (h)", out["reason"])
+        self.assertIn("overlong", out["reason"])
+
+    def test_tldr_within_cap_allows(self) -> None:
+        msg = self._compliant_non_edit() + "\ntldr: " + "x" * 150
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"150-char tldr must pass, got {out!r}")
+
+    def test_tldr_exactly_at_cap_allows(self) -> None:
+        # Boundary: len == 160 is allowed; only len > 160 blocks.
+        msg = self._compliant_non_edit() + "\ntldr: " + "y" * 160
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"exactly-160-char tldr must pass, got {out!r}")
+
+    def test_multi_item_list_all_short_allows(self) -> None:
+        msg = (
+            self._compliant_non_edit()
+            + "\ntldr:\n"
+            + '  - "修了 X：根因是缺锁，现在测试全绿。"\n'
+            + '  - "顺带同步了 B 的引用，无行为变化。"'
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"short multi-item tldr must pass, got {out!r}")
+
+    def test_multi_item_with_one_long_item_blocks(self) -> None:
+        msg = (
+            self._compliant_non_edit()
+            + "\ntldr:\n"
+            + '  - "短的一条，没问题。"\n'
+            + '  - "' + "长" * 200 + '"'
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="one overlong item in a list must block")
+        self.assertIn("overlong", out["reason"])
+
+    def test_dabaihua_overlong_line_blocks(self) -> None:
+        # The natural 大白话 marker is measured the same way.
+        msg = self._compliant_non_edit() + "\n大白话: " + "话" * 200
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="overlong 大白话 line must block at (h)")
+        self.assertIn("FAILED at Layer (h)", out["reason"])
+
+    def test_overlong_block_reason_names_the_cap(self) -> None:
+        msg = self._compliant_non_edit() + "\ntldr: " + "z" * 300
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIn("160", out["reason"])
+
+    # -- v0.23.1 extraction hardening (adversarial-review findings) ------- #
+
+    def test_heading_form_overlong_paragraph_blocks(self) -> None:
+        # `## TL;DR` + a 400-char paragraph line — the colon-less heading
+        # form must be measured, not silently skipped.
+        msg = self._compliant_non_edit() + "\n## TL;DR\n\n" + "内" * 200
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="overlong `## TL;DR` paragraph must block")
+        self.assertIn("overlong", out["reason"])
+
+    def test_bold_marker_form_overlong_blocks(self) -> None:
+        # `**tldr:** <long>` — the emphasised markdown-label form.
+        msg = self._compliant_non_edit() + "\n**tldr:** " + "w" * 300
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="overlong **tldr:** form must block")
+        self.assertIn("overlong", out["reason"])
+
+    def test_same_indent_yaml_list_is_measured(self) -> None:
+        # Legal YAML block sequence: `tldr:` + same-column `- ` items.
+        msg = (
+            self._compliant_non_edit()
+            + "\ntldr:\n"
+            + '- "短的一条。"\n'
+            + '- "' + "长" * 200 + '"'
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="same-indent YAML list items must be measured")
+        self.assertIn("overlong", out["reason"])
+
+    def test_canonical_yaml_fence_is_still_measured(self) -> None:
+        # The canonical reply schema lives in a ```yaml fence — the fence
+        # skip must NOT exempt it.
+        msg = (
+            self._compliant_non_edit()
+            + "\n```yaml\ncc-enslaver:\n  tldr: \"" + "超" * 200 + "\"\n```"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="overlong tldr inside ```yaml must block")
+        self.assertIn("overlong", out["reason"])
+
+    def test_non_yaml_fence_fixture_is_not_measured(self) -> None:
+        # A quoted fixture in a bare fence is someone else's tldr — the
+        # reply's own short tldr should pass.
+        msg = (
+            self._compliant_non_edit()
+            + "\n反面例子：\n```\ntldr: " + "坏" * 200 + "\n```\n"
+            + "tldr: 修好了，测试全绿。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"fenced fixture must not be measured, got {out!r}")
+
+    def test_blockquoted_tldr_is_not_measured(self) -> None:
+        # Quoting a user's overlong line as evidence must not self-trip.
+        msg = (
+            self._compliant_non_edit()
+            + "\n> tldr: " + "引" * 200 + "\n"
+            + "tldr: 修好了，测试全绿。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"blockquoted tldr must not be measured, got {out!r}")
+
+    def test_heading_with_colon_paragraph_is_measured(self) -> None:
+        # `## TL;DR:` (value-less heading marker WITH a colon) — the
+        # following paragraph is the content and must be measured; an
+        # indent-based continuation scan alone would never collect it.
+        msg = self._compliant_non_edit() + "\n## TL;DR:\n\n" + "容" * 200
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="overlong `## TL;DR:` paragraph must block")
+        self.assertIn("overlong", out["reason"])
+
+    def test_tilde_line_inside_backtick_fence_does_not_toggle(self) -> None:
+        # A `~~~` line INSIDE a ``` fence is content, not a fence close.
+        # Before the fence-marker pairing fix this flipped the state and
+        # the fixture tldr got measured → false-positive block.
+        msg = (
+            self._compliant_non_edit()
+            + "\n```text\n~~~ some inner line\ntldr: " + "假" * 200 + "\n```\n"
+            + "tldr: 修好了，测试全绿。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out, msg=f"mixed fence markers must not mis-toggle, got {out!r}",
+        )
+
+    def test_nested_list_under_short_dabaihua_is_not_swallowed(self) -> None:
+        # A nested markdown list under a short, compliant 大白话 bullet is
+        # detail, not more tldr — must not be measured as an item.
+        msg = (
+            self._compliant_non_edit()
+            + "\n- 大白话: 修好了，一句话说清。\n"
+            + "  - " + "细" * 200
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out, msg=f"nested detail bullet must not be measured, got {out!r}",
+        )
+
+
+class TestSyncGateLayerI(_StopBase):
+    """v0.23 — layer (i): rule 12 repo-wide sync gate.
+
+    Edit-turns only, per-project opt-in via
+    .claude/cc-enslaver/sync-gate.toml. Block condition: a group's `when`
+    glob matched an edited file, no edited file matched any `require`
+    glob, and the reply carries no sync marker. Failing-open on missing /
+    malformed config.
+    """
+
+    GATE_TOML = (
+        '[[groups]]\n'
+        'name = "rules-fanout"\n'
+        'when = ["rules/*.md"]\n'
+        'require = ["prompts/*.md"]\n'
+        'note = "rules fan out to prompts"\n'
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Pin project-dir resolution to the tmpdir so the surrounding
+        # environment (this repo has its own sync-gate.toml) can't leak in.
+        self.env["CLAUDE_PROJECT_DIR"] = str(self.tmpdir)
+
+    def _write_gate(self, toml_text: str) -> None:
+        gate_dir = self.tmpdir / ".claude" / "cc-enslaver"
+        gate_dir.mkdir(parents=True, exist_ok=True)
+        (gate_dir / "sync-gate.toml").write_text(toml_text, encoding="utf-8")
+
+    def _project_file(self, rel: str) -> str:
+        p = self.tmpdir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# x\n", encoding="utf-8")
+        return str(p)
+
+    def _seed_edit_turn_and_edited(
+        self, turn_count: int, edited: list[str],
+    ) -> None:
+        import os
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "last_edit_turn": turn_count,
+                "edited_files": [
+                    os.path.normcase(os.path.realpath(p)) for p in edited
+                ],
+            }),
+            encoding="utf-8",
+        )
+
+    def _full_compliance_message(self) -> str:
+        # Passes (a)-(h); deliberately contains NO sync marker.
+        return (
+            "已修复。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "rule 07: 无降级。\n"
+            "rule 08: 改前必读完毕。\n"
+            "rule 09: 系统式修改完成。\n"
+            "tldr: 改完了，测试全过。"
+        )
+
+    def test_unmet_group_blocks_at_i(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNotNone(out, msg="unmet sync-gate group must block at (i)")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("FAILED at Layer (i)", out["reason"])
+        self.assertIn("rule 12", out["reason"])
+        self.assertIn("rules-fanout", out["reason"])
+
+    def test_require_side_edited_passes(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        edited = [
+            self._project_file("rules/06-verify.md"),
+            self._project_file("prompts/session-start.md"),
+        ]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNone(out, msg=f"require-side edit must pass (i), got {out!r}")
+
+    def test_sync_marker_escape_passes(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        msg = (
+            self._full_compliance_message()
+            + "\n同步核对: prompts 侧核对过，本次改动不影响注入文案。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"sync marker must pass (i), got {out!r}")
+
+    def test_no_config_never_fires(self) -> None:
+        # No sync-gate.toml in the project → layer (i) is off.
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNone(out, msg=f"no config must never fire (i), got {out!r}")
+
+    def test_non_edit_turn_does_not_fire(self) -> None:
+        # Config + edited history present, but this turn had no edit.
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        import os
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "edited_files": [
+                    os.path.normcase(os.path.realpath(p)) for p in edited
+                ],
+            }),
+            encoding="utf-8",
+        )
+        msg = (
+            "已修复并验证。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求一项，已完成，无降级、无遗漏。\n"
+            "tldr: 修好了。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"non-edit turn must not fire (i), got {out!r}")
+
+    def test_malformed_config_fails_open(self) -> None:
+        self._write_gate("this is [[ not valid toml\n")
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNone(out, msg=f"malformed config must fail open, got {out!r}")
+
+    def test_edits_outside_project_are_ignored(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        # An edited file OUTSIDE the project root can't match any group.
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="ccens-outside-"))
+        try:
+            f = outside / "rules" / "06-verify.md"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("# x\n", encoding="utf-8")
+            self._seed_edit_turn_and_edited(5, [str(f)])
+            rc, out, _ = self._stop(
+                self._full_compliance_message(), turn_count=5,
+            )
+            self.assertIsNone(
+                out, msg=f"out-of-project edit must not trip (i), got {out!r}",
+            )
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_block_reason_lists_require_globs(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIn("prompts/*.md", out["reason"])
+        self.assertIn("同步核对", out["reason"])
+
+    # -- v0.23.1 hardening (adversarial-review findings) ------------------ #
+
+    def test_english_sync_check_marker_escapes(self) -> None:
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        msg = (
+            self._full_compliance_message()
+            + "\nsync-check: prompts need no change for this edit."
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"sync-check marker must pass (i), got {out!r}")
+
+    def test_sync_gate_filename_mention_does_not_escape(self) -> None:
+        # `sync-gate` is the config file's NAME, not a claim — merely
+        # mentioning sync-gate.toml must not pass the gate.
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        msg = (
+            self._full_compliance_message()
+            + "\n另外我看了一眼 sync-gate.toml 的配置格式。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(
+            out, msg="mentioning the config filename must NOT escape (i)",
+        )
+        self.assertIn("FAILED at Layer (i)", out["reason"])
+
+    def test_marker_escape_acks_group_for_the_session(self) -> None:
+        # Sticky-violation regression: after one marker escape, the same
+        # unmet group must not re-block a later, unrelated edit turn.
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        msg = (
+            self._full_compliance_message()
+            + "\n同步核对: prompts 侧核对过，无需变更。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"marker escape must pass, got {out!r}")
+        state_path = self.tmpdir / "sessions" / f"{self.sid}.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIn(
+            "rules-fanout", state.get("sync_acked_groups", []),
+            msg="marker escape must persist the group acknowledgement",
+        )
+        # A later edit turn WITHOUT the marker must now pass too.
+        state["last_edit_turn"] = 9
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=9)
+        self.assertIsNone(
+            out,
+            msg=f"acked group must not re-block later turns, got {out!r}",
+        )
+
+    def test_mode_all_requires_every_glob(self) -> None:
+        gate = (
+            '[[groups]]\n'
+            'name = "version-manifests"\n'
+            'when = ["plugin.json"]\n'
+            'require = ["marketplace.json", "CHANGELOG.md"]\n'
+            'mode = "all"\n'
+        )
+        self._write_gate(gate)
+        # when + only ONE require edited → still a violation under all-of.
+        edited = [
+            self._project_file("plugin.json"),
+            self._project_file("CHANGELOG.md"),
+        ]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNotNone(
+            out, msg="mode=all with one stale sibling must block",
+        )
+        self.assertIn("FAILED at Layer (i)", out["reason"])
+        # All require globs edited → satisfied.
+        edited.append(self._project_file("marketplace.json"))
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNone(out, msg=f"mode=all fully satisfied must pass, got {out!r}")
+
+
+class TestProductionShapePayloads(_StopBase):
+    """v0.23 E2E finding — production hook payloads carry NO turn_count.
+
+    Verified live: a real session with 27 recorded edits had no
+    `last_edit_turn` key at all (every stamp had silently no-op'd), so
+    the edit-gated layers (e)/(f)/(g)/(i) and the one-shot grace window
+    had NEVER fired in production — only in the test suite, which always
+    passed a turn_count. These tests replay the production shape: no
+    turn_count, message via transcript_path, edit signal via the
+    `edited_since_last_stop` flag that read_guard now always records.
+    """
+
+    def _seed_flag(self, value: bool = True) -> None:
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "edited_since_last_stop": value,
+            }),
+            encoding="utf-8",
+        )
+
+    def _stop_prod(self, reply: str) -> tuple[int, dict | None, str]:
+        """Stop with NO turn_count and the message in a transcript."""
+        tpath = self.tmpdir / f"transcript-{uuid.uuid4().hex[:6]}.jsonl"
+        entries = [
+            {"type": "user", "message": {"content": "do it"}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": reply}]}},
+        ]
+        tpath.write_text(
+            "\n".join(json.dumps(e) for e in entries), encoding="utf-8",
+        )
+        return run_hook([GUARD], {
+            "session_id": self.sid,
+            "hook_event_name": "Stop",
+            "cwd": str(self.tmpdir),
+            "transcript_path": str(tpath),
+        }, env_overrides=self.env)
+
+    MISSING_RULE08 = (
+        "已修复。\n$ pytest passed (35/35).\n重触发原症状: 已通过。\n"
+        "rule 07: 无降级、无遗漏。\ntldr: 修好了。"
+    )
+    COMPLIANT = (
+        "已修复。\n$ pytest passed (35/35).\n重触发原症状: 已通过。\n"
+        "rule 07: 无降级。\nrule 08: 改前必读完毕。\n"
+        "rule 09: 系统式修改完成。\ntldr: 改完了，测试全过。"
+    )
+
+    def _state_dict(self) -> dict:
+        f = self.tmpdir / "sessions" / f"{self.sid}.json"
+        return json.loads(f.read_text(encoding="utf-8"))
+
+    def test_edit_flag_triggers_layer_e_without_turn_count(self) -> None:
+        self._seed_flag(True)
+        rc, out, _ = self._stop_prod(self.MISSING_RULE08)
+        self.assertIsNotNone(
+            out, msg="production-shape edit turn must block at (e)",
+        )
+        self.assertIn("FAILED at Layer (e)", out["reason"])
+
+    def test_synthetic_grace_window_after_block(self) -> None:
+        self._seed_flag(True)
+        self._stop_prod(self.MISSING_RULE08)  # blocks, synthetic turn 1
+        rc, out, _ = self._stop_prod(self.MISSING_RULE08)
+        self.assertIsNone(
+            out,
+            msg=f"synthetic-turn grace must allow the recovery turn, got {out!r}",
+        )
+
+    def test_allowed_stop_clears_edit_flag(self) -> None:
+        self._seed_flag(True)
+        rc, out, _ = self._stop_prod(self.COMPLIANT)
+        self.assertIsNone(out, msg=f"compliant reply must pass, got {out!r}")
+        self.assertFalse(
+            self._state_dict().get("edited_since_last_stop"),
+            msg="an ALLOWED Stop is a turn boundary — flag must clear",
+        )
+
+    def test_blocked_stop_keeps_edit_flag(self) -> None:
+        self._seed_flag(True)
+        rc, out, _ = self._stop_prod(self.MISSING_RULE08)
+        self.assertIsNotNone(out)
+        self.assertTrue(
+            self._state_dict().get("edited_since_last_stop"),
+            msg="a BLOCKED Stop keeps the flag — recovery is the same turn",
+        )
+
+    def test_no_done_claim_clears_flag(self) -> None:
+        self._seed_flag(True)
+        rc, out, _ = self._stop_prod("看了一下 auth.py:42，问题在缺锁，下一步加锁。")
+        self.assertIsNone(out)
+        self.assertFalse(self._state_dict().get("edited_since_last_stop"))
+
+    def test_stop_counter_increments_per_production_stop(self) -> None:
+        self._seed_flag(False)
+        self._stop_prod("分析中，尚无结论。")
+        self._stop_prod("继续分析。")
+        self.assertEqual(self._state_dict().get("stop_counter"), 2)
+
+
 class TestCanonicalYamlSchema(_StopBase):
     """v0.20 — the canonical YAML reply schema must pass all layers a-h.
 
@@ -1185,7 +1699,7 @@ class TestV012StatusTableFormat(_StopBase):
         # (a) is the failing row; later layers are pending or n/a.
         self.assertIn("| (a)   | 06   | ❌", r)
         # Later layers must not be marked ✅ — they were never evaluated.
-        for later in ["(b)", "(c)", "(d)", "(e)", "(f)", "(h)"]:
+        for later in ["(b)", "(c)", "(d)", "(e)", "(f)", "(h)", "(i)"]:
             # Each later row should be either pending or n/a, never Pass.
             row = [line for line in r.splitlines() if line.startswith(f"| {later}")]
             self.assertEqual(len(row), 1, msg=f"missing row for {later}")
@@ -1260,6 +1774,23 @@ class TestV012StatusTableFormat(_StopBase):
         r = out["reason"]
         h_row = [l for l in r.splitlines() if l.startswith("| (h)")]
         self.assertEqual(len(h_row), 1, msg="status table must have an (h) row")
+
+    def test_layer_i_row_present_and_na_on_non_edit_turn(self) -> None:
+        # v0.23: the status table must include an (i) row; on a non-edit
+        # turn it renders n/a like the other edit-gated layers.
+        rc, out, _ = self._stop("已解决")  # layer (a) fail, non-edit turn
+        r = out["reason"]
+        i_rows = [l for l in r.splitlines() if l.startswith("| (i)")]
+        self.assertEqual(len(i_rows), 1, msg="status table must have an (i) row")
+        self.assertIn("n/a", i_rows[0])
+
+    def test_layer_i_row_pending_on_edit_turn_earlier_fail(self) -> None:
+        self._seed_edit_turn(5)
+        rc, out, _ = self._stop("已解决", turn_count=5)
+        i_row = next(
+            l for l in out["reason"].splitlines() if l.startswith("| (i)")
+        )
+        self.assertIn("pending", i_row)
 
 
 class TestFailOpen(_StopBase):

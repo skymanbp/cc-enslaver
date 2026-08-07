@@ -1,12 +1,12 @@
 ---
-description: 打印 cc-enslaver 十一条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改）。
-argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；默认 all)"
+description: 打印 cc-enslaver 十二条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改 / 全库同步）。
+argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (可选；默认 all)"
 ---
 
 # /cc-enslaver:checklist
 
-> 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改"、G "大白话 TL;DR 收尾" 七份清单；
-> 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` / `tldr` 则只输出对应一份。
+> 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改"、G "大白话 TL;DR 收尾"、H "全库同步" 八份清单；
+> 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` / `tldr` / `sync` 则只输出对应一份。
 
 请你（receiving agent）**逐项核对**以下检查清单，并明确回答每一条 ✅ / ❌ / N/A。
 不要笼统地说"都做了"——每一条都要单独写明依据（`file:line` 或具体动作）。
@@ -137,9 +137,27 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic] (可选；�
 - [ ] **G1 · YAML schema 收尾** — 回复末尾是否输出了 ```yaml `cc-enslaver:` 块？修改类用全量（改前/改中/收敛/忠实/收尾），非修改类用精简形（收敛/忠实/tldr）。
 - [ ] **G2 · tldr 字段存在** — schema 末尾是否有 `tldr:` 字段（或 `大白话:` / `一句话总结:` / `TL;DR:` 行）？
 - [ ] **G3 · tldr 是人话** — 这句是否用大白话讲清「到底干了啥 / 结果如何 / 用户接下来要不要做什么」，而**不是**复述规则检查？
+- [ ] **G4 · tldr 长度（v0.23 硬强制）** — 每条 tldr 是否都是**一句话**（前因 + 动作 + 结果）且 ≤ 160 字符？多条内容是否逐条一行、每条各自一句短话？
 
-> 任意 G 项 ❌ → **会被 Stop layer (h) BLOCK**。补一行 `tldr: "<一句大白话>"` 即可。
-> 禁止：把规则检查报告当 tldr；含 done-claim 却整段省略 schema。
+> 任意 G 项 ❌ → **会被 Stop layer (h) BLOCK**。补一行 `tldr: "<一句大白话>"`（超长则拆条 / 删过程细节，别删结果）即可。
+> 禁止：把规则检查报告当 tldr；含 done-claim 却整段省略 schema；把一段话塞进 tldr 冒充"一句"。
+
+---
+
+## H. 全库同步（参考 `rules/12`） —— **物理强制层** 🚨
+
+> rule 12 被动半区：修改不是"目标文件改对"就完，而是**全库引用**一起走。
+> 物理强制：`Stop` layer (i) 在 sync-gate 组未满足且回复无同步标记时 BLOCK（仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目、且为 edit 轮）。
+
+- [ ] **H1 · 引用集枚举** — 对本次改动的符号 / 文件名 / 数量 / 版本 / 概念做过全库 Grep（代码 + 文档 + 测试 + 翻译）？引用：列出 grep 与命中。
+- [ ] **H2 · 逐项分类** — 每个命中标了"必须改" / "核对过无需改"？没有"没看"类。
+- [ ] **H3 · 同会话连带更新** — 所有"必须改"（下游代码 / 陈述该事实的文档 / 钉住它的测试 / 镜像翻译）都在本会话改了？
+- [ ] **H4 · 清扫已汇报** — 收尾回复有 `同步核对:` / `sync-check:` 行，点名连带改了什么、核对过什么？
+- [ ] **H5 · sync-gate 组满足** — 本项目 `.claude/cc-enslaver/sync-gate.toml` 的各组：`when` 命中的组，`require` 侧是否有编辑（或 H4 的标记里说明了为何无需改）？
+- [ ] **H6 · 不变量登记** — 本次暴露的新连带关系是否值得登记为新 sync-gate 组？
+
+> 任意 H 项 ❌ 且组未满足 → **会被 Stop layer (i) BLOCK**。
+> 禁止：没核对就写 `同步核对: 无需变更`（rule 01 撒谎）；把门禁变绿当作全库一致（验证 2b）。
 
 ---
 
@@ -172,4 +190,4 @@ F5 · 无补丁标记 ✅  new_string 中无裸 `# noqa` / `try/except: pass`
 
 **不允许**笼统的"都做了"。**不允许**虚报 ✅。如果某条不通过，请在最终回复中**优先修复后再宣告完成**。
 
-> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/11-no-path-dependency.md`](rules/11-no-path-dependency.md)。
+> 完整规则正文：[`rules/01-verify-dont-guess.md`](rules/01-verify-dont-guess.md) ~ [`rules/12-repo-wide-sync.md`](rules/12-repo-wide-sync.md)。

@@ -47,7 +47,8 @@ from pathlib import Path
 
 try:
     import tomllib  # type: ignore[unused-ignore]
-except ModuleNotFoundError:  # Python < 3.11 — cc-enslaver requires 3.11+
+except ModuleNotFoundError:
+    # because Python < 3.11 has no tomllib and edicts must fail open
     tomllib = None  # type: ignore[assignment]
 
 
@@ -343,7 +344,7 @@ def _resolved_lang(explicit: str | None = None) -> str:
 # to "en" at the call site (`.get(lang, ...["en"])`).
 _INJECT_STRINGS = {
     "en": {
-        "title": "## 🏛️ Imperial Edicts (project hard rules; priority > builtin 11)",
+        "title": "## 🏛️ Imperial Edicts (project hard rules; priority > builtin 12)",
         "intro": (
             "> User-defined, hot-reloadable. `must` = physically enforced "
             "(DENY on violation); `should` = soft reminder only."
@@ -362,7 +363,7 @@ _INJECT_STRINGS = {
         "bash_unit": "Bash",
     },
     "zh": {
-        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 11 条）",
+        "title": "## 🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 12 条）",
         "intro": (
             "> 用户自定义、可热更新。`must` = 物理强制（违反即 DENY）；"
             "`should` = 软提醒。"

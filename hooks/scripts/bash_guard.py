@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import sys
@@ -41,6 +42,7 @@ from pathlib import Path
 # the same state files. `lib/` is alongside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
 from lib import edicts as edicts_lib  # noqa: E402
 
 
@@ -137,10 +139,16 @@ STATIC_PATTERNS = [
         ),
     },
     {
+        # essential: the home-variable spellings below are this detector's
+        # SUBJECT MATTER, not a path this script itself depends on — rule
+        # 11's detector would otherwise flag its own sibling guard. (See
+        # read_guard's `_PATH_DEP_PATTERNS`, which splits its home-var
+        # literal across concatenation for the same self-scan reason.)
         "name": "rm -rf on root / $HOME / ~",
         # Catches the catastrophic forms:
         #   rm -rf /
         #   rm -rf /<system-dir>
+        # essential (detector subject matter, not a real path dependency):
         #   rm -rf $HOME[/...]
         #   rm -rf ~  / rm -rf ~/...
         # while still allowing rm -rf /tmp/foo, rm -rf ./node_modules,
@@ -148,10 +156,12 @@ STATIC_PATTERNS = [
         "regex": re.compile(
             r"\brm\s+(?:-[rRf]+\s+)+"
             r"(?:/(?:\s|$|bin\b|boot\b|etc\b|home\b|lib\b|opt\b|root\b|sbin\b|sys\b|tmp/?\s*$|usr\b|var\b)"
+            # essential: home-var spelling is the pattern being detected.
             r"|\$HOME\b|~/?(?:\s|$))"
         ),
         "rule": "03",
         "explanation": (
+            # essential: names the spellings in the user-facing deny text.
             "Recursive force-deletion against system root, $HOME, or ~ "
             "is catastrophic and almost never the right tool. Per rule "
             "03 (rules/03-root-cause.md), if you need to clean a build "
@@ -168,20 +178,59 @@ STATIC_PATTERNS = [
 ]
 
 
+# Shell command separators. A compound command is split on these so a
+# flag is only ever attributed to the sub-command that owns it (v0.25).
+_CMD_SEPARATOR = re.compile(r"&&|\|\||;|\n|\|")
+
+# A single-dash short-option cluster, e.g. `-f`, `-fu`, `-uf`, `-fq`.
+# `git push -fu origin main` IS a force push (git accepts stacked short
+# options), so matching only the exact token `-f` under-blocks.
+_SHORT_FLAG_CLUSTER = re.compile(r"(?:^|\s)-([A-Za-z]+)(?=\s|$)")
+
+
 def _detect_force_push(cmd: str) -> dict | None:
-    """Detect `git push --force` (or `-f`) without `--force-with-lease`.
+    """Detect `git push --force` (or `-f` / `-fu` / …) without `--force-with-lease`.
 
     `--force-with-lease` is the safe variant: it refuses to overwrite if the
     remote moved underneath you. We allow it; we only block the unconditional
-    `--force` / `-f`.
+    `--force` / short-flag form.
+
+    v0.25 — two defects fixed, both stemming from scanning the WHOLE command
+    string instead of the `git push` sub-command:
+
+      * False DENY: `rm -f build.log && git push origin main` matched the
+        bare `-f` owned by `rm` and was denied as a force push. Any chained
+        `-f` (`make -f Makefile`, `docker build -f Dockerfile .`) did the
+        same.
+      * False ALLOW: `git push -fu origin main` — a genuine force push with
+        `--set-upstream` — never matched, because the old token regex
+        required `-f` to be delimited by whitespace on both sides. The exact
+        operation this guard exists to stop rode through.
+
+    Both are fixed by splitting the command on shell separators, keeping
+    only the segments that actually invoke `git push`, and looking for `f`
+    inside each single-dash option cluster within those segments.
     """
-    if not re.search(r"\bgit\s+push\b", cmd):
+    segments = [
+        seg for seg in _CMD_SEPARATOR.split(cmd)
+        if re.search(r"\bgit\s+push\b", seg)
+    ]
+    if not segments:
         return None
-    # Strip --force-with-lease (and its optional =refspec value) before
-    # checking for --force. Otherwise the substring `--force` inside
-    # `--force-with-lease` would falsely match below.
-    sanitised = re.sub(r"--force-with-lease(?:=\S+)?", "", cmd)
-    if re.search(r"(?:\s|^)(?:--force|-f)(?:\s|$)", sanitised):
+    hit = False
+    for seg in segments:
+        # Strip --force-with-lease (and its optional =refspec value) before
+        # checking for --force. Otherwise the substring `--force` inside
+        # `--force-with-lease` would falsely match below.
+        sanitised = re.sub(r"--force-with-lease(?:=\S+)?", "", seg)
+        if re.search(r"(?:\s|^)--force(?:\s|$)", sanitised):
+            hit = True
+            break
+        if any("f" in cluster
+               for cluster in _SHORT_FLAG_CLUSTER.findall(sanitised)):
+            hit = True
+            break
+    if hit:
         return {
             "name": "git push --force without --force-with-lease",
             "rule": "03",
@@ -245,6 +294,39 @@ def _emit_deny(command: str, pattern_name: str, rule: str, explanation: str) -> 
 _REGISTER_SCRIPT_NAME = "register_read.py"
 
 
+def _split_command(command: str) -> list[str] | None:
+    """Tokenise a shell command, preserving Windows path separators.
+
+    v0.25 — `shlex.split(command, posix=True)` treats a backslash as an
+    escape character, so an UNQUOTED Windows path came back mangled:
+
+        C:\\Users\\me\\note.txt   ->   C:Usersmenote.txt
+
+    `_handle_register_invocation` then denied with "file does not exist on
+    disk", i.e. the documented recovery path for a false rule-04 DENY was
+    itself broken on this plugin's own primary platform. It survived 21
+    releases because every existing test quotes the path (`--file "%s"`),
+    and quoting happens to survive posix splitting.
+
+    On Windows we therefore split in non-posix mode (backslash is a plain
+    character there) and strip the quotes shlex leaves attached; on POSIX
+    the original semantics are kept, where a backslash escape is real.
+    """
+    posix = os.name != "nt"
+    try:
+        tokens = shlex.split(command, posix=posix)
+    except ValueError:
+        return None
+    if posix:
+        return tokens
+    out: list[str] = []
+    for tok in tokens:
+        if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+            tok = tok[1:-1]
+        out.append(tok)
+    return out
+
+
 def _parse_register_invocation(command: str) -> dict | None:
     """If `command` is a register_read.py invocation, return parsed args.
 
@@ -252,10 +334,17 @@ def _parse_register_invocation(command: str) -> dict | None:
     command is not a register invocation. Tolerates malformed register
     invocations by returning None (the regular bypass-pattern checks then
     apply, and the script call itself will fail at argparse time).
+
+    v0.25 — the `--flag=value` spelling is now understood. register_read.py
+    parses its own argv with argparse, which accepts both `--file X` and
+    `--file=X`; this hand-parser only knew the space-separated form, so on
+    the `=` form the hook silently classified the command as "not a
+    registration", never called add_read, and let the stub script print
+    "register_read: ok" — a success message for a registration that never
+    happened, leaving the next Edit denied with no clue why.
     """
-    try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError:
+    tokens = _split_command(command)
+    if tokens is None:
         return None
     # Find the script-path token. Match by basename so we are robust to
     # whatever absolute path Claude Code expanded ${CLAUDE_PLUGIN_ROOT} to.
@@ -266,23 +355,31 @@ def _parse_register_invocation(command: str) -> dict | None:
             break
     if script_idx is None:
         return None
-    # Parse the trailing tokens for --file and --hash.
+    # Parse the trailing tokens for --file and --hash, in both the
+    # space-separated and the `=`-joined spelling.
     args = tokens[script_idx + 1 :]
-    file_path = None
-    hash_val = None
+    values: dict[str, str] = {}
     i = 0
     while i < len(args):
-        if args[i] == "--file" and i + 1 < len(args):
-            file_path = args[i + 1]
-            i += 2
-        elif args[i] == "--hash" and i + 1 < len(args):
-            hash_val = args[i + 1]
-            i += 2
-        else:
+        tok = args[i]
+        matched = False
+        for name in ("file", "hash"):
+            flag = f"--{name}"
+            if tok == flag and i + 1 < len(args):
+                values[name] = args[i + 1]
+                i += 2
+                matched = True
+                break
+            if tok.startswith(flag + "="):
+                values[name] = tok[len(flag) + 1 :]
+                i += 1
+                matched = True
+                break
+        if not matched:
             i += 1
-    if file_path is None or hash_val is None:
+    if "file" not in values or "hash" not in values:
         return None
-    return {"file": file_path, "hash": hash_val}
+    return {"file": values["file"], "hash": values["hash"]}
 
 
 def _compute_sha256(path: Path) -> str:
@@ -384,18 +481,35 @@ def main() -> int:
         if not command:
             return 0
 
-        # Read-cache escape hatch: register-as-read invocation.
-        # Process this BEFORE bypass-pattern checks so a register command
-        # cannot false-match unrelated regexes.
+        # ------------------------------------------------------------- #
+        # Check order (v0.25 — CHANGED, and the change is the fix).
+        #
+        # Until v0.24 the register_read escape hatch was processed FIRST
+        # and returned 0 on success, on the assumption that the command
+        # simply *was* a registration. But the checks below scan the whole
+        # command string, and a command can CONTAIN a registration while
+        # doing other things:
+        #
+        #     python …/register_read.py --file F --hash H && git push --force
+        #
+        # was ALLOWED — the entire bypass catalog, the force-push detector
+        # and every 圣旨 were skipped for the rest of the compound command.
+        # Registration and bypass-scanning are orthogonal; both must run.
+        #
+        # So: run every DENY check first, and register only once the whole
+        # command is known to be clean. This also means a command that is
+        # going to be denied never mutates session state — the same
+        # ordering principle as v0.24's read_guard fix, where a DENIED
+        # Write must not grant read-before-edit authorization.
+        #
+        # A bare, legitimate registration is unaffected: none of the
+        # patterns below match a `register_read.py --file … --hash …`
+        # command (verified by the regression suite's clean-registration
+        # case), so it still falls through to the registration step.
+        # ------------------------------------------------------------- #
         session_id = payload.get("session_id") or "default"
-        reg_handled = _handle_register_invocation(command, session_id)
-        if reg_handled is True:
-            return 0  # ALLOW -- registration succeeded; stub script will run
-        if reg_handled is False:
-            return 0  # DENY emitted; do not fall through to bypass checks
-        # reg_handled is None: not a register invocation; continue.
 
-        # Static regex patterns next.
+        # Static regex patterns first.
         for pat in STATIC_PATTERNS:
             if pat["regex"].search(command):
                 _emit_deny(command, pat["name"], pat["rule"], pat["explanation"])
@@ -420,6 +534,14 @@ def main() -> int:
                     hit, kind="Bash", tool_or_cmd=command,
                 ))
                 return 0
+
+        # Read-cache escape hatch: register-as-read invocation. Reached
+        # only when the command cleared every deny check above.
+        reg_handled = _handle_register_invocation(command, session_id)
+        if reg_handled is False:
+            return 0  # DENY emitted (bad hash / missing file / bad args)
+        # True  -> registration succeeded; ALLOW (stub script will run).
+        # None  -> not a register invocation; ALLOW (nothing matched).
 
         # No bypass detected; allow by exiting silently.
     except Exception:

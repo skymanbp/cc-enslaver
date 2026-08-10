@@ -270,5 +270,203 @@ class TestBashGuardRegisterFlow(unittest.TestCase):
         self.assertIsNone(out)
 
 
+class TestRegisterChainingBypass(unittest.TestCase):
+    """v0.25 — a register_read invocation must not shield the rest of a
+    compound command from the bypass-pattern catalog.
+
+    Root cause (v0.4.0-v0.24.0): `main()` returned 0 the moment a
+    registration succeeded, so every static pattern, the force-push
+    detector, and the edict scan were skipped for the WHOLE command
+    string. Any bypass chained after a valid registration rode through:
+
+        python .../register_read.py --file F --hash H && git push --force
+
+    was ALLOWED. Registration and bypass-scanning are orthogonal concerns
+    and both must run; the deny checks now run FIRST, and the file is
+    registered only when the command is otherwise clean (same ordering
+    principle as v0.24's read_guard fix, where a DENIED Write must not
+    grant read-before-edit authorization).
+    """
+
+    def setUp(self) -> None:
+        import hashlib
+        import shutil
+        import tempfile
+
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-bg-chain-"))
+        self.fpath = self.tmpdir / "fixture.bin"
+        content = b"chaining-bypass fixture content\n"
+        self.fpath.write_bytes(content)
+        self.correct = hashlib.sha256(content).hexdigest()
+        self.state_dir = self.tmpdir / "data"
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.state_dir)}
+        self._shutil = shutil
+
+    def tearDown(self) -> None:
+        self._shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _call(self, command: str, sid: str):
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            },
+            env_overrides=self.env,
+        )
+
+    def _reg_cmd(self) -> str:
+        return (
+            'python "/path/to/register_read.py" '
+            '--file "%s" --hash %s' % (self.fpath, self.correct)
+        )
+
+    def _recorded_paths(self) -> list[str]:
+        import json
+
+        out: list[str] = []
+        sessions_dir = self.state_dir / "sessions"
+        if not sessions_dir.is_dir():
+            return out
+        for f in sessions_dir.glob("*.json"):
+            try:
+                out.extend(json.loads(f.read_text(encoding="utf-8"))
+                           .get("read_files", []))
+            except (OSError, json.JSONDecodeError):
+                continue
+        return out
+
+    def test_chained_bypasses_are_denied(self) -> None:
+        chained = [
+            ("force-push", " && git push --force origin main", "force"),
+            ("no-verify", ' && git commit -m x --no-verify', "no-verify"),
+            ("chmod 777", " ; chmod 777 /tmp/x", "777"),
+            ("no-gpg-sign", " && git commit -m x --no-gpg-sign", "no-gpg-sign"),
+            ("rebase --skip", " && git rebase --skip", "--skip"),
+        ]
+        for i, (label, tail, substring) in enumerate(chained):
+            with self.subTest(bypass=label):
+                sid = f"chain-deny-{i}"
+                rc, out, err = self._call(self._reg_cmd() + tail, sid)
+                self.assertEqual(rc, 0, msg=err)
+                self.assertIsNotNone(
+                    out,
+                    msg=f"{label} chained after a registration was ALLOWED "
+                        f"— the bypass catalog was skipped",
+                )
+                spec = out["hookSpecificOutput"]
+                self.assertEqual(spec["permissionDecision"], "deny")
+                self.assertIn(substring, spec["permissionDecisionReason"])
+
+    def test_denied_chain_does_not_register(self) -> None:
+        # Ordering contract: the deny checks run BEFORE registration, so a
+        # command that is going to be denied never mutates session state.
+        self._call(self._reg_cmd() + " && git push --force", "chain-noreg")
+        self.assertFalse(
+            any("fixture.bin" in p for p in self._recorded_paths()),
+            msg="a DENIED compound command still registered its file as read",
+        )
+
+    def test_clean_registration_still_allows_and_records(self) -> None:
+        # Guard against over-fixing: a bare, clean registration must keep
+        # working exactly as before.
+        rc, out, err = self._call(self._reg_cmd(), "chain-clean")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIsNone(out, msg="clean registration must still ALLOW")
+        self.assertTrue(
+            any("fixture.bin" in p for p in self._recorded_paths()),
+            msg="clean registration failed to record the file",
+        )
+
+
+class TestRegisterPathSpellings(unittest.TestCase):
+    """v0.25 — `shlex.split(..., posix=True)` destroys unquoted Windows
+    backslash paths, making the read-cache escape hatch unusable with the
+    path spelling this plugin's own primary platform produces.
+
+    `C:\\Users\\me\\note.txt` came back out of shlex as
+    `C:Usersmenote.txt`, so `_handle_register_invocation` denied with
+    "file does not exist on disk" — the recovery mechanism for a false
+    rule-04 DENY was itself broken. The existing register tests all quote
+    the path (`--file "%s"`), and quoting happens to survive posix
+    splitting, which is why this went unnoticed for 21 releases.
+    """
+
+    def setUp(self) -> None:
+        import hashlib
+        import shutil
+        import tempfile
+
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-bg-spell-"))
+        self.fpath = self.tmpdir / "fixture.bin"
+        content = b"path-spelling fixture content\n"
+        self.fpath.write_bytes(content)
+        self.correct = hashlib.sha256(content).hexdigest()
+        self.state_dir = self.tmpdir / "data"
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.state_dir)}
+        self._shutil = shutil
+
+    def tearDown(self) -> None:
+        self._shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _call(self, command: str, sid: str):
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            },
+            env_overrides=self.env,
+        )
+
+    def _registered(self) -> bool:
+        import json
+
+        sessions_dir = self.state_dir / "sessions"
+        if not sessions_dir.is_dir():
+            return False
+        for f in sessions_dir.glob("*.json"):
+            try:
+                paths = json.loads(f.read_text(encoding="utf-8")).get(
+                    "read_files", [])
+            except (OSError, json.JSONDecodeError):
+                continue
+            if any("fixture.bin" in p for p in paths):
+                return True
+        return False
+
+    def test_all_four_spellings_register(self) -> None:
+        native = str(self.fpath)
+        forward = native.replace("\\", "/")
+        spellings = [
+            ("native unquoted", f"--file {native}"),
+            ("native quoted", f'--file "{native}"'),
+            ("forward unquoted", f"--file {forward}"),
+            ("forward quoted", f'--file "{forward}"'),
+        ]
+        for i, (label, file_arg) in enumerate(spellings):
+            with self.subTest(spelling=label):
+                self._shutil.rmtree(self.state_dir, ignore_errors=True)
+                cmd = (
+                    'python "/path/to/register_read.py" '
+                    f"{file_arg} --hash {self.correct}"
+                )
+                rc, out, err = self._call(cmd, f"spell-{i}")
+                self.assertEqual(rc, 0, msg=err)
+                self.assertIsNone(
+                    out,
+                    msg=f"{label} path was rejected: "
+                        f"{(out or {}).get('hookSpecificOutput', {}).get('permissionDecisionReason', '')[:200]}",
+                )
+                self.assertTrue(
+                    self._registered(),
+                    msg=f"{label} path did not land in session state",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

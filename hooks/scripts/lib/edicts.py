@@ -1,6 +1,6 @@
 """cc-enslaver — 圣旨 (Imperial Edicts) system.
 
-User-defined per-project hard rules that ride on top of the built-in 11
+User-defined per-project hard rules that ride on top of the built-in 12
 rules. Loaded from a TOML file (project-level by default), injected into
 the session-start / user-prompt soft-layer reminders, and enforced as
 PreToolUse DENY when a regex matches Edit / Write content or Bash
@@ -51,6 +51,7 @@ except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and edicts must fail open
     tomllib = None  # type: ignore[assignment]
 
+from . import tomlio
 
 _PLUGIN_NAME = "cc-enslaver"
 _EDICTS_FILENAME = "edicts.toml"
@@ -276,14 +277,11 @@ def load() -> list[Edict]:
     p = edicts_path()
     if p is None:
         return []
-    try:
-        with p.open("rb") as f:
-            data = tomllib.load(f)
-    except OSError as e:
-        _warn(f"could not read {p}: {e}")
-        return []
-    except tomllib.TOMLDecodeError as e:
-        _warn(f"invalid TOML in {p}: {e}")
+    # Hardened shared reader: strips a UTF-8 BOM and reports a non-UTF-8
+    # file instead of letting UnicodeDecodeError escape this function —
+    # which used to switch read-before-edit OFF for the whole session.
+    data = tomlio.parse_toml_file(p, _warn)
+    if data is None:
         return []
 
     raw_list = data.get("edicts", [])

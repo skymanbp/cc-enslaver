@@ -76,6 +76,7 @@ from pathlib import Path
 # Make `lib/` importable when run directly as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
 from lib import edicts as edicts_lib  # noqa: E402
 
 # --------------------------------------------------------------------------- #
@@ -438,7 +439,7 @@ def _scan_bare_try_except_pass(text: str) -> tuple[int, int] | None:
             or body.startswith("except(")
         ):
             # ``except`` header at matching indent: check whether the
-            # next non-blank line is bare ``pass`` indented deeper.
+            # next non-blank line is a ``pass`` indented deeper.
             j = i + 1
             while j < n and lines[j].lstrip(" \t").rstrip() == "":
                 j += 1
@@ -446,9 +447,30 @@ def _scan_bare_try_except_pass(text: str) -> tuple[int, int] | None:
                 nxt = lines[j]
                 nxt_body = nxt.lstrip(" \t").rstrip()
                 nxt_indent = nxt[: len(nxt) - len(nxt.lstrip(" \t"))]
-                if nxt_body == "pass" and len(nxt_indent) > len(indent):
+                # v0.25 — compare the CODE on the line, not the raw line.
+                # Requiring an exactly-bare ``pass`` meant any trailing
+                # comment defeated rule 09's flagship detector outright:
+                # ``pass  # TODO later`` was ALLOWED. Worse, it made the
+                # documented escape hatch unreachable — a rationale
+                # comment on the pass line silenced the detector by
+                # changing the string, so ``_has_rationale`` was never
+                # consulted and the "why-comment" contract was vacuous.
+                # Now the comment is stripped, the marker still fires,
+                # and the ±1-line rationale window decides.
+                nxt_code = nxt_body.split("#", 1)[0].rstrip()
+                nxt_code = nxt_code.rstrip(";").rstrip()
+                if nxt_code == "pass" and len(nxt_indent) > len(indent):
                     return starts[j], starts[j] + len(lines[j])
-            pending_try_indent = None
+            # v0.25 — do NOT drop the watch here. A try statement may have
+            # several ``except`` clauses, and the canonical antipattern is
+            # a narrow handler followed by a catch-all that swallows
+            # everything:
+            #     try: … / except ValueError: log() / except Exception: pass
+            # Clearing the watch after the first clause made exactly that
+            # shape invisible. Leaving it set lets each subsequent clause
+            # at the same indent be inspected; the dedent branch below
+            # still ends the watch when a non-``except`` statement returns
+            # to (or below) the ``try:`` column.
             i += 1
             continue
 
@@ -638,10 +660,17 @@ HARDCODE_RATIONALE_TOKENS = RATIONALE_TOKENS + (
 # value is captured (group `val`) so obvious placeholders can be filtered
 # out below. Bounded, backtrack-free (the value class excludes both
 # quotes, so the closing quote terminates the run in one pass).
+# v0.25 — the optional quote before the separator makes the QUOTED-KEY
+# spelling matchable. `"api_key": "…"` is the single most common way a
+# credential gets committed (JSON config, quoted-key YAML/TOML), and
+# `.json` is fully scannable — but the old pattern required the `:` to
+# follow the keyword with only spaces between, so the closing quote of
+# the key blocked every match. The rarer bare-key form was caught while
+# the common one was waved through.
 _SECRET_ASSIGN = re.compile(
     r"\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key"
     r"|secret[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key"
-    r"|bearer)\b[ \t]*[:=][ \t]*(['\"])(?P<val>[^'\"\n]{8,})\1",
+    r"|bearer)\b['\"]?[ \t]*[:=][ \t]*(['\"])(?P<val>[^'\"\n]{8,})\1",
     re.IGNORECASE,
 )
 
@@ -816,12 +845,28 @@ def _handle_pre_tool_use(payload: dict) -> None:
 
     if tool == "Read":
         # Record the read so subsequent Edit/Write on this file is allowed.
-        # Always allow — Read itself will fail naturally if the file does
-        # not exist, and a phantom record of a non-existent path is
-        # harmless (Edit's os.path.exists short-circuit covers it).
-        state_lib.add_read(session_id, file_path)
+        # Always ALLOW the Read itself — it will fail naturally if the file
+        # does not exist.
+        #
+        # v0.25 — but only RECORD an existing target. The previous code
+        # recorded unconditionally, justified by "a phantom record of a
+        # non-existent path is harmless (Edit's os.path.exists
+        # short-circuit covers it)". That reasoning is wrong: the
+        # short-circuit only fires while the file is STILL absent. Read a
+        # path before it exists (reading a generated artifact before
+        # generating it is an everyday flow), let a build step / git
+        # checkout / another process create it, and the stale entry now
+        # satisfies has_read — so an Edit or a whole-file Write lands on
+        # content the session never saw, with rule 04 silently disabled
+        # for that path for the rest of the session. Same defect class as
+        # the v0.24 fix below, where a DENIED Write must not grant
+        # read-before-edit authorization.
+        if os.path.exists(file_path):
+            state_lib.add_read(session_id, file_path)
         # v0.16: also capture file-state baseline for Stop layer (g)
-        # (file-claim verification). Lazy, idempotent.
+        # (file-claim verification). Lazy, idempotent. Recorded even for a
+        # missing target — "did not exist at baseline" is exactly what
+        # layer (g) needs to adjudicate a later "I created X" claim.
         state_lib.record_baseline(session_id, file_path)
         return
 

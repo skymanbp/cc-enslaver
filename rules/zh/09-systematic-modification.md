@@ -98,12 +98,21 @@ DENY 时给出的恢复路径：
 
 | 模式 | 拒绝理由 |
 |---|---|
-| `try:\s*\n[^\n]*\n\s*except[^:]*:\s*\n\s*pass` | 静默吞错（rule 03） |
+| `try:` … `except …:` … `pass`（单层扫描） | 静默吞错（rule 03） |
 | `^\s*#\s*noqa\b`（无紧随的解释注释） | 屏蔽 lint（rule 03） |
 | `^\s*#\s*type:\s*ignore\b`（无紧随的解释注释） | 屏蔽类型检查（rule 03） |
 | `//\s*@ts-ignore\b`（无紧随的解释注释） | 屏蔽 TS 报错（rule 03） |
 | `//\s*eslint-disable(?:-next-line)?\b`（无解释） | 屏蔽 lint（rule 03） |
 | `time\.sleep\([^)]*\)\s*#\s*(wait|race|workaround)` | 用 sleep 掩盖竞态（rule 03） |
+
+**吞错行的扫描方式（v0.25）**：`try/except: pass` 检测器比对该行的**代码**，而非原始文本：
+
+- 行尾注释不再能绕过它 —— `pass  # TODO later` 照样拦。此前要求 `pass` 必须
+  完全裸露，反而让下面那条 why 注释逃生口**对这个标记根本不可达**：加理由注释
+  是靠"改变了字符串"让检测器沉默的，理由本身从没被读过。逃生口到 v0.25 才真正生效。
+- 一个 `try` 语句的**每个** `except` 子句都会被检查，不再只看第一个。于是那个
+  典型形态 —— 先一个窄 handler、再一个吞掉一切的兜底（`except ValueError: log()`
+  之后跟 `except Exception: pass`）—— 不再隐形。
 
 **允许的形式**：每个屏蔽标记必须在同一行或紧邻上一行/下一行带**理由注释**（含 "because" / "原因" / "why" / "正当" / 显式说明），例如：
 

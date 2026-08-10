@@ -1880,5 +1880,137 @@ class TestFailOpen(_StopBase):
         self.assertIn(b"stop_guard exception", proc.stderr)
 
 
+class TestChineseFileClaimAnchoring(unittest.TestCase):
+    """v0.25 — layer (g) must not read a third-party attribution as a
+    self-claim, and must honour Chinese negation.
+
+    `_FILE_CLAIMS_EN` requires the subject `I`, so "The previous commit
+    modified state.py" is correctly ignored. The Chinese pattern had NO
+    subject constraint, so "上一版修改了 lib/state.py，本次没动" became a
+    claim that THIS agent edited the file — and since read_guard records a
+    baseline mtime for every file merely READ this session, layer (g)
+    could then "disprove" it and BLOCK, accusing the agent of lying about
+    an edit in the very sentence where it correctly said it had not
+    touched the file.
+
+    The negation guard was independently broken for CJK: it required
+    whitespace after the negator, and Chinese does not put a space
+    between 没有 and the verb, so "我没有修改了 X" still produced a claim.
+
+    This repo's primary language is Chinese and version attributions
+    ("v0.23 修改了 X") are pervasive in its own docs and replies, so both
+    were live false-block generators.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard
+
+        self.sg = stop_guard
+
+    def _paths(self, message: str) -> list[str]:
+        return [c[1] for c in self.sg._extract_file_claims(message)]
+
+    def test_third_person_attribution_is_not_a_self_claim(self) -> None:
+        for msg in [
+            "上一版修改了 lib/state.py ，本次没动",
+            "v0.23 修改了 stop_guard.py，这里不再赘述",
+            "那个 PR 新增了 docs/RULES.md",
+        ]:
+            with self.subTest(msg=msg):
+                self.assertEqual(
+                    self._paths(msg), [],
+                    msg="third-party attribution parsed as a self-claim",
+                )
+
+    def test_chinese_negation_is_honoured(self) -> None:
+        for msg in [
+            "我没有修改了 lib/state.py",
+            "我没修改了 lib/state.py",
+            "本次未修改了 lib/state.py",
+        ]:
+            with self.subTest(msg=msg):
+                self.assertEqual(
+                    self._paths(msg), [],
+                    msg="negated Chinese claim still extracted",
+                )
+
+    def test_genuine_first_person_claims_still_extracted(self) -> None:
+        # The layer must keep catching what it exists to catch.
+        for msg, expected in [
+            ("我修改了 lib/state.py", "lib/state.py"),
+            ("我创建了 docs/NEW.md", "docs/NEW.md"),
+            ("本次修改了 hooks/scripts/read_guard.py",
+             "hooks/scripts/read_guard.py"),
+        ]:
+            with self.subTest(msg=msg):
+                self.assertIn(expected, self._paths(msg))
+
+    def test_english_behaviour_unchanged(self) -> None:
+        self.assertIn("state.py", self._paths("I edited state.py"))
+        self.assertEqual(
+            self._paths("The previous commit modified state.py"), [])
+        self.assertEqual(self._paths("I did not edit state.py"), [])
+
+
+class TestNestedFenceTldrExtraction(unittest.TestCase):
+    """v0.25 — a nested code fence must not close its parent.
+
+    Fence markers were truncated to 3 characters, so an inner ``` fence
+    inside an outer ```` fence compared equal to the opener and closed
+    it. CommonMark requires a closing fence to be at least as long as the
+    opening one; a shorter run is content. Once the outer fence was
+    spuriously closed, its remaining body was scanned as prose — and a
+    `tldr:` line inside quoted fixture text got measured, blocking layer
+    (h) with "tldr item overlong" on text the reply merely quoted.
+    Quoting nested markdown/YAML examples is routine in this repo.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard
+
+        self.sg = stop_guard
+
+    def test_nested_fence_content_is_not_measured(self) -> None:
+        nl = chr(10)
+        tick3, tick4 = "`" * 3, "`" * 4
+        reply = (
+            "Fixed." + nl * 2
+            + tick4 + "markdown" + nl
+            + tick3 + "text" + nl
+            + 'tldr: "' + "A" * 300 + '"' + nl
+            + tick3 + nl
+            + tick4 + nl * 2
+            + 'tldr: "the real one, short"' + nl
+        )
+        items = self.sg._tldr_items(reply)
+        self.assertNotIn(
+            300, [len(i) for i in items],
+            msg="quoted fixture inside a nested fence was measured",
+        )
+        self.assertIsNone(
+            self.sg._find_overlong_tldr(reply),
+            msg="layer (h) would block on quoted text the agent did not "
+                "author as its tldr",
+        )
+
+    def test_canonical_yaml_fence_still_measured(self) -> None:
+        # Guard against over-fixing: the reply schema lives in a ```yaml
+        # fence and its tldr MUST stay length-checked.
+        nl = chr(10)
+        tick3 = "`" * 3
+        reply = (
+            "Done." + nl * 2 + tick3 + "yaml" + nl
+            + "cc-enslaver:" + nl
+            + '  tldr: "' + "B" * 300 + '"' + nl
+            + tick3 + nl
+        )
+        self.assertIsNotNone(
+            self.sg._find_overlong_tldr(reply),
+            msg="the canonical yaml schema block must remain measurable",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

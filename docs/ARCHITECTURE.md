@@ -41,6 +41,7 @@ catches the lazy behaviour, often via a different signal.
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
 - Stop guard (v0.6.0 → … → v0.23.0, rule 01 + 06 + 07 + 08 + 09 + 12 + TL;DR enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) + [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py)
+- Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session.
 
 Five hook entries across four events:
 
@@ -451,9 +452,33 @@ Word-boundary care: `--no-verify-extra` (longer flag) does not match;
 `git push --force-with-lease` is stripped before the `--force` check, so it
 also does not match.
 
+**Sub-command scoping (v0.25).** Force-push detection splits the command on
+shell separators (`&&`, `||`, `;`, `|`, newline) and inspects only the
+segments that invoke `git push`. Scanning the whole string gave errors in
+both directions: `rm -f build.log && git push origin main` was denied as a
+force push (the `-f` belongs to `rm`; likewise `make -f`, `docker build -f`),
+while `git push -fu origin main` — a real force push, since git accepts
+stacked short options — never matched a whitespace-delimited `-f` token.
+Within a `git push` segment the check now looks for `f` inside any
+single-dash option cluster.
+
 If the user has explicitly authorised a bypass, `bash_guard` will still deny.
 The agent should surface the deny reason to the user and let the user run the
 command manually — that is the intended discipline (no AI-mediated bypassing).
+
+**Check order (v0.25).** All deny checks — static patterns, force-push,
+圣旨 — run **before** the register-as-read handling below, and a file is
+registered only once the whole command is known clean. Until v0.24 the
+registration was processed first and returned immediately on success, on
+the assumption that such a command simply *was* a registration. But a
+command can *contain* a registration while doing other things, so
+`python …/register_read.py --file F --hash H && git push --force` was
+ALLOWED: the entire bypass catalog was skipped for the rest of the compound
+command. Registration and bypass-scanning are orthogonal concerns and both
+must run; putting the denies first also means a command destined for denial
+never mutates session state — the same ordering principle as v0.24's
+read_guard fix, where a DENIED Write must not grant read-before-edit
+authorization.
 
 #### Read-cache escape hatch (v0.4.0)
 
@@ -472,6 +497,17 @@ session state. Motivation:
   the file on disk and only registers if it matches the agent's claim.
   An agent that has not actually opened the file can't produce the
   current on-disk hash, so the hatch can't be abused.
+- **Argument parsing (v0.25).** The command is tokenised in non-posix mode
+  on Windows (with quote-stripping) because `shlex.split(posix=True)` treats
+  a backslash as an escape: an unquoted `C:\Users\me\note.txt` came back as
+  `C:Usersmenote.txt`, so the hatch denied with "file does not exist on
+  disk" — the recovery path for a false rule-04 DENY was itself broken on
+  this plugin's primary platform. It went unnoticed for 21 releases because
+  every test quoted the path, and quoting survives posix splitting. Both
+  `--file X` and `--file=X` are accepted, matching what `register_read.py`'s
+  own argparse accepts; previously the `=` spelling made the hook classify
+  the command as "not a registration", so nothing was registered while the
+  stub script still printed `register_read: ok`.
 
 Flow:
 
@@ -625,8 +661,14 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
     │
     ├─ command matches --no-verify                       → DENY (rule 03)
     ├─ command matches --no-gpg-sign                     → DENY (rule 03)
-    ├─ command matches git push --force (no --force-with-lease) → DENY (rule 03)
+    ├─ git push segment has --force / -f cluster (no --force-with-lease) → DENY (rule 03)
     ├─ command matches chmod 0?777                       → DENY (rule 03)
+    ├─ command matches a must 圣旨 deny_bash regex       → DENY (edict)
+    │        (v0.25: every deny check above runs BEFORE the step below, so a
+    │         registration can no longer shield the rest of a compound command)
+    ├─ command is a register_read.py invocation          → verify SHA-256:
+    │        match   → record file as read, ALLOW
+    │        no match / missing file / bad args → DENY
     └─ no bypass pattern matched                         → ALLOW (silent exit 0)
 
    ─── if user/agent invokes /cc-enslaver:verify ───
@@ -660,7 +702,8 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn` + `record_edited_file`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn` + `get_edited_files`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
-| `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` (sync-gate cases) |
+| `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), `hooks/scripts/lib/tomlio.py` (config reader), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` + `tests/test_sync_gate.py` (sync-gate cases) |
+| `hooks/scripts/lib/tomlio.py` (v0.25) | **Both** TOML config loaders — `hooks/scripts/lib/edicts.py` and `hooks/scripts/lib/sync_gate.py`. A change here changes how *every* hand-edited config degrades, so it needs both `tests/test_edicts.py` and `tests/test_sync_gate.py` re-checked. It exists precisely so the BOM / non-UTF-8 hardening is not hand-copied into two loaders that then drift apart. |
 | `.claude/cc-enslaver/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
 | `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5 |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |

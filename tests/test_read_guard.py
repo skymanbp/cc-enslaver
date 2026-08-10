@@ -1283,5 +1283,290 @@ class TestUnreadableStateMutation(_GuardTestBase):
                 os.environ["CLAUDE_PLUGIN_DATA"] = old_env
 
 
+class TestDetectorHardeningV025(unittest.TestCase):
+    """v0.25 — three detector defects found by the round-2 audit."""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-v025-"))
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir / "data")}
+        self.sid = f"v025-{uuid.uuid4().hex[:8]}"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _seen(self, path: Path) -> None:
+        run_hook(
+            [GUARD],
+            {"session_id": self.sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Read", "tool_input": {"file_path": str(path)}},
+            env_overrides=self.env,
+        )
+
+    def _edit(self, path: Path, new_string: str, sid: str | None = None):
+        return run_hook(
+            [GUARD],
+            {"session_id": sid or self.sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Edit",
+             "tool_input": {"file_path": str(path), "old_string": "zzz",
+                            "new_string": new_string}},
+            env_overrides=self.env,
+        )
+
+    def _decision(self, out) -> str:
+        if out is None:
+            return "allow"
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    # --- rule 09: bare try/except: pass ------------------------------- #
+    def test_try_except_pass_variants(self) -> None:
+        """A trailing comment must not defeat the detector, and a later
+        except clause must still be inspected.
+
+        Requiring the swallow line to be exactly `pass` meant `pass  # TODO`
+        was ALLOWED — and, worse, it made the documented why-comment escape
+        hatch unreachable, because a rationale comment silenced the marker
+        by changing the string instead of by being read. Clearing the
+        try-watch after the first except clause hid the canonical shape:
+        a narrow handler followed by a catch-all that swallows everything.
+        """
+        nl = chr(10)
+        cases = [
+            ("bare pass", "try:" + nl + "    r()" + nl
+             + "except Exception:" + nl + "    pass" + nl, "deny"),
+            ("pass + non-rationale comment", "try:" + nl + "    r()" + nl
+             + "except Exception:" + nl + "    pass  # TODO later" + nl, "deny"),
+            ("pass + trailing semicolon", "try:" + nl + "    r()" + nl
+             + "except Exception:" + nl + "    pass ;" + nl, "deny"),
+            ("bare pass in 2nd except clause", "try:" + nl + "    r()" + nl
+             + "except ValueError:" + nl + "    log()" + nl
+             + "except Exception:" + nl + "    pass" + nl, "deny"),
+            # The escape hatch must now actually work — this is the case
+            # that used to pass vacuously.
+            ("pass + rationale comment", "try:" + nl + "    r()" + nl
+             + "except Exception:" + nl
+             + "    # because upstream guarantees idempotency" + nl
+             + "    pass" + nl, "allow"),
+            ("handled except (no pass)", "try:" + nl + "    r()" + nl
+             + "except Exception:" + nl + "    log()" + nl, "allow"),
+        ]
+        # A fresh file AND session per case: several of these edits are
+        # "small" by the rule-09 classifier, so sharing one session would
+        # let the rolling-patch counter deny the 4th ALLOWED case and make
+        # this test fail for a reason that has nothing to do with the
+        # detector under test.
+        for i, (label, src, expected) in enumerate(cases):
+            with self.subTest(case=label):
+                sid = f"{self.sid}-tep{i}"
+                target = self.tmpdir / f"mod{i}.py"
+                target.write_text("zzz\n", encoding="utf-8")
+                run_hook(
+                    [GUARD],
+                    {"session_id": sid, "hook_event_name": "PreToolUse",
+                     "tool_name": "Read",
+                     "tool_input": {"file_path": str(target)}},
+                    env_overrides=self.env,
+                )
+                _, out, _ = self._edit(target, src, sid=sid)
+                self.assertEqual(self._decision(out), expected, msg=label)
+
+    # --- rule 10: quoted-key secrets ---------------------------------- #
+    def test_quoted_key_secret_is_detected(self) -> None:
+        """`"api_key": "…"` (JSON / quoted-key YAML) must deny.
+
+        The old pattern required the separator to follow the keyword with
+        only spaces between, so the key's closing quote blocked every
+        match — waving through the single most common way a credential
+        gets committed, while catching the rarer bare-key spelling.
+        """
+        cfg = self.tmpdir / "config.json"
+        cfg.write_text("zzz\n", encoding="utf-8")
+        self._seen(cfg)
+        secret = "Xk9" + "mQ2vLp7"
+        for label, body in [
+            ("quoted key", '  "api_key": "' + secret + '"'),
+            ("quoted key, single quotes", "  'password': '" + secret + "'"),
+            ("bare key (pre-existing behaviour)", '  api_key: "' + secret + '"'),
+        ]:
+            with self.subTest(case=label):
+                _, out, _ = self._edit(cfg, body)
+                self.assertEqual(self._decision(out), "deny", msg=label)
+
+    def test_quoted_key_placeholder_still_allowed(self) -> None:
+        # The placeholder escape must survive the pattern widening.
+        cfg = self.tmpdir / "config.json"
+        cfg.write_text("zzz\n", encoding="utf-8")
+        self._seen(cfg)
+        _, out, _ = self._edit(cfg, '  "api_key": "your-key-here"')
+        self.assertEqual(self._decision(out), "allow")
+
+    # --- rule 04: phantom read ---------------------------------------- #
+    def test_read_of_missing_path_grants_no_authorization(self) -> None:
+        """Reading a path before it exists must not authorize a later edit.
+
+        The old code recorded unconditionally, justified by "Edit's
+        os.path.exists short-circuit covers it" — but that only holds
+        while the file is still absent. Read a generated artifact before
+        generating it (an everyday flow), let a build step create it, and
+        rule 04 was silently off for that path for the rest of the session.
+        """
+        ghost = self.tmpdir / "generated.py"
+        self._seen(ghost)                      # phantom read: does not exist
+        ghost.write_text("content never seen by the agent\n", encoding="utf-8")
+        _, out, _ = self._edit(ghost, "x = 1")
+        self.assertEqual(
+            self._decision(out), "deny",
+            msg="edit landed on content the session never read",
+        )
+        # A Write (whole-file replacement) must be gated too.
+        _, out, _ = run_hook(
+            [GUARD],
+            {"session_id": self.sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Write",
+             "tool_input": {"file_path": str(ghost), "content": "wiped"}},
+            env_overrides=self.env,
+        )
+        self.assertEqual(self._decision(out), "deny")
+
+    def test_read_of_existing_path_still_authorizes(self) -> None:
+        real = self.tmpdir / "real.py"
+        real.write_text("zzz\n", encoding="utf-8")
+        self._seen(real)
+        _, out, _ = self._edit(real, "x = 1")
+        self.assertEqual(self._decision(out), "allow")
+
+
+class TestStateUnreadableFailsOpen(unittest.TestCase):
+    """v0.25 — an unreadable state file must not become a false DENY.
+
+    `load()` degrades an unreadable record to an EMPTY one, and for
+    `has_read` "empty" is a positive assertion of "never read" — which
+    read_guard turns into a hard DENY. So a transient Windows sharing
+    violation (the same cause `save()` already retries against) produced
+    the exact false "you have not Read this file" DENY that v0.23/v0.24
+    were chasing, while stderr simultaneously announced "failing open".
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-failopen-"))
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir / "data")}
+        self.sid = f"failopen-{uuid.uuid4().hex[:8]}"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_unreadable_state_allows_instead_of_denying(self) -> None:
+        target = self.tmpdir / "mod.py"
+        target.write_text("zzz\n", encoding="utf-8")
+        edit_payload = {
+            "session_id": self.sid, "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "old_string": "zzz",
+                           "new_string": "x = 1"},
+        }
+        # Control: never read -> deny (state file readable, simply empty).
+        _, out, _ = run_hook([GUARD], edit_payload, env_overrides=self.env)
+        self.assertIsNotNone(out, msg="control: unread file must deny")
+
+        # Now make the state file exist-but-unreadable. A directory in its
+        # place raises OSError on read_text exactly like a sharing
+        # violation that outlives the single retry.
+        state_file = self.tmpdir / "data" / "sessions" / f"{self.sid}.json"
+        self.assertTrue(state_file.is_file(), msg="expected state to exist")
+        state_file.unlink()
+        state_file.mkdir()
+        _, out, err = run_hook([GUARD], edit_payload, env_overrides=self.env)
+        self.assertIsNone(
+            out,
+            msg="unreadable state produced a false read-before-edit DENY "
+                "instead of failing open",
+        )
+
+
+class TestPluginIsSelfRewritable(unittest.TestCase):
+    """v0.25 — every production hook script must survive its OWN detectors.
+
+    A script containing a bare `# noqa` / `try: … except: pass` cannot be
+    rewritten by any agent running this plugin: read_guard DENIES the
+    Write. v0.23 recognised the failure mode and fixed exactly one file
+    (lib/sync_gate.py's bare `# type: ignore`, whose commit message notes
+    that otherwise "the plugin's own rule 09 guard would refuse to let
+    anyone rewrite it") — but never swept the rest of the tree, which is
+    the very repo-wide-sync omission rule 12 exists to catch. Five of the
+    twelve scripts were still self-locked:
+
+        bash_guard.py, gc_state.py, manage_edicts.py, read_guard.py
+            → bare `# noqa: E402` on the sys.path-bootstrap imports
+        inject_context.py
+            → bare `try: sys.stdin.read() / except Exception: pass`
+
+    The house pattern for a legitimate suppression is stop_guard.py's:
+    the marker stays, and an adjacent line carries the rationale. This
+    test pins the invariant for the whole tree so a new script cannot
+    reintroduce the lock.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-selfwrite-"))
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir)}
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _production_scripts(self) -> list[Path]:
+        scripts = sorted(SCRIPTS_DIR.glob("*.py"))
+        scripts += sorted((SCRIPTS_DIR / "lib").glob("*.py"))
+        return [p for p in scripts if p.name != "__init__.py"]
+
+    def test_every_hook_script_can_be_rewritten(self) -> None:
+        scripts = self._production_scripts()
+        self.assertGreaterEqual(
+            len(scripts), 10,
+            msg="script discovery looks wrong — expected the full hook tree",
+        )
+        for script in scripts:
+            with self.subTest(script=script.name):
+                sid = f"selfwrite-{script.stem}-{uuid.uuid4().hex[:8]}"
+                # Register the file as read so only the CONTENT detectors
+                # (rule 09 / 10 / 11 + edicts) can produce a deny.
+                rc, _, _ = run_hook(
+                    [GUARD],
+                    {
+                        "session_id": sid,
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": "Read",
+                        "tool_input": {"file_path": str(script)},
+                    },
+                    env_overrides=self.env,
+                )
+                self.assertEqual(rc, 0)
+                rc, out, err = run_hook(
+                    [GUARD],
+                    {
+                        "session_id": sid,
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": "Write",
+                        "tool_input": {
+                            "file_path": str(script),
+                            "content": script.read_text(encoding="utf-8"),
+                        },
+                    },
+                    env_overrides=self.env,
+                )
+                self.assertEqual(rc, 0, msg=err)
+                if out is not None:
+                    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                    label = next(
+                        (ln for ln in reason.splitlines()
+                         if ln.startswith("Pattern matched:")),
+                        reason.splitlines()[0] if reason else "",
+                    )
+                    self.fail(
+                        f"{script.name} is self-locked: rewriting it verbatim "
+                        f"is DENIED by this plugin's own content detectors. "
+                        f"{label}. Add an adjacent rationale comment (see "
+                        f"stop_guard.py's `# noqa: E402 … because …` line)."
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

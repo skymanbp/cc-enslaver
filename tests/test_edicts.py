@@ -1095,5 +1095,153 @@ class TestManageCLICwdFallback(unittest.TestCase):
         self.assertIn(str(self.proj), out)
 
 
+class TestEdictsFileEncoding(_EdictsBase):
+    """v0.25 — a mis-encoded edicts.toml must not disable OTHER guards.
+
+    `tomllib.load(fileobj)` raises `UnicodeDecodeError` (a `ValueError`),
+    caught by neither the `OSError` nor the `TOMLDecodeError` clause. It
+    escaped `edicts.load()` — contradicting that function's own "never
+    raises" docstring — and unwound past every downstream check in
+    `read_guard._handle_pre_tool_use`, which calls it as the FIRST
+    statement of the Edit/Write path, into the outer failing-open
+    handler. Net effect: one edicts.toml saved as GBK/ANSI (a historical
+    Windows Notepad default, and hand-editing is explicitly blessed by
+    manage_edicts' own header) silently switched OFF read-before-edit —
+    rules 04 + 08 — for the entire session.
+
+    A UTF-8 BOM (PowerShell `>` / `Out-File` default here) was a quieter
+    variant: the file parsed as invalid TOML, so every `must` edict went
+    unenforced while `/cc-enslaver:edict list` reported an empty file.
+    """
+
+    def _body(self) -> str:
+        nl = chr(10)
+        return (
+            "[[edicts]]" + nl
+            + 'id = "E01"' + nl
+            + 'text = "禁止使用 mongoose"' + nl
+            + 'severity = "must"' + nl
+            + "deny_edit = ['''mongoose''']" + nl
+        )
+
+    def _write_bytes(self, data: bytes) -> None:
+        self.edicts_path.parent.mkdir(parents=True, exist_ok=True)
+        self.edicts_path.write_bytes(data)
+
+    def _edit_unread_file(self):
+        """Edit a file this session has never Read.
+
+        read-before-edit must DENY. If the edicts loader blew up, the
+        exception unwinds past this check and the edit is ALLOWED — that
+        is the collateral damage this test pins.
+        """
+        victim = self.proj / "app.py"
+        victim.write_text("zzz\n", encoding="utf-8")
+        return run_hook(
+            [READ_GUARD],
+            {"session_id": "enc-test", "hook_event_name": "PreToolUse",
+             "tool_name": "Edit",
+             "tool_input": {"file_path": str(victim), "old_string": "zzz",
+                            "new_string": "x = 2"}},
+            env_overrides=self.env,
+        )
+
+    def test_non_utf8_edicts_do_not_disable_read_before_edit(self) -> None:
+        self._write_bytes(self._body().encode("gbk"))
+        _, out, err = self._edit_unread_file()
+        self.assertIsNotNone(
+            out, msg="a mis-encoded edicts.toml disabled read-before-edit")
+        self.assertIn(
+            "rule 04", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("Traceback", err)
+        self.assertIn("not valid UTF-8", err)
+
+    def test_bom_prefixed_edicts_still_enforced(self) -> None:
+        self._write_bytes(b"\xef\xbb\xbf" + self._body().encode("utf-8"))
+        import os
+
+        old = dict(os.environ)
+        try:
+            os.environ.update(self.env)
+            loaded = edicts_lib.load()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        self.assertEqual(
+            [e.id for e in loaded], ["E01"],
+            msg="a UTF-8 BOM silently dropped every edict",
+        )
+
+
+class TestManageEdictsRoundTrip(_EdictsBase):
+    """v0.25 — rewriting the file must never corrupt it.
+
+    `_dump_edict` escaped only `\\` and `"`, then interpolated the value
+    into a SINGLE-LINE TOML basic string, where a newline is illegal. A
+    multi-line `text = \"\"\"…\"\"\"` is a legal, natural way to hand-write
+    an edict, and `_write_edicts` re-emits EVERY edict on any add/remove
+    — so one pre-existing multi-line edict made the whole file
+    unparseable. The CLI printed "Added edict …" over a config that
+    tomllib then rejected, silently unenforcing every `must` rule in the
+    project with only a stderr line no user sees.
+    """
+
+    def _run(self, *args):
+        import subprocess
+
+        import os
+        env = os.environ.copy()
+        env.update(self.env)
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "manage_edicts.py"), *args],
+            capture_output=True, env=env, cwd=str(self.proj),
+        )
+        return (proc.returncode,
+                proc.stdout.decode("utf-8", errors="replace"),
+                proc.stderr.decode("utf-8", errors="replace"))
+
+    def test_multiline_edict_survives_a_rewrite(self) -> None:
+        nl = chr(10)
+        q3 = '"' * 3
+        self.edicts_path.parent.mkdir(parents=True, exist_ok=True)
+        self.edicts_path.write_text(
+            "[[edicts]]" + nl
+            + 'id = "E01"' + nl
+            + "text = " + q3 + nl + "Never install mongoose." + nl
+            + "Use prisma instead." + nl + q3 + nl
+            + 'severity = "must"' + nl
+            + "deny_bash = ['''npm i mongoose''']" + nl,
+            encoding="utf-8",
+        )
+        rc, _, _ = self._run("add", "E02", "no lodash")
+        self.assertEqual(rc, 0)
+
+        # The rewritten file must still parse, and BOTH edicts must load.
+        import os
+
+        old = dict(os.environ)
+        try:
+            os.environ.update(self.env)
+            loaded = edicts_lib.load()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        self.assertEqual(
+            sorted(e.id for e in loaded), ["E01", "E02"],
+            msg="the rewrite corrupted the file — every must edict is now "
+                "silently unenforced",
+        )
+        # And the surviving edict must still physically DENY.
+        _, out, _ = run_hook(
+            [BASH_GUARD],
+            {"session_id": "rt", "hook_event_name": "PreToolUse",
+             "tool_name": "Bash",
+             "tool_input": {"command": "npm i mongoose"}},
+            env_overrides=self.env,
+        )
+        self.assertIsNotNone(out, msg="E01 stopped being enforced")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
 if __name__ == "__main__":
     unittest.main()

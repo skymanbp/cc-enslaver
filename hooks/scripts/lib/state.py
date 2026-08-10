@@ -270,7 +270,8 @@ def _load_shared(session_id: str) -> dict:
     remains as defense-in-depth against non-cooperating external
     readers (antivirus / indexers / backup agents). Mutators must NOT
     call this (they already hold the lock; Windows byte-range locks are
-    not reentrant across handles) — they keep calling plain load().
+    not reentrant across handles) — they call `_load_for_mutation`
+    directly, inside the lock they already hold.
     """
     with _session_lock(session_id):
         return load(session_id)
@@ -289,8 +290,24 @@ def add_read(session_id: str, file_path: str) -> None:
 
 
 def has_read(session_id: str, file_path: str) -> bool:
-    """True if this session has previously Read or Written this file."""
-    state = _load_shared(session_id)
+    """True if this session has previously Read or Written this file.
+
+    v0.25 — fails OPEN when the state file exists but cannot be read.
+    `load()` degrades an unreadable record to an EMPTY one, and for this
+    accessor "empty" is not neutral: it is a positive assertion of "never
+    read", which read_guard turns into a hard DENY. So a transient
+    Windows sharing violation (antivirus / indexer / backup agent — the
+    same cause `save()` already retries against) produced the exact false
+    "you have not Read this file" DENY that v0.23/v0.24 were chasing,
+    while stderr simultaneously announced "failing open". Distinguishing
+    "no state yet" (fresh record → False → deny, correct) from "state
+    unreadable" (None → True → allow) restores the failing-open contract
+    on the gating path.
+    """
+    with _session_lock(session_id):
+        state = _load_for_mutation(session_id)
+    if state is None:
+        return True
     return normalize_path(file_path) in state.get("read_files", [])
 
 

@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import edicts as edicts_lib  # noqa: E402
+# noqa: E402 above because the lib import must follow the sys.path bootstrap
 
 
 _HEADER = """# cc-enslaver — Imperial Edicts (圣旨) file
@@ -112,19 +113,43 @@ def _escape_triple_quoted(s: str) -> str:
     return s.replace("'''", r"'' + \"'\" + ''")
 
 
+def _toml_basic_string(s: str) -> str:
+    """Encode `s` as a TOML basic string, escaping the control characters.
+
+    v0.25 — the previous encoder escaped only `\\` and `"`, then dropped
+    the result into a single-line basic string. A newline is ILLEGAL
+    there, and a multi-line value is a perfectly legal, natural way to
+    hand-write an edict (`text = \"\"\"…\"\"\"`) — which this script's own
+    header documents as fully supported. Because `_write_edicts` re-emits
+    EVERY edict through this encoder on any add/remove, one pre-existing
+    multi-line edict was enough to make the whole file unparseable: the
+    CLI printed "Added edict …" while leaving a config that tomllib then
+    rejected, silently unenforcing every `must` rule in the project with
+    only a stderr line no user sees.
+    """
+    out = s.replace("\\", "\\\\").replace('"', '\\"')
+    for raw, esc in (
+        ("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t"),
+        ("\b", "\\b"), ("\f", "\\f"),
+    ):
+        out = out.replace(raw, esc)
+    # Any remaining C0 control character must be \uXXXX-escaped.
+    return "".join(
+        ch if ch >= " " or ch == "\x7f" else f"\\u{ord(ch):04X}"
+        for ch in out
+    )
+
+
 def _dump_edict(e: dict) -> str:
     """Serialize one edict dict to a TOML [[edicts]] block."""
     parts = ["[[edicts]]"]
-    parts.append(f"id = \"{e['id']}\"")
-    # Text: use regular string with escaping for embedded quotes.
-    text = e.get("text", "").replace("\\", "\\\\").replace('"', '\\"')
-    parts.append(f'text = "{text}"')
+    parts.append(f'id = "{_toml_basic_string(str(e["id"]))}"')
+    parts.append(f'text = "{_toml_basic_string(e.get("text", ""))}"')
     sev = e.get("severity", "must")
-    parts.append(f'severity = "{sev}"')
+    parts.append(f'severity = "{_toml_basic_string(sev)}"')
     note = e.get("note", "")
     if note:
-        n = note.replace("\\", "\\\\").replace('"', '\\"')
-        parts.append(f'note = "{n}"')
+        parts.append(f'note = "{_toml_basic_string(note)}"')
     for field in ("deny_edit", "deny_bash"):
         vals = e.get(field) or []
         if vals:

@@ -62,6 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
+# noqa: E402 above because the lib import must follow the sys.path bootstrap
 
 
 # Filenames in state_dir that are NOT per-session state files. These

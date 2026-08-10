@@ -17,6 +17,185 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.25.0] — 2026-08-10
+
+**Second-round audit release: 12 confirmed defect fixes, zero new features.**
+
+Process: a full own-architecture re-read of every hook script → a five-lens
+parallel read-only model review of the v0.24 tree (state/concurrency,
+Stop layers, read_guard detectors, bash/edicts bypass, periphery), each
+finding then put through an independent adversarial verification pass →
+**every surviving finding re-reproduced by my own runtime probe before any
+code changed** → red-first regressions → fixes → 346/346 green. Red-first
+evidence is unusually strong this round: the new assertions were replayed
+against a pristine v0.24.0 worktree and produced **32 failures + 1 error**
+there, all green here.
+
+The theme is **guards that could be walked around**. v0.24 audited whether
+the machinery *worked*; v0.25 audited whether it could be *evaded* — and
+every one of the HIGH findings is a guard that was silently not guarding.
+
+### Fixed
+
+- **HIGH — a successful `register_read` shielded the entire bypass catalog**
+  (`bash_guard.py`). `main()` returned the moment a registration succeeded,
+  so every static pattern, the force-push detector and every 圣旨 were
+  skipped for the *whole* command string. Verified by probe:
+  `python …/register_read.py --file F --hash H && git push --force` →
+  **ALLOWED**; same for `--no-verify`, `chmod 777`, `git rebase --skip`.
+  Registration and bypass-scanning are orthogonal concerns; the deny checks
+  now run first and registration happens only once the command is known
+  clean — so a command destined for denial also no longer mutates session
+  state (the same ordering principle as v0.24's read_guard fix).
+- **HIGH — any trailing comment defeated the `try/except: pass` detector**
+  (`read_guard.py`). The swallow line had to be *exactly* `pass`, so
+  `pass  # TODO later` was ALLOWED. Worse, this made rule 09's documented
+  why-comment escape hatch **unreachable for its flagship marker**: a
+  rationale comment silenced the detector by changing the string, so
+  `_has_rationale` was never consulted — the existing test that claimed to
+  pin that behaviour was passing vacuously. The detector now compares the
+  *code* on the line.
+- **HIGH — only the first `except` clause was ever inspected**
+  (`read_guard.py`). The try-watch was cleared after the first clause, so
+  the canonical antipattern — a narrow handler followed by a catch-all that
+  swallows everything — was invisible. Subsequent clauses at the same
+  indent are now checked.
+- **HIGH — reading a path before it existed granted permanent blind-edit
+  authorization** (`read_guard.py`). `add_read` ran unconditionally,
+  justified in-code by "a phantom record of a non-existent path is harmless
+  (Edit's `os.path.exists` short-circuit covers it)". That short-circuit
+  only fires while the file is *still* absent: read a generated artifact
+  before generating it (an everyday flow), let a build step create it, and
+  the stale entry satisfied `has_read` — so an Edit *or a whole-file Write*
+  landed on content the session never saw, with rule 04 off for that path
+  for the rest of the session. Only existing targets are recorded now; the
+  mtime baseline is still captured for missing ones, which is what layer
+  (g) needs to adjudicate a later "I created X" claim.
+- **HIGH — an unreadable-but-present state file became a false DENY**
+  (`lib/state.py`). `load()` degrades an unreadable record to an EMPTY one,
+  and for `has_read` "empty" is a positive assertion of "never read", which
+  read_guard turns into a hard DENY. A transient Windows sharing violation
+  — the same cause `save()` already retries against — therefore produced
+  the exact false "you have not Read this file" DENY that v0.23/v0.24 were
+  chasing, while stderr simultaneously announced "failing open". `has_read`
+  now distinguishes "no state yet" (deny, correct) from "state unreadable"
+  (allow).
+- **HIGH — layer (g) blocked truthful third-party attributions in Chinese**
+  (`stop_guard.py`). `_FILE_CLAIMS_EN` requires the subject `I`;
+  `_FILE_CLAIMS_ZH` had no subject constraint at all, so
+  `上一版修改了 lib/state.py，本次没动` was parsed as *this* agent claiming
+  the edit — and since read_guard baselines every file merely READ this
+  session, layer (g) could then "disprove" it and BLOCK, accusing the agent
+  of lying in the very sentence where it correctly said it had not touched
+  the file. This repo's primary language is Chinese and version
+  attributions (`v0.23 修改了 X`) are pervasive in its own docs. The
+  negation guard was independently broken for CJK: it required whitespace
+  after the negator, which Chinese does not use, so `我没有修改了 X` still
+  produced a claim. Both fixed (first-person anchor + a second negation
+  check on the subject→verb gap, which a look-behind structurally cannot
+  reach).
+- **HIGH — a mis-encoded `edicts.toml` switched off read-before-edit**
+  (`lib/edicts.py`). `tomllib.load()` decodes the stream itself and raises
+  `UnicodeDecodeError` (a `ValueError`) that neither the `OSError` nor the
+  `TOMLDecodeError` clause caught. It escaped `load()` — contradicting that
+  function's own "never raises" docstring — and unwound past every
+  downstream check in `read_guard._handle_pre_tool_use`, which calls it as
+  the *first* statement of the Edit/Write path, into the outer failing-open
+  handler. One edicts.toml saved as GBK/ANSI therefore disabled rules 04 +
+  08 for the entire session. Hand-editing is explicitly blessed by
+  manage_edicts' own header.
+- **MED — a UTF-8 BOM silently dropped every rule** in both configs. tomllib
+  does not strip it, so the first `[[table]]` became an invalid statement:
+  `/cc-enslaver:edict list` reported "(edicts file is empty)" while every
+  `must` rule sat unenforced. A BOM is what several standard Windows save
+  paths emit.
+- **MED — `sync_gate.load()` crashed on a non-UTF-8 config**, taking Stop
+  layer (i) down with it — and with it the turn-boundary `clear_edit_flag`.
+  Both loaders now share one hardened reader,
+  [`lib/tomlio.py`](hooks/scripts/lib/tomlio.py), rather than the same
+  patch applied twice (this repo keeps getting bitten by hand-copied logic
+  drifting apart — read_guard's three write branches in v0.24, the fence
+  tracker below).
+- **MED — quoted-key secrets passed rule 10** (`read_guard.py`). The
+  separator had to follow the keyword with only spaces between, so the
+  key's own closing quote blocked every match in JSON and quoted-key
+  YAML/TOML: `"api_key": "…"` — the most common shape a committed
+  credential takes, in a fully scannable file type — was ALLOWED while the
+  rarer bare-key spelling was caught.
+- **MED — force-push detection was scoped to the whole command string**
+  (`bash_guard.py`), giving both a false DENY and a false ALLOW:
+  `rm -f build.log && git push origin main` was denied as a force push
+  (the `-f` belongs to `rm`; same for `make -f`, `docker build -f`), while
+  `git push -fu origin main` — a genuine force push, since git accepts
+  stacked short options — never matched the whitespace-delimited token
+  regex. Detection now splits on shell separators and inspects only the
+  `git push` segments, looking for `f` inside single-dash option clusters.
+- **MED — the read-cache escape hatch was unusable on this plugin's own
+  primary platform** (`bash_guard.py`). `shlex.split(posix=True)` treats a
+  backslash as an escape, so an unquoted `C:\Users\me\note.txt` came back as
+  `C:Usersmenote.txt` and the registration was denied with "file does not
+  exist on disk" — i.e. the documented recovery path for a false rule-04
+  DENY was itself broken. It survived 21 releases because every existing
+  test quotes the path, and quoting happens to survive posix splitting.
+  Windows now splits in non-posix mode with quote-stripping. The
+  `--file=VALUE` spelling is also understood now: argparse accepts it, this
+  hand-parser did not, so the hook classified such a command as "not a
+  registration", never called `add_read`, and let the stub script print
+  `register_read: ok` for a registration that never happened.
+- **MED — a nested code fence closed its parent** in both markdown scanners
+  (`stop_guard.py`, `i18n_check.py`). Fence markers were truncated to three
+  characters, so an inner ``` inside an outer ```` compared equal to the
+  opener and closed it; CommonMark requires a closing fence to be at least
+  as long as the opening one. Downstream, layer (h) measured `tldr:` lines
+  inside *quoted fixture text* and blocked with "tldr item overlong" on
+  content the reply merely quoted, and i18n_check registered phantom ATX
+  headers from `#` comments in the orphaned body.
+- **MED — `manage_edicts` corrupted the file when re-emitting a multi-line
+  edict.** `_dump_edict` escaped only `\` and `"` before interpolating into
+  a single-line TOML basic string, where a newline is illegal — and
+  `_write_edicts` re-emits *every* edict on any add/remove, so one
+  hand-written `text = """…"""` was enough to make the whole file
+  unparseable. The CLI printed "Added edict …" over a config tomllib then
+  rejected, silently unenforcing every `must` rule with only a stderr line
+  no user sees. Control characters are now escaped properly.
+- **MED — five of twelve hook scripts were self-locked.** `bash_guard`,
+  `gc_state`, `manage_edicts` and `read_guard` carried bare `# noqa: E402`
+  on their sys.path-bootstrap imports, and `inject_context` a bare
+  `try: … except: pass` — so a full-file Write of any of them was DENIED by
+  this plugin's own content detectors: **no agent running cc-enslaver could
+  rewrite them.** v0.23 recognised the failure mode and fixed exactly one
+  file (`lib/sync_gate.py`), then never swept the tree — precisely the
+  repo-wide-sync omission rule 12 exists to catch. All five now carry the
+  house-style adjacent rationale, and
+  `TestPluginIsSelfRewritable` pins the invariant for the whole tree so a
+  new script cannot reintroduce it. (Fixing the `# noqa` layer immediately
+  exposed a second, previously-shadowed hit in `bash_guard`: its `rm -rf`
+  detector embeds `$HOME` as *subject matter*, which rule 11 flagged — now
+  carrying an `essential:` rationale, mirroring how read_guard splits its
+  own home-var literal across concatenation.)
+- **LOW — stale docstrings**: `stop_guard` said "eight" laziness signals
+  (nine layers exist), `lib/edicts` said "built-in 11 rules" (12), and
+  `state._load_shared` claimed mutators "keep calling plain `load()`" when
+  v0.24 had moved them to `_load_for_mutation`.
+
+### Notes
+
+- **Not everything the review proposed was accepted.** The five-lens pass
+  returned 33 candidate findings and its own verifiers confirmed 30 — a
+  confirmation rate high enough to distrust on its face (they even
+  "refuted" a defect I had already reproduced with a probe). Each was
+  re-adjudicated here against the actual code; the ones fixed above are
+  those I reproduced myself. Deliberately **not** changed: the layer-(i)
+  grace-path ack remains scoped to layer-(i) recoveries. The report that
+  this drops acknowledgements when layer (h) blocks first is correct, but
+  widening it re-opens the v0.24 guardrail against a reply that merely
+  *quotes* "sync-check" while recovering from an unrelated block. That is a
+  contract change about enforcement strictness, not a bug fix, so it is
+  recorded for the user rather than decided unilaterally.
+- Tests **323 → 346**.
+
+---
+
 ## [0.24.0] — 2026-08-10
 
 **Health-audit release: architecture review + multi-path adversarial model

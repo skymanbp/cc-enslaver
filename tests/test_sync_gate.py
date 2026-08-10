@@ -205,5 +205,54 @@ class TestEvaluate(_SyncGateBase):
         )
 
 
+class TestConfigEncodingRobustness(_SyncGateBase):
+    """v0.25 — a mis-encoded config must degrade, never crash.
+
+    `tomllib.load(fileobj)` decodes the stream itself and raises
+    `UnicodeDecodeError` (a `ValueError`), which neither the `OSError`
+    nor the `TOMLDecodeError` clause caught. It escaped `load()` and
+    crashed stop_guard's layer-(i) evaluation — which also skipped the
+    turn-boundary `clear_edit_flag`. A UTF-8 BOM (what several standard
+    Windows save paths emit) made the first `[[groups]]` an invalid
+    statement, silently dropping every group.
+    """
+
+    def _write_bytes(self, data: bytes) -> None:
+        d = self.root / ".claude" / "cc-enslaver"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "sync-gate.toml").write_bytes(data)
+
+    def _body(self) -> str:
+        nl = chr(10)
+        return (
+            "[[groups]]" + nl
+            + 'name = "g"' + nl
+            + 'when = ["a/*.md"]' + nl
+            + 'require = ["b/*.md"]' + nl
+            + 'note = "中文说明"' + nl
+        )
+
+    def test_utf8_control_loads(self) -> None:
+        self._write_bytes(self._body().encode("utf-8"))
+        loaded = sync_gate.load(str(self.root))
+        self.assertIsNotNone(loaded)
+        self.assertEqual([g.name for g in loaded[1]], ["g"])
+
+    def test_bom_prefixed_config_still_loads(self) -> None:
+        self._write_bytes(b"\xef\xbb\xbf" + self._body().encode("utf-8"))
+        loaded = sync_gate.load(str(self.root))
+        self.assertIsNotNone(loaded, msg="BOM made the config unparseable")
+        self.assertEqual([g.name for g in loaded[1]], ["g"])
+
+    def test_non_utf8_config_degrades_without_raising(self) -> None:
+        self._write_bytes(self._body().encode("gbk"))
+        # Must not raise — the whole Stop layer (i) runs inside this call.
+        self.assertIsNone(sync_gate.load(str(self.root)))
+        self.assertEqual(
+            sync_gate.evaluate([str(self.root / "a" / "x.md")], str(self.root)),
+            [],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

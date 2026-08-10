@@ -162,6 +162,8 @@ def main() -> int:
     try:
         sys.stdin.read()
     except Exception:
+        # Rationale: draining stdin is best-effort (the payload is unused
+        # here); a read failure must never block the injection.
         pass
 
     prompt_filename = EVENT_TO_PROMPT[args.event]

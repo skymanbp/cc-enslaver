@@ -73,6 +73,8 @@ except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and the gate must fail open
     tomllib = None  # type: ignore[assignment]
 
+from . import tomlio
+
 _PLUGIN_NAME = "cc-enslaver"
 _CONFIG_FILENAME = "sync-gate.toml"
 
@@ -190,14 +192,12 @@ def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
     p = config_path(cwd)
     if p is None:
         return None
-    try:
-        with p.open("rb") as f:
-            data = tomllib.load(f)
-    except OSError as e:
-        _warn(f"could not read {p}: {e}")
-        return None
-    except tomllib.TOMLDecodeError as e:
-        _warn(f"invalid TOML in {p}: {e}")
+    # Shared reader: strips a UTF-8 BOM and turns a non-UTF-8 file into a
+    # diagnostic instead of an uncaught UnicodeDecodeError. Without it a
+    # sync-gate.toml saved as GBK/ANSI crashed stop_guard's layer (i)
+    # evaluation, which also skipped the turn-boundary `clear_edit_flag`.
+    data = tomlio.parse_toml_file(p, _warn)
+    if data is None:
         return None
 
     raw_list = data.get("groups", [])

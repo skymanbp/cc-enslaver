@@ -107,12 +107,25 @@ The following patterns, when present in `new_string` **without an accompanying "
 
 | Pattern | Reason |
 |---|---|
-| `try:\s*\n[^\n]*\n\s*except[^:]*:\s*\n\s*pass` | Silent exception-swallowing (rule 03) |
+| `try:` … `except …:` … `pass` (single-level scan) | Silent exception-swallowing (rule 03) |
 | `^\s*#\s*noqa\b` (without immediately adjacent rationale comment) | Lint suppression (rule 03) |
 | `^\s*#\s*type:\s*ignore\b` (without rationale) | Type-checker suppression (rule 03) |
 | `//\s*@ts-ignore\b` (without rationale) | TS suppression (rule 03) |
 | `//\s*eslint-disable(?:-next-line)?\b` (without rationale) | Lint suppression (rule 03) |
 | `time\.sleep\([^)]*\)\s*#\s*(wait\|race\|workaround)` | Sleep masking a race (rule 03) |
+
+**Swallow-line scanning (v0.25).** The `try/except: pass` detector compares the
+**code** on the swallow line, not the raw text:
+
+- A trailing comment no longer defeats it — `pass  # TODO later` is intercepted.
+  Requiring an exactly-bare `pass` had made the why-comment escape hatch below
+  *unreachable for this marker*: a rationale comment silenced the detector by
+  changing the string, so the rationale was never actually read. The escape
+  hatch only became real in v0.25.
+- Every `except` clause of a `try` statement is inspected, not just the first,
+  so the canonical shape — a narrow handler followed by a catch-all that
+  swallows everything (`except ValueError: log()` then `except Exception: pass`)
+  — is no longer invisible.
 
 **Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing "because" / "原因" / "why" / a concrete justification, e.g.:
 

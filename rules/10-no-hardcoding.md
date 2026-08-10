@@ -68,9 +68,17 @@ placeholder value or an adjacent "why" rationale**, are intercepted:
 | Pattern | Example (illustrative) |
 |---|---|
 | secret-named identifier = quoted literal | `api_key = "…10+ chars…"` |
+| secret-named **quoted key** = quoted literal (v0.25) | `"api_key": "…10+ chars…"` |
 | private-key PEM header | `-----BEGIN … PRIVATE KEY-----` |
 | AWS access-key literal | `AKIA` + 16 upper-alnum |
 | credentials in a URL | `postgres://user:pw@host/db` |
+
+The quoted-key row closes a gap that mattered: the separator had to
+follow the keyword with only spaces between, so the key's own closing
+quote blocked every match in JSON and quoted-key YAML/TOML — the single
+most common shape a committed credential takes, and `.json` is fully
+scannable. The rarer bare-key spelling was caught while the common one
+was waved through.
 
 A value is treated as a harmless placeholder (not flagged) when it
 contains `example` / `changeme` / `your-` / `<…>` / `${…}` / `dummy` /

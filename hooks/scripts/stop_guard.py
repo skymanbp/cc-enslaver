@@ -2,7 +2,7 @@
 """cc-enslaver — Stop hook enforcing rules 06 + 07 + 08 + 09 + TL;DR.
 
 At every Stop event, this hook inspects the agent's last assistant
-message and refuses to let the agent finish the turn when any of eight
+message and refuses to let the agent finish the turn when any of nine
 laziness signals appear in proximity to a "done" claim:
 
   (a) [v0.6.0] No convergence evidence at all (no `$ ` shell prompt,
@@ -612,8 +612,27 @@ def _strip_item_decorations(s: str) -> str:
     return s
 
 
+def _fence_marker(stripped_line: str) -> str | None:
+    """Return the full fence run (e.g. '```' / '````'), or None.
+
+    v0.25 — the previous code truncated every fence to its first 3 chars,
+    so an inner ``` fence inside an outer ```` fence compared EQUAL to the
+    opener and closed it. CommonMark requires a closing fence to be at
+    least as long as the opening one; a shorter run is content. Once the
+    outer fence was spuriously closed, the rest of its body was scanned as
+    prose — and a `tldr:` line inside quoted fixture text got measured,
+    blocking layer (h) with "tldr item overlong" on text the reply merely
+    quoted. Nested fences are routine in this repo's own rule docs.
+    """
+    for ch in ("`", "~"):
+        if stripped_line.startswith(ch * 3):
+            run = len(stripped_line) - len(stripped_line.lstrip(ch))
+            return ch * run
+    return None
+
+
 def _is_fence(stripped_line: str) -> bool:
-    return stripped_line.startswith("```") or stripped_line.startswith("~~~")
+    return _fence_marker(stripped_line) is not None
 
 
 def _tldr_items(text: str) -> list[str]:
@@ -642,11 +661,12 @@ def _tldr_items(text: str) -> list[str]:
     while idx < n:
         line = lines[idx]
         stripped_line = line.strip()
-        if _is_fence(stripped_line):
-            # A fence closes only on the SAME marker that opened it —
-            # a `~~~` line inside a ``` block is content, not a fence
+        marker = _fence_marker(stripped_line)
+        if marker is not None:
+            # A fence closes only on the SAME character AND a run at least
+            # as long as the opener — a `~~~` line inside a ``` block, or
+            # a ``` line inside a ```` block, is content, not a fence
             # toggle (same contract as i18n_check's fence tracking).
-            marker = stripped_line[:3]
             if not in_fence:
                 in_fence = True
                 fence_marker = marker
@@ -654,7 +674,7 @@ def _tldr_items(text: str) -> list[str]:
                 # The canonical reply schema is a ```yaml block — keep it
                 # measurable; every other fence is a fixture/example.
                 fence_measurable = info.startswith(("yaml", "yml"))
-            elif marker == fence_marker:
+            elif marker[0] == fence_marker[0] and len(marker) >= len(fence_marker):
                 in_fence = False
                 fence_marker = ""
                 fence_measurable = False
@@ -842,16 +862,49 @@ _FILE_CLAIMS_EN = re.compile(
 )
 
 # Chinese claim verbs.
+#
+# v0.25 — a first-person subject is now REQUIRED, mirroring the English
+# pattern's `\bI\s+`. Without it, any third-party attribution became a
+# self-claim: "上一版修改了 lib/state.py，本次没动" was parsed as the agent
+# claiming to have edited state.py, and since read_guard records a
+# baseline mtime for every file merely READ this session, layer (g) could
+# then "disprove" it and BLOCK — accusing the agent of lying about an
+# edit in the very sentence where it correctly said it had NOT touched
+# the file. English speakers never hit this; this repo's primary language
+# is Chinese and version attributions ("v0.23 修改了 X") are pervasive in
+# its own docs and replies.
+#
+# The subject is optional-but-anchored: the verb must either be preceded
+# by 我/本次/这次/此次/已经/刚 (first-person or "in this turn"), or start
+# the sentence / follow a clause boundary with no other subject. We take
+# the conservative reading — only an explicit first-person marker counts
+# — because layer (g) BLOCKS, and a false block costs a turn while a
+# missed lie costs nothing but a missed catch (the layer is documented
+# false-negative-preferring).
 _FILE_CLAIMS_ZH = re.compile(
+    r"(?:我|本次|这次|此次)[^。；;\n]{0,12}?"
     r"(修改|更新|创建|新增|新建|编辑|写入|添加|生成)了\s*"
     r"[`「\[]?(" + _PATH_TOKEN + r")[`」\]]?"
 )
 
 # Negation guard: don't extract claims when negated.
+#
+# v0.25 — the `\s+` after the negator made every CJK negation invisible:
+# Chinese does not put whitespace between 没有 and the verb, so
+# "我没有修改了 lib/state.py" still yielded a positive claim. The CJK
+# negators now allow zero intervening spaces; the ASCII branch keeps its
+# mandatory whitespace so "cannot" / "note" cannot be read as "not".
 _NEGATED_BEFORE = re.compile(
-    r"(?:not?|n't|没有|未|不|沒)\s+\S{0,12}\Z",
+    r"(?:(?:not?|n't)\s+\S{0,12}|(?:没有|没|未|不|沒|无|無)\s*\S{0,12})\Z",
     re.IGNORECASE,
 )
+
+# v0.25 — a second negation site the look-behind structurally cannot see.
+# Now that the Chinese pattern anchors on a first-person subject, the
+# negator sits INSIDE the match ("我" + "没有" + "修改了 X"), i.e. after
+# the match start rather than before it. `_extract_file_claims` therefore
+# also scans the subject→verb gap with this pattern.
+_NEGATION_INNER = re.compile(r"没有|没|尚未|未|不|沒|无|無")
 
 
 def _extract_file_claims(message: str) -> list[tuple[str, str, str]]:
@@ -875,9 +928,15 @@ def _extract_file_claims(message: str) -> list[tuple[str, str, str]]:
         for m in pattern.finditer(message):
             verb = m.group(1).lower()
             path = m.group(2)
-            # Negation window: look at up to 30 chars before the verb.
+            # Negation window: look at up to 30 chars before the match.
             preceding = message[max(0, m.start() - 30):m.start()]
             if _NEGATED_BEFORE.search(preceding):
+                continue
+            # …and at the subject→verb gap INSIDE the match, which the
+            # look-behind cannot reach (v0.25 — see _NEGATION_INNER).
+            # Empty for the English pattern, whose subject is `I` glued
+            # to the verb by whitespace only.
+            if _NEGATION_INNER.search(message[m.start():m.start(1)]):
                 continue
             ctype = "create" if (
                 verb in create_verbs_en or verb in create_verbs_zh

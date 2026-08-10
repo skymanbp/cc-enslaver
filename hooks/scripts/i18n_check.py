@@ -65,6 +65,19 @@ class Drift:
         return f"[{self.kind}] {loc}: {self.detail}"
 
 
+def _fence_run(stripped_line: str) -> str | None:
+    """Return the full fence run (e.g. '```' / '````'), or None.
+
+    Mirrors stop_guard._fence_marker — both files track markdown fences
+    and must agree, so the contract lives in both with the same shape.
+    """
+    for ch in ("`", "~"):
+        if stripped_line.startswith(ch * 3):
+            run = len(stripped_line) - len(stripped_line.lstrip(ch))
+            return ch * run
+    return None
+
+
 def _header_levels(text: str) -> list[int]:
     """Return the ATX header level of every heading outside code fences.
 
@@ -78,13 +91,19 @@ def _header_levels(text: str) -> list[int]:
     for line in text.splitlines():
         stripped = line.lstrip()
         # Toggle fenced code blocks. A fence closes only on the same
-        # 3-char marker (``` or ~~~) that opened it.
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            marker = stripped[:3]
+        # character AND a run at least as long as the opener — per
+        # CommonMark, a ``` line inside a ```` block is content, not a
+        # closing fence. (v0.25: the old 3-char truncation let a nested
+        # fence close its parent, after which the parent's remaining body
+        # was scanned as prose and any `#` comment in it registered as a
+        # phantom ATX header, corrupting the header-level sequence this
+        # checker compares across languages.)
+        marker = _fence_run(stripped)
+        if marker is not None:
             if not in_fence:
                 in_fence = True
                 fence_marker = marker
-            elif marker == fence_marker:
+            elif marker[0] == fence_marker[0] and len(marker) >= len(fence_marker):
                 in_fence = False
                 fence_marker = ""
             continue

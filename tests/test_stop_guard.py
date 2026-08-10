@@ -1234,6 +1234,80 @@ class TestSyncGateLayerI(_StopBase):
             msg=f"acked group must not re-block later turns, got {out!r}",
         )
 
+    def test_marker_in_grace_window_recovery_acks_group(self) -> None:
+        # v0.24 regression (the PRIMARY real-world flow): block at (i) →
+        # the recovery reply carries the sync marker but lands INSIDE the
+        # one-shot grace window. v0.23 returned from the grace path before
+        # reading the message, so the ack was silently lost and the same
+        # group re-blocked the next post-grace edit turn — the exact
+        # sticky-violation the sync_acked_groups contract promises to
+        # prevent ("one explicit answer per group per session").
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
+        self.assertIsNotNone(out, msg="unmet group must first block at (i)")
+        self.assertIn("FAILED at Layer (i)", out["reason"])
+        # Recovery reply one turn later (inside grace), WITH the marker.
+        # Merge-update the state (a fresh seed would wipe last_blocked_turn
+        # and defeat the grace window this test is about).
+        state_path = self.tmpdir / "sessions" / f"{self.sid}.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["last_edit_turn"] = 6
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        msg = (
+            self._full_compliance_message()
+            + "\n同步核对: prompts 侧核对过，无需变更。"
+        )
+        rc, out, _ = self._stop(msg, turn_count=6)
+        self.assertIsNone(out, msg=f"grace window must allow, got {out!r}")
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIn(
+            "rules-fanout", state.get("sync_acked_groups", []),
+            msg="the grace-path recovery marker must persist the ack",
+        )
+        # Post-grace edit turn WITHOUT the marker → must NOT re-block.
+        state["last_edit_turn"] = 9
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=9)
+        self.assertIsNone(
+            out,
+            msg=f"group answered in grace window re-blocked later: {out!r}",
+        )
+
+    def test_grace_marker_after_non_i_block_does_not_ack(self) -> None:
+        # v0.24 adversarial-review finding: the grace-path ack must be
+        # scoped to recoveries from a layer-(i) block. A reply that
+        # merely QUOTES a sync marker while recovering from an
+        # unrelated layer (here: (a), no evidence) must NOT silently
+        # acknowledge the pending group — the gate still owes the agent
+        # a real layer-(i) confrontation later.
+        self._write_gate(self.GATE_TOML)
+        edited = [self._project_file("rules/06-verify.md")]
+        self._seed_edit_turn_and_edited(5, edited)
+        rc, out, _ = self._stop("已解决。", turn_count=5)
+        self.assertIsNotNone(out)
+        self.assertIn("FAILED at Layer (a)", out["reason"])
+        # Recovery inside grace, incidentally containing a marker string.
+        state_path = self.tmpdir / "sessions" / f"{self.sid}.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["last_edit_turn"] = 6
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        msg = "补充证据中；顺带提一句，日志里出现过 sync-check 这个词。"
+        rc, out, _ = self._stop(msg, turn_count=6)
+        self.assertIsNone(out, msg=f"grace must still allow, got {out!r}")
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "rules-fanout", state.get("sync_acked_groups", []),
+            msg="a non-(i) recovery must not ack the sync group",
+        )
+        # Post-grace, the group must still be enforceable at (i).
+        state["last_edit_turn"] = 9
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        rc, out, _ = self._stop(self._full_compliance_message(), turn_count=9)
+        self.assertIsNotNone(out, msg="un-acked group must still block at (i)")
+        self.assertIn("FAILED at Layer (i)", out["reason"])
+
     def test_mode_all_requires_every_glob(self) -> None:
         gate = (
             '[[groups]]\n'

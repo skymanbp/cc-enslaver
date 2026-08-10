@@ -460,6 +460,25 @@ class TestPatchStyleEdit(_GuardTestBase):
         self.assertIsNotNone(out, msg="even new-file Write must DENY bare noqa")
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_denied_write_new_does_not_register_read(self) -> None:
+        # v0.24 regression: the Write-new branch used to call add_read
+        # BEFORE the content checks, so a DENIED Write still registered
+        # the path as "read" — granting read-before-edit authorization
+        # for a file whose content was never seen (if another process
+        # later created it, a Write-existing would sail past has_read).
+        import os
+        target = str(self.tmpdir / "brand_new_denied.py")
+        bare = "# " + "no" + "qa"
+        rc, out, _ = self._pre_write_with_content(target, "x = 1  " + bare + "\n")
+        self.assertIsNotNone(out, msg="the Write itself must DENY")
+        state = self._state()
+        if state is not None:
+            norm = os.path.normcase(os.path.realpath(target))
+            self.assertNotIn(
+                norm, state.get("read_files", []),
+                msg="a DENIED Write-new must NOT register the path as read",
+            )
+
 
 class TestRecordEditTurn(_GuardTestBase):
     """v0.11 — accepted Edits/Writes stamp last_edit_turn into state.
@@ -778,6 +797,38 @@ class TestRollingPatchInterception(_GuardTestBase):
         self.assertIsNone(out)
         self.assertEqual(self._counter(target), 0)
 
+    def test_write_new_resets_stale_rolling_counter(self) -> None:
+        # v0.24 regression: delete-and-recreate. A path accumulates small
+        # edits, the file is deleted externally, then a Write creates a
+        # fresh file at the same path. The stale counter used to survive,
+        # so the fresh file's FIRST small edit was denied as attempt #4.
+        # A new file is a fresh start — Write-new must clear the counter.
+        import os
+        target = str(self.tmpdir / "reborn.py")
+        norm = os.path.normcase(os.path.realpath(target))
+        sessions = self.tmpdir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{self.sid}.json").write_text(
+            json.dumps({
+                "session_id": self.sid,
+                "read_files": [],
+                "edits_per_file": {norm: 3},
+            }),
+            encoding="utf-8",
+        )
+        rc, out, _ = self._pre_write_with_content(target, "def f(): pass\n")
+        self.assertIsNone(out, msg=f"Write-new must allow, got {out!r}")
+        Path(target).write_text("def f(): pass\n", encoding="utf-8")
+        rc, out, _ = self._do_small_edit(target)
+        self.assertIsNone(
+            out,
+            msg=(
+                "first small edit after recreation must be attempt #1, "
+                f"not #4 from the stale counter — got {out!r}"
+            ),
+        )
+        self.assertEqual(self._counter(target), 1)
+
     def test_state_persists_edits_per_file_field(self) -> None:
         # Quick sanity check that the JSON field name is what other tools
         # (e.g. /cc-enslaver:gc, future tooling) can rely on.
@@ -985,6 +1036,53 @@ class TestHardcodedSecretEdit(_ContentDetectorBase):
         _, out, _ = self._pre_write_with_content(target, self._aws_key_line() + "\n")
         self.assertIsNone(out, msg=f".md must be exempt from rule 10, got {out!r}")
 
+    def test_annotation_type_name_value_is_allowed(self) -> None:
+        # v0.24: a Python forward-reference annotation like
+        # `password: "SecretStr"` is a TYPE NAME, not a credential — the
+        # pure-alpha CamelCase value shape must not be flagged (real
+        # secrets carry digits / symbols). False positives violate the
+        # repo's "prefer false negatives" detector philosophy.
+        target = self._read_py_target()
+        line = ("pass" + "word") + ": " + self.Q + "Secret" + "Str" + self.Q
+        _, out, _ = self._pre_edit_with_new_string(target, line + "\n")
+        self.assertIsNone(
+            out, msg=f"type-annotation value must allow, got {out!r}",
+        )
+
+    def test_camel_case_value_with_digits_still_denied(self) -> None:
+        # Guard against over-widening the v0.24 type-name allowance: a
+        # value with digits is not a type name and must still DENY.
+        target = self._read_py_target()
+        line = ("pass" + "word") + " = " + self.Q + "Hunter" + "2Secret9" + self.Q
+        _, out, _ = self._pre_edit_with_new_string(target, line + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_requirements_txt_is_scannable(self) -> None:
+        # v0.24: requirements*.txt is a dependency manifest, not prose —
+        # an index URL with embedded credentials is a real leak vector
+        # that the blanket .txt exemption used to wave through.
+        target = str(self.tmpdir / "requirements.txt")
+        line = (
+            "--extra-index-url https:" + "//" + "build:" + "s3cr3t@"
+            + "pkgs.host.test/simple"
+        )
+        _, out, _ = self._pre_write_with_content(target, line + "\n")
+        self._assert_deny(out, "rule 10")
+
+    def test_plain_txt_stays_exempt(self) -> None:
+        # The v0.24 requirements carve-out must not shrink the general
+        # .txt prose exemption.
+        target = str(self.tmpdir / "notes.txt")
+        _, out, _ = self._pre_write_with_content(target, self._aws_key_line() + "\n")
+        self.assertIsNone(out, msg=f"plain .txt must stay exempt, got {out!r}")
+
+    def test_asciidoc_long_extension_is_exempt(self) -> None:
+        # v0.24: .asciidoc is the same format as the already-exempt
+        # .adoc — both spellings must behave identically.
+        target = str(self.tmpdir / "guide.asciidoc")
+        _, out, _ = self._pre_write_with_content(target, self._pem_header_line() + "\n")
+        self.assertIsNone(out, msg=f".asciidoc must be exempt, got {out!r}")
+
 
 class TestPathDependencyEdit(_ContentDetectorBase):
     """v0.22 — rule 11 machine-specific path-dependency content detector."""
@@ -1035,6 +1133,154 @@ class TestPathDependencyEdit(_ContentDetectorBase):
         target = str(self.tmpdir / "README.md")
         _, out, _ = self._pre_write_with_content(target, self._win_path_line() + "\n")
         self.assertIsNone(out, msg=f".md must be exempt from rule 11, got {out!r}")
+
+    def test_url_route_home_segment_is_allowed(self) -> None:
+        # v0.24: `/home/<x>/` glued to a hostname is a URL route, not a
+        # filesystem path — must not be flagged as a path dependency.
+        target = self._read_py_target()
+        line = (
+            "URL = " + self.Q + "https:" + "//" + "host.test"
+            + "/ho" + "me/" + "alice/dashboard/" + self.Q
+        )
+        _, out, _ = self._pre_edit_with_new_string(target, line + "\n")
+        self.assertIsNone(out, msg=f"URL route must allow, got {out!r}")
+
+    def test_file_scheme_home_path_still_denied(self) -> None:
+        # Guard against over-widening the v0.24 URL allowance: a
+        # file:///home/... URI IS a machine path and must still DENY
+        # (the segment before /home/ is a slash, not a hostname char).
+        target = self._read_py_target()
+        line = (
+            "p = " + self.Q + "file:" + "//" + "/ho" + "me/"
+            + "bob/data/" + self.Q
+        )
+        _, out, _ = self._pre_edit_with_new_string(target, line + "\n")
+        self._assert_deny(out, "rule 11")
+
+
+class TestReaderWriterCollision(_GuardTestBase):
+    """v0.24 — saves must survive concurrent readers (C8).
+
+    The v0.23 session lock serialized writer-vs-writer only; every read
+    path (has_read / was_just_blocked / get_edited_files / ...) called
+    load() WITHOUT the lock. On Windows, os.replace against a file a
+    reader currently holds open fails with PermissionError (CPython's
+    open() does not pass FILE_SHARE_DELETE), the mutator raised, the
+    hook failed open, and the mutation was silently lost — measured
+    300/300 lost saves under 8 tight-loop readers, with orphan
+    `<sid>.json.<pid>.tmp` files left behind (observed in live session
+    state directories). The v0.24 fix routes the read accessors through
+    the session lock (state._load_shared) so hook readers and writers
+    serialize, plus a save()-side os.replace retry against
+    non-cooperating external readers.
+
+    The reader threads here call the real production read accessor
+    (has_read), so this pins the end-to-end contract: with the v0.23
+    lock-free accessor this test was red (192/200 saves lost); with the
+    locked accessor every save must land. POSIX rename has no such
+    restriction, so the Windows CI leg is the one that pins the
+    regression.
+    """
+
+    def test_saves_survive_concurrent_lockfree_readers(self) -> None:
+        import os
+        import threading
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from lib import state as state_lib
+
+        old_env = os.environ.get("CLAUDE_PLUGIN_DATA")
+        os.environ["CLAUDE_PLUGIN_DATA"] = str(self.tmpdir)
+        try:
+            state_lib.add_read(self.sid, str(self.tmpdir / "seed.txt"))
+            state_file = (
+                self.tmpdir / "sessions" / f"{self.sid}.json"
+            )
+            stop = threading.Event()
+            probe = str(self.tmpdir / "seed.txt")
+
+            def reader() -> None:
+                while not stop.is_set():
+                    # The real production read path (locked since v0.24).
+                    state_lib.has_read(self.sid, probe)
+
+            threads = [
+                threading.Thread(target=reader, daemon=True)
+                for _ in range(4)
+            ]
+            for t in threads:
+                t.start()
+            n = 200
+            for i in range(n):
+                state_lib.add_read(self.sid, str(self.tmpdir / f"f_{i}.txt"))
+            stop.set()
+            for t in threads:
+                t.join(timeout=5)
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            recorded = sum(
+                1 for p in state.get("read_files", []) if "f_" in p
+            )
+            self.assertEqual(
+                recorded, n,
+                msg=(
+                    f"lost {n - recorded}/{n} saves to reader collisions — "
+                    "the os.replace retry regressed"
+                ),
+            )
+            leftovers = list((self.tmpdir / "sessions").glob("*.tmp"))
+            self.assertEqual(
+                leftovers, [],
+                msg=f"orphan temp files left by failed saves: {leftovers}",
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("CLAUDE_PLUGIN_DATA", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_DATA"] = old_env
+
+
+class TestUnreadableStateMutation(_GuardTestBase):
+    """v0.24 adversarial-review finding: a mutator that cannot read the
+    existing state file must SKIP its mutation, not proceed with the
+    empty fallback record — saving that record back would erase every
+    recorded read, edit, baseline and counter of the session (full
+    amnesia amplified through the lock). Losing one mutation is the
+    strictly smaller failure.
+    """
+
+    def test_unreadable_state_skips_mutation_instead_of_wiping(self) -> None:
+        import os
+        from unittest import mock
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from lib import state as state_lib
+
+        old_env = os.environ.get("CLAUDE_PLUGIN_DATA")
+        os.environ["CLAUDE_PLUGIN_DATA"] = str(self.tmpdir)
+        try:
+            seeded = str(self.tmpdir / "seeded.txt")
+            state_lib.add_read(self.sid, seeded)
+            state_file = self.tmpdir / "sessions" / f"{self.sid}.json"
+            before = state_file.read_text(encoding="utf-8")
+            # Every read_text raises → _load_for_mutation returns None
+            # (after its one retry) → the mutator must bail out.
+            with mock.patch.object(
+                Path, "read_text", side_effect=OSError("scanner holds file"),
+            ):
+                state_lib.add_read(self.sid, str(self.tmpdir / "other.txt"))
+            after = state_file.read_text(encoding="utf-8")
+            self.assertEqual(
+                before, after,
+                msg=(
+                    "an unreadable state file must not be overwritten by "
+                    "an empty-record save — the session would lose all "
+                    "recorded reads/edits/baselines"
+                ),
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("CLAUDE_PLUGIN_DATA", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_DATA"] = old_env
 
 
 if __name__ == "__main__":

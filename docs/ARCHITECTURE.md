@@ -134,19 +134,30 @@ State files are git-ignored (`.gitignore` line 26). Paths within state are
 canonicalised via `os.path.realpath` + `os.path.normcase` so case-insensitive
 filesystems (Windows) compare correctly.
 
-**Concurrency (v0.23)**: every hook invocation is a separate OS process, and
-Claude Code fires parallel tool calls as concurrent hook subprocesses sharing
-one session file. Every state *mutation* therefore holds a per-session
-cross-process advisory lock (`_session_lock`: `msvcrt.locking` on Windows /
-`fcntl.flock` on POSIX, on a sibling `<sid>.json.lock` file) across its
-load→mutate→save cycle, and `save()` is atomic (unique temp file +
+**Concurrency (v0.23, completed v0.24)**: every hook invocation is a separate
+OS process, and Claude Code fires parallel tool calls as concurrent hook
+subprocesses sharing one session file. Every state *mutation* holds a
+per-session cross-process advisory lock (`_session_lock`: `msvcrt.locking` on
+Windows / `fcntl.flock` on POSIX, on a sibling `<sid>.json.lock` file) across
+its load→mutate→save cycle, and `save()` is atomic (unique temp file +
 `os.replace`) so readers can never observe a torn JSON. Measured before the
-fix: 10 parallel `PreToolUse(Read)` hooks lost 2-3 of 10 recorded paths per
-round — the visible symptom was a false rule-04 DENY immediately after the
-file WAS read. Lock acquisition failure degrades to the old unlocked
-behavior with a stderr diagnostic (failing-open, never a bricked agent).
-`gc_state.py` prunes `*.json` only, so lock files are never deleted out
-from under a holder.
+v0.23 fix: 10 parallel `PreToolUse(Read)` hooks lost 2-3 of 10 recorded paths
+per round — the visible symptom was a false rule-04 DENY immediately after the
+file WAS read. **v0.24 closed the other half**: the v0.23 read accessors were
+lock-free, and on Windows a writer's `os.replace` fails with `PermissionError`
+while ANY process holds the target open (CPython's `open()` does not request
+`FILE_SHARE_DELETE`) — the hooks' own readers collided with their own writers
+(measured 300/300 lost saves under tight-loop readers; live state dirs carried
+orphan `<sid>.json.<pid>.tmp` debris). Read accessors now route through the
+same lock (`_load_shared`), `save()` retries the replace with a short backoff
+against non-cooperating external readers (antivirus / indexers) and unlinks
+its temp file if it ever gives up, and `load()` retries once on a transient
+`OSError` (a bare degrade returns an empty record, which a locked mutator
+would save back — full session amnesia). Lock acquisition failure still
+degrades to unlocked behavior with a stderr diagnostic (failing-open, never a
+bricked agent). `gc_state.py` prunes `*.json` session files and (v0.24)
+sweeps day-old orphan `*.tmp` files; lock files are never deleted out from
+under a holder.
 
 #### Failing-open
 
@@ -164,7 +175,7 @@ the last assistant entry in `payload.transcript_path`).
 
 | Step | Condition | Action |
 |------|-----------|--------|
-| 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`; **v0.23**: production Stop payloads carry no turn_count — verified live — so a monotonic turn number is synthesized from the per-session `stop_counter`, which restores the grace arithmetic in production) | Allow |
+| 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`; **v0.23**: production Stop payloads carry no turn_count — verified live — so a monotonic turn number is synthesized from the per-session `stop_counter`, which restores the grace arithmetic in production). **v0.24**: the message is now extracted *before* this guard, and a grace-window reply carrying a sync marker records its layer-(i) group acknowledgement — but only when the block being recovered from was itself at layer (i) (`last_blocked_layer`), so a reply merely quoting "sync-check" while recovering from an unrelated layer cannot ack anything. The block→recover-with-`同步核对` flow used to lose the ack entirely, so the answered group re-blocked after the grace expired | Allow |
 | 1 | No done-claim regex matched | Allow |
 | 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (`HEDGED_DONE_REASON`) |
 | 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
@@ -341,14 +352,15 @@ blocks resume.
 envelope used by `PreToolUse`. Verified against
 https://code.claude.com/docs/en/hooks.md.
 
-**Why heuristic, not file-claim verification**: deep "I edited X" →
-`git diff` / mtime verification was the original roadmap idea. v0.6.0
-deliberately ships the lighter heuristic — natural-language file-path
+**Why heuristic first, file-claim verification later**: deep "I edited X"
+→ `git diff` / mtime verification was the original roadmap idea. v0.6.0
+deliberately shipped the lighter heuristic — natural-language file-path
 extraction is fragile (high false positives), while done-claim-without-
 evidence is robust (a careful agent always cites evidence per rule 05,
 so this only fires on actual laziness). v0.7.0 deepened the rule-06
-side (hedge + self-quiz); v0.8.0 added the rule-07 fidelity layer.
-File-claim verification is now a v0.9+ candidate.
+side (hedge + self-quiz); v0.8.0 added the rule-07 fidelity layer; the
+file-claim verification itself landed as layer (g) in v0.16 with the
+conservative mtime-baseline design described above.
 
 #### `Edit` / `Write` patch-style content blocking (v0.11.0)
 
@@ -401,12 +413,18 @@ Two scoping refinements keep false positives low, honouring the repo's
   `process.env` reads) are skipped by construction. "Essential"
   hardcoding declares itself; lazy hardcoding does not.
 - **Prose-doc + lockfile targets are exempt** (`_is_scannable_target`
-  returns False for `.md` / `.markdown` / `.rst` / `.txt` / `.adoc` and
-  `*.lock` / `package-lock.json` / `yarn.lock` / `poetry.lock` /
-  `Cargo.lock`). The user framed this as "写完**代码**后" detection, and
-  this repo's own docs are full of example paths and values — scanning
-  them would self-trip. The rule-09 patch check keeps its all-files
-  behaviour; only these two new detectors are gated.
+  returns False for `.md` / `.markdown` / `.rst` / `.txt` / `.adoc` /
+  `.asciidoc` and `*.lock` / `package-lock.json` / `yarn.lock` /
+  `poetry.lock` / `Cargo.lock`). The user framed this as "写完**代码**后"
+  detection, and this repo's own docs are full of example paths and
+  values — scanning them would self-trip. The rule-09 patch check keeps
+  its all-files behaviour; only these two new detectors are gated.
+  v0.24 refinements: `requirements*.txt` / `constraints*.txt` stay
+  scannable despite `.txt` (dependency manifests are a real
+  credential-leak vector); a pure-alpha CamelCase secret *value*
+  (`password: "SecretStr"` — a Python forward-reference annotation) is
+  skipped; and the POSIX `/home/…` pattern rejects matches glued to a
+  hostname (`https://host/home/alice/…` is a route, not a path).
 
 Unlike rule 09, rule 10 / 11 have **no Stop layer** — content detectors
 are `PreToolUse`-only by precedent (the sibling `# noqa` / `@ts-ignore`

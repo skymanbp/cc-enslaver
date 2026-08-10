@@ -25,6 +25,7 @@ import contextlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 if os.name == "nt":
@@ -33,6 +34,13 @@ else:
     import fcntl
 
 _PLUGIN_NAME = "cc-enslaver"
+
+# v0.24 — os.replace retry budget (see save()). The reader-collision
+# window is micro-to-milliseconds; 8 attempts with a growing backoff
+# (5ms, 10ms, … ≈ 180ms worst case) closes it without ever stalling a
+# hook noticeably.
+_REPLACE_ATTEMPTS = 8
+_REPLACE_BACKOFF_BASE = 0.005
 
 
 def state_dir() -> Path:
@@ -83,16 +91,51 @@ def _state_file(session_id: str) -> Path:
     return state_dir() / _safe_session_filename(session_id)
 
 
-def load(session_id: str) -> dict:
-    """Load the session's state, or return a fresh empty record."""
+def _load_for_mutation(session_id: str) -> dict | None:
+    """Load for a locked read-modify-write cycle; None = do not mutate.
+
+    v0.24: a transient OSError (e.g. an antivirus scanner briefly
+    holding the file on Windows) is retried once. If the file exists
+    but STILL cannot be read, this returns None and the mutator must
+    skip its mutation entirely: proceeding with the empty fallback
+    record would save it back over the real file — erasing every
+    recorded read, edit, baseline and counter of the session. Losing
+    one mutation is the strictly smaller failure (same failing-open
+    direction as the lock). A genuinely corrupt file (JSONDecodeError)
+    still resets to a fresh record immediately — that file's content is
+    already gone, so the reset loses nothing extra.
+    """
     f = _state_file(session_id)
     if not f.exists():
         return {"session_id": session_id, "read_files": []}
-    try:
-        return json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        # A corrupt state file should not block the agent. Reset it.
+    for attempt in (0, 1):
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # Rationale: a truly corrupt state file must never block
+            # the agent (failing-open) — reset to a fresh record.
+            return {"session_id": session_id, "read_files": []}
+        except OSError:
+            if attempt == 0:
+                time.sleep(0.01)
+    sys.stderr.write(
+        f"[cc-enslaver] state for {session_id!r} unreadable after retry; "
+        f"skipping this mutation (failing open)\n"
+    )
+    return None
+
+
+def load(session_id: str) -> dict:
+    """Load the session's state, or return a fresh empty record.
+
+    Read-only counterpart of _load_for_mutation: an unreadable file
+    degrades to an empty record, which is safe here because accessors
+    never save it back.
+    """
+    state = _load_for_mutation(session_id)
+    if state is None:
         return {"session_id": session_id, "read_files": []}
+    return state
 
 
 def save(state: dict) -> None:
@@ -103,6 +146,23 @@ def save(state: dict) -> None:
     fresh empty record — i.e. amnesia about every recorded read). The
     temp name embeds the pid so two unlocked writers (the failing-open
     path of `_session_lock`) cannot collide on the same temp file.
+
+    Windows retry (v0.24): os.replace against a target a concurrent
+    process holds open fails with PermissionError (sharing violation),
+    because CPython's open() does not request FILE_SHARE_DELETE. In
+    v0.23 the read paths were lock-free (has_read / was_just_blocked /
+    get_edited_files / … called load() without the session lock), so
+    the hooks' own readers collided with their own writers — measured
+    300/300 lost saves under 8 tight-loop readers, and live session
+    dirs carried orphan `<sid>.json.<pid>.tmp` files from exactly these
+    failures (the v0.23 lock only serialized writer-vs-writer). v0.24
+    removes the self-collision at the root by routing read accessors
+    through the same lock (_load_shared); this retry remains as
+    defense-in-depth against non-cooperating EXTERNAL readers
+    (antivirus / indexers / backup agents), whose open windows are
+    micro-to-milliseconds. If the window somehow persists, give up on
+    THIS save (failing open, same contract as the lock) and remove the
+    temp file so no orphans pile up.
     """
     f = _state_file(state["session_id"])
     tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
@@ -110,7 +170,26 @@ def save(state: dict) -> None:
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    os.replace(tmp, f)
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, f)
+            return
+        except PermissionError:
+            # Windows sharing violation from a concurrent lock-free
+            # reader; back off briefly and retry (see docstring).
+            time.sleep(_REPLACE_BACKOFF_BASE * (attempt + 1))
+    try:
+        tmp.unlink()
+    except OSError:
+        # Rationale: cleanup-of-cleanup — the temp file is cosmetic
+        # debris; failing to remove it must not raise past the
+        # failing-open save contract.
+        pass
+    sys.stderr.write(
+        f"[cc-enslaver] state save abandoned after {_REPLACE_ATTEMPTS} "
+        f"os.replace attempts (concurrent reader held {f.name}); "
+        f"this mutation is lost (failing open)\n"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -178,10 +257,31 @@ def _session_lock(session_id: str):
             fh.close()
 
 
+def _load_shared(session_id: str) -> dict:
+    """Load session state under the session lock (v0.24 read path).
+
+    Why readers lock too: on Windows, a writer's os.replace fails with
+    PermissionError while ANY process holds the target open, and
+    CPython's open() does not request FILE_SHARE_DELETE. v0.23 locked
+    only the mutators, so the hooks' own lock-free readers collided
+    with their own writers — measured 300/300 lost saves under
+    tight-loop readers. Serializing reads through the same lock removes
+    the self-collision entirely at the design level; the save() retry
+    remains as defense-in-depth against non-cooperating external
+    readers (antivirus / indexers / backup agents). Mutators must NOT
+    call this (they already hold the lock; Windows byte-range locks are
+    not reentrant across handles) — they keep calling plain load().
+    """
+    with _session_lock(session_id):
+        return load(session_id)
+
+
 def add_read(session_id: str, file_path: str) -> None:
     """Mark a file as Read (or Written) in this session."""
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         norm = normalize_path(file_path)
         if norm not in state["read_files"]:
             state["read_files"].append(norm)
@@ -190,7 +290,7 @@ def add_read(session_id: str, file_path: str) -> None:
 
 def has_read(session_id: str, file_path: str) -> bool:
     """True if this session has previously Read or Written this file."""
-    state = load(session_id)
+    state = _load_shared(session_id)
     return normalize_path(file_path) in state.get("read_files", [])
 
 
@@ -201,15 +301,33 @@ def has_read(session_id: str, file_path: str) -> bool:
 # evidence, we block the Stop and force one more turn. To avoid an infinite
 # loop, we record that we just blocked, and refuse to block twice in a row.
 # --------------------------------------------------------------------------- #
-def record_stop_block(session_id: str, turn_count: int | None) -> None:
+def record_stop_block(
+    session_id: str, turn_count: int | None, layer_id: str | None = None,
+) -> None:
     """Mark that this session's Stop was blocked at the given turn_count.
 
     The next Stop check consults `was_just_blocked` to skip re-blocking.
+    `layer_id` (v0.24, e.g. "(i)") records WHICH layer blocked: the
+    grace path only honors a sync-marker acknowledgement when the block
+    being recovered from was actually the sync gate — otherwise a reply
+    that merely quotes "sync-check" while recovering from an unrelated
+    layer would silently ack every pending group.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         state["last_blocked_turn"] = turn_count
+        if layer_id is not None:
+            state["last_blocked_layer"] = layer_id
         save(state)
+
+
+def get_last_blocked_layer(session_id: str) -> str | None:
+    """Layer id ("(a)".."(i)") of the most recent Stop block, or None."""
+    state = _load_shared(session_id)
+    layer = state.get("last_blocked_layer")
+    return layer if isinstance(layer, str) else None
 
 
 def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
@@ -224,7 +342,7 @@ def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
     return True whenever any prior block was recorded — preferring false
     negatives (no block) to false positives (infinite loop).
     """
-    state = load(session_id)
+    state = _load_shared(session_id)
     last = state.get("last_blocked_turn")
     if last is None:
         return False
@@ -279,7 +397,9 @@ def record_edit_turn(session_id: str, turn_count: int | None) -> None:
         field). Preserves the original exact-match semantics.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         state["edited_since_last_stop"] = True
         if turn_count is not None:
             state["last_edit_turn"] = turn_count
@@ -294,7 +414,9 @@ def clear_edit_flag(session_id: str) -> None:
     must still face the edit-gated layers.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         if state.get("edited_since_last_stop"):
             state["edited_since_last_stop"] = False
             save(state)
@@ -313,7 +435,7 @@ def did_edit_this_turn(session_id: str, turn_count: int | None) -> bool:
     A read-only / pure-analysis turn never trips the edit-gated layers,
     regardless of how the agent phrases the closing message.
     """
-    state = load(session_id)
+    state = _load_shared(session_id)
     if state.get("edited_since_last_stop"):
         return True
     if turn_count is None:
@@ -334,7 +456,9 @@ def next_stop_turn(session_id: str) -> int:
     unchanged.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return 0
         counter = int(state.get("stop_counter", 0)) + 1
         state["stop_counter"] = counter
         save(state)
@@ -355,7 +479,9 @@ def next_stop_turn(session_id: str) -> int:
 def record_edited_file(session_id: str, file_path: str) -> None:
     """Add `file_path` to this session's edited-file set (idempotent)."""
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         edited = state.setdefault("edited_files", [])
         norm = normalize_path(file_path)
         if norm not in edited:
@@ -365,7 +491,7 @@ def record_edited_file(session_id: str, file_path: str) -> None:
 
 def get_edited_files(session_id: str) -> list[str]:
     """Return the normalized paths of every file edited this session."""
-    state = load(session_id)
+    state = _load_shared(session_id)
     edited = state.get("edited_files") or []
     return [p for p in edited if isinstance(p, str)]
 
@@ -380,7 +506,7 @@ def get_sync_acked_groups(session_id: str) -> list[str]:
     are therefore remembered per session: one explicit answer per group
     is enough.
     """
-    state = load(session_id)
+    state = _load_shared(session_id)
     acked = state.get("sync_acked_groups") or []
     return [g for g in acked if isinstance(g, str)]
 
@@ -390,7 +516,9 @@ def ack_sync_groups(session_id: str, group_names: list[str]) -> None:
     if not group_names:
         return
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         acked = state.setdefault("sync_acked_groups", [])
         changed = False
         for name in group_names:
@@ -402,48 +530,59 @@ def ack_sync_groups(session_id: str, group_names: list[str]) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Rolling-patch counter (v0.13.0 — rule 09 hard interception).
+# Rolling-patch counter (v0.13.0 — rule 09 hard interception; API made
+# atomic in v0.24).
 #
 # Counter semantics:
-#   - get_edit_count(sid, path) → current count of small edits applied
-#     to `path` in this session (0 if never edited or after reset).
-#   - record_small_edit(sid, path) → increment by 1, return new count.
-#     Called only when the guard has decided to ALLOW a small edit.
+#   - try_record_small_edit(sid, path, threshold) → atomically decide
+#     AND record one small edit: refuse (no increment) when the counter
+#     would reach `threshold`, else increment. One lock acquisition
+#     covers both, closing the v0.13-v0.23 check-then-act race where two
+#     parallel hooks both read count=2, both allowed, and the forbidden
+#     4th small edit landed.
 #   - reset_edit_count(sid, path) → clear the counter, called on a
-#     systematic rewrite (≥ 50 lines / ≥ 1500 chars on new_string).
+#     systematic rewrite (≥ 50 lines / ≥ 1500 chars on new_string) and
+#     on Write-new (a fresh file has no rolling history — v0.24).
 #
-# The DENY decision lives in read_guard (which has all the classification
-# logic); this module just stores the count. Threshold = 4 means the 4th
-# small edit attempt is denied — the recorded count stays at 3 until a
-# systematic rewrite resets it, so subsequent small-edit attempts also
-# DENY (the agent must do a systematic change to recover).
+# The classification logic (small / medium / systematic) lives in
+# read_guard; this module owns the counter storage + the atomic
+# threshold decision. Threshold = 4 means the 4th small edit attempt is
+# refused — the recorded count stays at 3 until a systematic rewrite
+# resets it, so subsequent small-edit attempts also DENY.
 # --------------------------------------------------------------------------- #
-def get_edit_count(session_id: str, file_path: str) -> int:
-    """Return the small-edit count for `file_path` in this session."""
-    state = load(session_id)
-    counters = state.get("edits_per_file") or {}
-    return int(counters.get(normalize_path(file_path), 0))
+def try_record_small_edit(
+    session_id: str, file_path: str, threshold: int,
+) -> tuple[bool, int]:
+    """Atomically decide-and-record one small edit against `threshold`.
 
-
-def record_small_edit(session_id: str, file_path: str) -> int:
-    """Increment the small-edit counter for `file_path`; return new count.
-
-    Should only be called after the guard has decided to ALLOW the edit
-    (i.e., when `get_edit_count(...) + 1 < ROLLING_PATCH_THRESHOLD`).
+    Returns (allowed, prior_count). When prior_count + 1 >= threshold
+    the edit is refused and the counter is NOT incremented (a refused
+    edit never lands; counting it would double-count and silently
+    disable the threshold). Decision and increment share one lock
+    acquisition — the previous two-step API (read the count, then
+    increment in a separate locked call) let two parallel hooks both
+    observe count=2 and both allow.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return (True, 0)
         counters = state.setdefault("edits_per_file", {})
         norm = normalize_path(file_path)
-        counters[norm] = int(counters.get(norm, 0)) + 1
+        prior = int(counters.get(norm, 0))
+        if prior + 1 >= threshold:
+            return (False, prior)
+        counters[norm] = prior + 1
         save(state)
-        return counters[norm]
+        return (True, prior)
 
 
 def reset_edit_count(session_id: str, file_path: str) -> None:
     """Clear the small-edit counter for `file_path` (systematic rewrite)."""
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         counters = state.get("edits_per_file") or {}
         norm = normalize_path(file_path)
         if norm in counters:
@@ -486,7 +625,9 @@ def record_baseline(session_id: str, file_path: str) -> None:
     modifications.
     """
     with _session_lock(session_id):
-        state = load(session_id)
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
         baselines = state.setdefault("baseline_mtimes", {})
         norm = normalize_path(file_path)
         if norm in baselines:
@@ -506,7 +647,7 @@ def get_baseline(session_id: str, file_path: str) -> tuple[bool, float | None]:
     have_baseline=True + mtime=None → file did NOT exist at baseline time.
     have_baseline=True + mtime=float → file existed with that mtime.
     """
-    state = load(session_id)
+    state = _load_shared(session_id)
     baselines = state.get("baseline_mtimes") or {}
     norm = normalize_path(file_path)
     if norm not in baselines:

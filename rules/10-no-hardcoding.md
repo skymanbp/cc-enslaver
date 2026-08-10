@@ -51,10 +51,14 @@ detector for them would fire constantly on legitimate code.
 |---|---|---|---|
 | **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` / `content` contains an unjustified hardcoded secret | **DENY** |
 
-Prose docs (`.md` / `.markdown` / `.rst` / `.txt` / `.adoc`) and lockfiles
-(`*.lock`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `Cargo.lock`,
-…) are **exempt** — they legitimately carry example values and are
-machine-generated. The detector targets freshly authored *code*.
+Prose docs (`.md` / `.markdown` / `.rst` / `.txt` / `.adoc` /
+`.asciidoc`) and lockfiles (`*.lock`, `package-lock.json`, `yarn.lock`,
+`poetry.lock`, `Cargo.lock`, …) are **exempt** — they legitimately carry
+example values and are machine-generated. The detector targets freshly
+authored *code*. One carve-out inside the exemption (v0.24):
+`requirements*.txt` / `constraints*.txt` are dependency manifests, not
+prose — an index URL with embedded credentials there is a real leak
+vector — so they stay scannable despite the `.txt` extension.
 
 ### Detector catalog
 
@@ -71,6 +75,9 @@ placeholder value or an adjacent "why" rationale**, are intercepted:
 A value is treated as a harmless placeholder (not flagged) when it
 contains `example` / `changeme` / `your-` / `<…>` / `${…}` / `dummy` /
 `redacted`, or is an env-read (`os.environ[…]`, `getenv`, `process.env`).
+A pure-alpha CamelCase value (`^[A-Z][A-Za-z]*$`) is also skipped
+(v0.24): `password: "SecretStr"` is a Python forward-reference type
+annotation, not a credential — real secrets carry digits or symbols.
 
 ### Escape hatch — operationalizing "non-essential"
 

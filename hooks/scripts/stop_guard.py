@@ -748,6 +748,41 @@ def _has_sync_marker(text: str) -> bool:
     return any(p.search(text) for p in SYNC_MARKERS)
 
 
+def _pending_sync_violations(
+    session_id: str, cwd: str | None,
+) -> list:
+    """Sync-gate violations not yet acknowledged this session.
+
+    Shared by layer (i) and the one-shot grace path (v0.24): both need
+    "which violated groups has the agent NOT answered yet", filtered
+    against the session's `sync_acked_groups`.
+    """
+    violations = sync_gate_lib.evaluate(
+        state_lib.get_edited_files(session_id), cwd,
+    )
+    if not violations:
+        return []
+    acked = set(state_lib.get_sync_acked_groups(session_id))
+    return [v for v in violations if v.group.name not in acked]
+
+
+def _ack_pending_sync_groups(session_id: str, cwd: str | None) -> None:
+    """Record every currently-pending violated group as acknowledged.
+
+    Called when a reply carries a sync marker. v0.24 fix: the one-shot
+    grace path used to return BEFORE the message was even read, so a
+    recovery reply that answered a layer-(i) block with a `同步核对:`
+    marker never had its acknowledgement persisted — and the same group
+    re-blocked the next post-grace edit turn, breaking the "one explicit
+    answer per group per session" contract the ack exists to provide.
+    """
+    pending = _pending_sync_violations(session_id, cwd)
+    if pending:
+        state_lib.ack_sync_groups(
+            session_id, [v.group.name for v in pending],
+        )
+
+
 # --------------------------------------------------------------------------- #
 # v0.16.0 — Layer (g): file-claim verification (rule 01 + 06).
 #
@@ -1413,20 +1448,40 @@ def main() -> int:
             # `edited_since_last_stop` flag (see lib/state.py).
             turn_count = state_lib.next_stop_turn(session_id)
 
-        # One-shot guard: if we just blocked, allow this Stop
-        # unconditionally. Every ALLOWED Stop is a turn boundary →
-        # clear the edit flag so the next turn starts clean; blocked
-        # Stops keep it (the recovery reply is the same logical turn).
-        if state_lib.was_just_blocked(session_id, turn_count):
-            state_lib.clear_edit_flag(session_id)
-            return 0
-
         # Get the message text, preferring the direct payload field.
+        # Extracted BEFORE the one-shot guard (v0.24): the grace path
+        # must also see the reply — a recovery answer to a layer-(i)
+        # block carries its sync marker here, and returning early used
+        # to drop that acknowledgement on the floor (the group then
+        # re-blocked after the grace window despite having been
+        # explicitly answered).
         message = payload.get("assistant_message") or ""
         if not message and payload.get("transcript_path"):
             message = _last_assistant_message_from_transcript(
                 payload["transcript_path"]
             )
+
+        # One-shot guard: if we just blocked, allow this Stop
+        # unconditionally — but first honor an explicit sync
+        # acknowledgement in the recovery reply (see above). The ack is
+        # scoped to recoveries from a layer-(i) block specifically
+        # (last_blocked_layer): a reply that merely QUOTES "sync-check"
+        # while recovering from an unrelated layer must not silently
+        # ack every pending group — only a reply answering the sync
+        # gate itself is an answer. Every ALLOWED Stop is a turn
+        # boundary → clear the edit flag so the next turn starts clean;
+        # blocked Stops keep it (the recovery reply is the same logical
+        # turn).
+        if state_lib.was_just_blocked(session_id, turn_count):
+            if (
+                message
+                and _has_sync_marker(message)
+                and state_lib.get_last_blocked_layer(session_id) == "(i)"
+            ):
+                _ack_pending_sync_groups(session_id, payload.get("cwd"))
+            state_lib.clear_edit_flag(session_id)
+            return 0
+
         if not message:
             state_lib.clear_edit_flag(session_id)
             return 0  # nothing to inspect
@@ -1448,7 +1503,7 @@ def main() -> int:
         # Even if evidence is present, hedging undermines the claim — block.
         hedge_pair = _has_hedge_near_done(message)
         if hedge_pair is not None:
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(b)")
             hedge_phrase = (
                 hedge_pair[0]
                 if hedge_pair[1] == matched or matched in hedge_pair[1]
@@ -1464,7 +1519,7 @@ def main() -> int:
 
         # v0.6.0 base layer (a): no evidence at all.
         if not _has_evidence(message):
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(a)")
             _emit_block(_build_block_reason(
                 "(a)", edited_this_turn,
                 _RECOVERY_A,
@@ -1475,7 +1530,7 @@ def main() -> int:
         # v0.7.0 deep layer (c): evidence present but rule-06 self-quiz
         # neither named nor answered (>=2 of 4 questions).
         if not _has_self_quiz_or_marker(message):
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(c)")
             _emit_block(_build_block_reason(
                 "(c)", edited_this_turn,
                 _RECOVERY_C,
@@ -1488,7 +1543,7 @@ def main() -> int:
         # Different axis from (c): coverage / standard / no-degrade
         # versus root-cause / re-trigger / boundary.
         if not _has_fidelity_marker_or_quiz(message):
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(d)")
             _emit_block(_build_block_reason(
                 "(d)", edited_this_turn,
                 _RECOVERY_D,
@@ -1506,7 +1561,7 @@ def main() -> int:
             # closing marker. Pass if either an explicit rule-08 marker
             # OR ≥ 3 of six rule-02 keywords are present.
             if not _has_rule08_marker_or_keywords(message):
-                state_lib.record_stop_block(session_id, turn_count)
+                state_lib.record_stop_block(session_id, turn_count, "(e)")
                 _emit_block(_build_block_reason(
                     "(e)", edited_this_turn,
                     _RECOVERY_E,
@@ -1518,7 +1573,7 @@ def main() -> int:
             # Pass if either an explicit rule-09 marker OR all three of
             # (root-cause + impact + solution) keywords are present.
             if not _has_rule09_marker_or_triplet(message):
-                state_lib.record_stop_block(session_id, turn_count)
+                state_lib.record_stop_block(session_id, turn_count, "(f)")
                 _emit_block(_build_block_reason(
                     "(f)", edited_this_turn,
                     _RECOVERY_F,
@@ -1538,7 +1593,7 @@ def main() -> int:
                         session_id, claims, payload.get("cwd"),
                     )
                     if contradictions:
-                        state_lib.record_stop_block(session_id, turn_count)
+                        state_lib.record_stop_block(session_id, turn_count, "(g)")
                         _emit_block(_build_block_reason(
                             "(g)", edited_this_turn,
                             _RECOVERY_G.format(
@@ -1552,7 +1607,7 @@ def main() -> int:
         # requirement. Fires on EVERY done-claim turn (edit or not) — the
         # reader deserves a one-line takeaway regardless.
         if not _has_tldr(message):
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(h)")
             _emit_block(_build_block_reason(
                 "(h)", edited_this_turn,
                 _RECOVERY_H,
@@ -1565,7 +1620,7 @@ def main() -> int:
         # "summary" defeats the field's purpose.
         overlong = _find_overlong_tldr(message)
         if overlong is not None:
-            state_lib.record_stop_block(session_id, turn_count)
+            state_lib.record_stop_block(session_id, turn_count, "(h)")
             snippet, length = overlong
             _emit_block(_build_block_reason(
                 "(h)", edited_this_turn,
@@ -1592,19 +1647,17 @@ def main() -> int:
         # and never blocks again this session — one explicit answer per
         # group is the contract.
         if edited_this_turn:
-            violations = sync_gate_lib.evaluate(
-                state_lib.get_edited_files(session_id), payload.get("cwd"),
+            pending = _pending_sync_violations(
+                session_id, payload.get("cwd"),
             )
-            if violations:
-                acked = set(state_lib.get_sync_acked_groups(session_id))
-                pending = [v for v in violations if v.group.name not in acked]
-                if pending and _has_sync_marker(message):
+            if pending:
+                if _has_sync_marker(message):
                     state_lib.ack_sync_groups(
                         session_id, [v.group.name for v in pending],
                     )
                     pending = []
                 if pending:
-                    state_lib.record_stop_block(session_id, turn_count)
+                    state_lib.record_stop_block(session_id, turn_count, "(i)")
                     detail_lines = []
                     for v in pending:
                         hits = ", ".join(v.when_hits[:5])

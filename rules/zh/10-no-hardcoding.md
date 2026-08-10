@@ -45,10 +45,13 @@ severity: must
 |---|---|---|---|
 | **Edit/Write 内容** | `PreToolUse(Edit\|Write)` | `new_string` / `content` 含未经辩护的硬编码密钥 | **拒绝** |
 
-散文文档（`.md` / `.markdown` / `.rst` / `.txt` / `.adoc`）与锁文件
-（`*.lock`、`package-lock.json`、`yarn.lock`、`poetry.lock`、`Cargo.lock`
-…）**豁免** —— 它们合法地携带示例值，且是机器生成的。探测器只针对
-新写的*代码*。
+散文文档（`.md` / `.markdown` / `.rst` / `.txt` / `.adoc` / `.asciidoc`）
+与锁文件（`*.lock`、`package-lock.json`、`yarn.lock`、`poetry.lock`、
+`Cargo.lock` …）**豁免** —— 它们合法地携带示例值，且是机器生成的。
+探测器只针对新写的*代码*。豁免内有一个例外（v0.24）：
+`requirements*.txt` / `constraints*.txt` 是依赖清单而非散文 —— 其中
+内嵌凭证的 index URL 是真实的泄漏向量 —— 因此尽管扩展名是 `.txt`，
+它们仍被扫描。
 
 ### 探测器清单
 
@@ -64,7 +67,9 @@ severity: must
 
 一个值被当作无害占位（不标记）的条件是：它含有 `example` / `changeme` /
 `your-` / `<…>` / `${…}` / `dummy` / `redacted`，或是一次环境读取
-（`os.environ[…]`、`getenv`、`process.env`）。
+（`os.environ[…]`、`getenv`、`process.env`）。纯字母 CamelCase 形状的值
+（`^[A-Z][A-Za-z]*$`）也被跳过（v0.24）：`password: "SecretStr"` 是
+Python 前向引用类型注解，不是凭证 —— 真实密钥总带数字或符号。
 
 ### 逃生舱 —— 把"非必须"操作化
 

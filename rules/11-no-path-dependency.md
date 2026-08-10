@@ -46,10 +46,13 @@ correct code. Relative paths are the desired outcome, not a violation.
 |---|---|---|---|
 | **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` / `content` contains an unjustified user-specific absolute path | **DENY** |
 
-Prose docs (`.md` / `.markdown` / `.rst` / `.txt` / `.adoc`) and lockfiles
-are **exempt** — this repo's own docs are full of illustrative
-`C:\Users\skyma\…` paths, and lockfiles legitimately record absolute
-resolved paths. The detector targets freshly authored *code*.
+Prose docs (`.md` / `.markdown` / `.rst` / `.txt` / `.adoc` /
+`.asciidoc`) and lockfiles are **exempt** — this repo's own docs are
+full of illustrative `C:\Users\skyma\…` paths, and lockfiles
+legitimately record absolute resolved paths. The detector targets
+freshly authored *code*. (The `requirements*.txt` / `constraints*.txt`
+carve-out from rule 10 applies here too — the exemption logic is
+shared.)
 
 ### Detector catalog
 
@@ -67,6 +70,12 @@ The portable alternatives the detector wants you to reach for:
 `Path(__file__).resolve().parent…`, `os.environ["CC_PLUGIN_DATA"]`,
 `Path.home()` computed at runtime (not a literal), a CLI argument, or a
 path relative to the repo root.
+
+A `/home/<x>/` segment glued to a hostname is NOT flagged (v0.24): in
+`https://host.test/home/alice/dashboard` it is a URL route, not a
+filesystem path (the POSIX pattern rejects matches preceded by a
+word / dot / dash character). A `file:///home/…` URI still matches —
+that IS a machine path.
 
 ### Escape hatch — operationalizing "non-essential"
 

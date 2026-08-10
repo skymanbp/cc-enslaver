@@ -41,9 +41,11 @@ severity: must
 |---|---|---|---|
 | **Edit/Write 内容** | `PreToolUse(Edit\|Write)` | `new_string` / `content` 含未经辩护的用户特定绝对路径 | **拒绝** |
 
-散文文档（`.md` / `.markdown` / `.rst` / `.txt` / `.adoc`）与锁文件
-**豁免** —— 本仓库自己的文档就满是示意性的 `C:\Users\skyma\…` 路径，
-锁文件也合法地记录解析出的绝对路径。探测器只针对新写的*代码*。
+散文文档（`.md` / `.markdown` / `.rst` / `.txt` / `.adoc` / `.asciidoc`）
+与锁文件**豁免** —— 本仓库自己的文档就满是示意性的 `C:\Users\skyma\…`
+路径，锁文件也合法地记录解析出的绝对路径。探测器只针对新写的*代码*。
+（规则 10 的 `requirements*.txt` / `constraints*.txt` 例外同样适用于
+本规则 —— 豁免逻辑是共享的。）
 
 ### 探测器清单
 
@@ -60,6 +62,11 @@ severity: must
 `Path(__file__).resolve().parent…`、`os.environ["CC_PLUGIN_DATA"]`、
 运行时计算的 `Path.home()`（而非字面量）、一个 CLI 参数，或一条相对
 仓库根的路径。
+
+紧贴主机名的 `/home/<x>/` 段**不**标记（v0.24）：在
+`https://host.test/home/alice/dashboard` 里它是 URL 路由而非文件系统
+路径（POSIX 模式拒绝前导字符为字母 / 点 / 连字符的匹配）。
+`file:///home/…` URI 仍然命中 —— 那确实是机器路径。
 
 ### 逃生舱 —— 把"非必须"操作化
 

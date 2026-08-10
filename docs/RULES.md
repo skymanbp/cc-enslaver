@@ -8,7 +8,7 @@
 
 ## 语言
 
-- **English（骨架 / source of truth）** — [`../rules/01-*.md` ~ `../rules/11-*.md`](../rules/)（root 层）。英文是**骨架语言**：钩子注入默认英文（`prompts/` root），任意其它层的规则语义都以英文骨架为准。命令 / skill 的**正文**用中文书写（作者语言，可以是任意语言），但它们引用的规则**定义**以英文骨架为准。
+- **English（骨架 / source of truth）** — [`../rules/01-*.md` ~ `../rules/12-*.md`](../rules/)（root 层）。英文是**骨架语言**：钩子注入默认英文（`prompts/` root），任意其它层的规则语义都以英文骨架为准。命令 / skill 的**正文**用中文书写（作者语言，可以是任意语言），但它们引用的规则**定义**以英文骨架为准。
 - **中文翻译** — [`../rules/zh/`](../rules/zh/)。逐节跟随英文骨架、与英文 1-1 对应；**如出现 drift，以英文骨架为准**（CI 硬门 [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py) 会拦，见 [`I18N.md`](./I18N.md)）。运行时用 `CC_ENSLAVER_LANG=zh` 切换注入语言；任意新语言放 `rules/<code>/` + `prompts/<code>/`，缺失文件自动回退英文骨架。
 
 ---

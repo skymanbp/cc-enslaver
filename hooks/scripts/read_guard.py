@@ -654,6 +654,15 @@ _SECRET_PLACEHOLDERS = (
     "getenv", "process.env", "config.", "settings.",
 )
 
+# v0.24 — pure-alpha CamelCase value shape. A `password: "SecretStr"`
+# match is a Python forward-reference type annotation (the `:` form is
+# indistinguishable from YAML assignment at the regex level), not an
+# embedded credential: real secrets carry digits / symbols. Skipping
+# this shape trades a far-fetched false negative (an all-alpha,
+# capitalised, 8+ char real password) for a realistic false-positive
+# class, per the repo's "prefer false negatives" philosophy.
+_TYPE_NAME_VALUE = re.compile(r"^[A-Z][A-Za-z]*$")
+
 # Standalone secret literals that need no keyword on the left.
 _SECRET_LITERAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -681,7 +690,12 @@ _PATH_DEP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "Path dependency: POSIX user-home absolute path",
-        re.compile(r"/(?:home|Users)/[^/\s'\"<>|]+/"),
+        # v0.24 — the lookbehind rejects a match glued to a hostname /
+        # URL path segment (https://host.test/home/alice/… is a route,
+        # not a filesystem path). A quoted or slash-anchored real path
+        # still matches: file:///home/x has `/` before /home, which is
+        # not in the excluded class.
+        re.compile(r"(?<![\w.-])/(?:home|Users)/[^/\s'\"<>|]+/"),
     ),
     (
         "Path dependency: shell home variable in a literal",
@@ -701,19 +715,34 @@ _PATH_DEP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # values, and lockfiles are machine-generated. The rule-09 patch-marker
 # detector keeps its all-files behavior; only these two new detectors
 # honor the exemption. Mirrors the user's "写完*代码*后" framing.
-_PROSE_DOC_EXTS = {".md", ".markdown", ".rst", ".txt", ".adoc"}
+# v0.24: `.asciidoc` added (same format as the already-exempt `.adoc`).
+_PROSE_DOC_EXTS = {".md", ".markdown", ".rst", ".txt", ".adoc", ".asciidoc"}
 _LOCKFILE_NAMES = {
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
     "cargo.lock", "gemfile.lock", "composer.lock",
 }
 
+# v0.24 — exception inside the .txt exemption: requirements*.txt /
+# constraints*.txt are dependency manifests, not prose. An index URL
+# with embedded credentials in requirements.txt is a real leak vector
+# the blanket .txt exemption used to wave through.
+_DEP_MANIFEST_TXT_PREFIXES = ("requirements", "constraints")
+
 
 def _is_scannable_target(file_path: str) -> bool:
-    """Return False for prose-doc / lockfile targets (rule 10 + 11 exempt)."""
+    """Return False for prose-doc / lockfile targets (rule 10 + 11 exempt).
+
+    Dependency manifests that merely *look* like prose by extension
+    (requirements*.txt / constraints*.txt) stay scannable — see
+    _DEP_MANIFEST_TXT_PREFIXES.
+    """
     name = os.path.basename(file_path).lower()
     if name in _LOCKFILE_NAMES or name.endswith(".lock"):
         return False
-    return os.path.splitext(name)[1] not in _PROSE_DOC_EXTS
+    stem, ext = os.path.splitext(name)
+    if ext not in _PROSE_DOC_EXTS:
+        return True
+    return ext == ".txt" and stem.startswith(_DEP_MANIFEST_TXT_PREFIXES)
 
 
 def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
@@ -729,6 +758,10 @@ def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
     for m in _SECRET_ASSIGN.finditer(text):
         val_lc = m.group("val").lower()
         if any(ph in val_lc for ph in _SECRET_PLACEHOLDERS):
+            continue
+        if _TYPE_NAME_VALUE.match(m.group("val")):
+            # Forward-reference type annotation, not a credential
+            # (v0.24 — see _TYPE_NAME_VALUE).
             continue
         window = _line_window(text, m.start(), m.end())
         if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
@@ -838,14 +871,41 @@ def _handle_pre_tool_use(payload: dict) -> None:
             )
             return  # unreachable; _emit_deny exits
 
+    def _run_content_checks(content: str) -> None:
+        """Shared write-content gate: patch markers (rule 09) →
+        hardcode / path (rule 10 + 11) → edicts (圣旨, v0.12).
+
+        Every write branch runs the SAME sequence through this one
+        helper. v0.11-v0.23 hand-copied the sequence into each branch,
+        which is exactly how the branches drifted: the Write-new branch
+        registered its target as read BEFORE the checks had passed (so a
+        DENIED Write still granted read-before-edit authorization), and
+        each new detector had to be spliced into three places.
+        """
+        hit = _find_unjustified_patch_marker(content)
+        if hit is not None:
+            _emit_deny(
+                PATCH_DENY_TEMPLATE,
+                tool_name=tool,
+                file_path=file_path,
+                pattern_label=hit[0],
+                snippet=hit[1],
+            )
+            return  # unreachable; _emit_deny exits
+        _check_hardcode_and_path(content)
+        _check_edicts(content)
+
     def _check_rolling_patch(old_string: str, new_string: str) -> None:
-        """Rule-09 rolling-patch counter (v0.13).
+        """Rule-09 rolling-patch counter (v0.13; atomic since v0.24).
 
         Classify the change and either DENY (small-edit threshold met),
-        reset the counter (systematic rewrite), or increment-and-allow
+        reset the counter (systematic rewrite), or record-and-allow
         (small edit under threshold). Medium-sized changes are a no-op:
         too big to count as "rolling" but too small to count as a
-        re-engagement reset.
+        re-engagement reset. The decide-and-record step is a single
+        locked state operation (try_record_small_edit) — the previous
+        read-count-then-increment pair let two parallel hooks both see
+        count=2 and both allow, landing the forbidden 4th small edit.
         """
         kind = _classify_change(old_string, new_string)
         if kind == "systematic":
@@ -853,15 +913,16 @@ def _handle_pre_tool_use(payload: dict) -> None:
             return
         if kind != "small":
             return  # "medium" — leave counter untouched
-        current = state_lib.get_edit_count(session_id, file_path)
-        attempt = current + 1
-        if attempt >= ROLLING_PATCH_THRESHOLD:
+        allowed, current = state_lib.try_record_small_edit(
+            session_id, file_path, ROLLING_PATCH_THRESHOLD,
+        )
+        if not allowed:
             _emit_deny(
                 ROLLING_PATCH_DENY_TEMPLATE,
                 tool_name=tool,
                 file_path=file_path,
                 current_count=current,
-                attempt_count=attempt,
+                attempt_count=current + 1,
                 threshold=ROLLING_PATCH_THRESHOLD,
                 small_chars=SMALL_EDIT_MAX_CHARS,
                 small_lines=SMALL_EDIT_MAX_LINES,
@@ -869,41 +930,33 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 sys_lines=SYSTEMATIC_MIN_LINES,
             )
             return  # unreachable; _emit_deny exits
-        state_lib.record_small_edit(session_id, file_path)
 
     if tool == "Write":
         # v0.16: capture baseline BEFORE the Write lands. For a brand-new
         # file this captures None (file did not exist at baseline); for
         # an existing file it captures the pre-Write mtime. Either way
         # Stop layer (g) can later verify "created X" / "modified X"
-        # claims against this snapshot.
+        # claims against this snapshot. (Baseline capture is
+        # observational — safe before the checks, unlike add_read.)
         state_lib.record_baseline(session_id, file_path)
         target_exists = os.path.exists(file_path)
-        # New file creation: nothing to gate on read-before-edit, and
-        # no prior small-edit history to consider (it's a fresh file).
+        content = tool_input.get("content") or ""
         if not target_exists:
+            # New file creation: nothing to gate on read-before-edit,
+            # but ALL content checks still apply — writing a brand-new
+            # file full of `# noqa` / secrets is still laziness.
+            _run_content_checks(content)
+            # v0.24: a fresh file has no rolling history — clear any
+            # stale counter left by a same-named file that was deleted
+            # and is being recreated (its first small edit used to be
+            # denied as attempt #4).
+            state_lib.reset_edit_count(session_id, file_path)
+            # Register as read ONLY after every check passed (v0.24 —
+            # a DENIED Write must not grant read-before-edit
+            # authorization for content the agent never saw).
             state_lib.add_read(session_id, file_path)
-            # rule 09 patch-style check still applies even for new files —
-            # writing a brand-new file full of `# noqa` is still laziness.
-            content = tool_input.get("content") or ""
-            hit = _find_unjustified_patch_marker(content)
-            if hit is not None:
-                _emit_deny(
-                    PATCH_DENY_TEMPLATE,
-                    tool_name=tool,
-                    file_path=file_path,
-                    pattern_label=hit[0],
-                    snippet=hit[1],
-                )
-                return  # unreachable; _emit_deny exits
-            # rule 10 + 11 content check (v0.22) — hardcoded secrets /
-            # machine-specific paths are laziness in a brand-new file too.
-            _check_hardcode_and_path(content)
-            # 圣旨 check (v0.12) — applies to new files too.
-            _check_edicts(content)
             state_lib.record_edit_turn(session_id, turn_count)
-            # v0.23: record into the session's edited-file set for the
-            # rule-12 repo-wide sync gate (Stop layer (i)).
+            # v0.23: rule-12 edited-file set (Stop layer (i) sync gate).
             state_lib.record_edited_file(session_id, file_path)
             return
         # Existing file: agent must have seen it before (Read or Write).
@@ -914,23 +967,7 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 file_path=file_path,
             )
             return  # not reached; _emit_deny exits
-        # Existing and known: now check the new content for patch markers.
-        content = tool_input.get("content") or ""
-        hit = _find_unjustified_patch_marker(content)
-        if hit is not None:
-            _emit_deny(
-                PATCH_DENY_TEMPLATE,
-                tool_name=tool,
-                file_path=file_path,
-                pattern_label=hit[0],
-                snippet=hit[1],
-            )
-            return
-        # rule 10 + 11 content check (v0.22) — hardcoded secrets /
-        # machine-specific paths.
-        _check_hardcode_and_path(content)
-        # 圣旨 check (v0.12).
-        _check_edicts(content)
+        _run_content_checks(content)
         # Rolling-patch check (v0.13). A Write to an existing file is
         # effectively a full-file replacement; classify by `content`
         # alone (old_string="" yields the right small/systematic split).
@@ -958,26 +995,12 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 file_path=file_path,
             )
             return  # unreachable; _emit_deny exits
-        # Check the new_string for patch markers. Edit can also carry a
-        # replace_all flag; the new_string is what actually lands in the
-        # file, so that's what we scan.
+        # The new_string is what actually lands in the file (Edit may
+        # carry replace_all; the scanned content is the same), so that
+        # is what the shared content gate scans.
         new_string = tool_input.get("new_string") or ""
         old_string = tool_input.get("old_string") or ""
-        hit = _find_unjustified_patch_marker(new_string)
-        if hit is not None:
-            _emit_deny(
-                PATCH_DENY_TEMPLATE,
-                tool_name=tool,
-                file_path=file_path,
-                pattern_label=hit[0],
-                snippet=hit[1],
-            )
-            return  # unreachable; _emit_deny exits
-        # rule 10 + 11 content check (v0.22) — hardcoded secrets /
-        # machine-specific paths in the incoming new_string.
-        _check_hardcode_and_path(new_string)
-        # 圣旨 check (v0.12) — scan the incoming new_string.
-        _check_edicts(new_string)
+        _run_content_checks(new_string)
         # Rolling-patch check (v0.13).
         _check_rolling_patch(old_string, new_string)
         # Edit allowed — stamp the edit-turn for Stop layers (e)+(f).

@@ -143,6 +143,27 @@ def prune_old_sessions(
             except OSError as exc:
                 failures.append(f"{path.name}: {exc}")
 
+    # v0.24 — sweep orphan temp files left by failed atomic saves.
+    # state.save()'s os.replace could lose a race against a lock-free
+    # reader on Windows and, before the retry fix, left
+    # `<sid>.json.<pid>.tmp` debris behind (observed in live state
+    # dirs). A live save's temp file exists for milliseconds, so
+    # anything older than a day is dead by definition. Counted under a
+    # separate key so the session-file counts the CLI prints (and the
+    # tests pin) stay untouched.
+    tmp_deleted = 0
+    if not dry_run:
+        tmp_cutoff = time.time() - 86400
+        for tf in sessions_dir.glob("*.tmp"):
+            try:
+                if tf.stat().st_mtime < tmp_cutoff:
+                    tf.unlink()
+                    tmp_deleted += 1
+            except OSError:
+                # Rationale: best-effort janitor — a locked or already-
+                # vanished temp file must not fail the GC pass.
+                continue
+
     return {
         "scanned": scanned,
         "eligible": len(items),
@@ -150,6 +171,7 @@ def prune_old_sessions(
         "bytes_freed": bytes_freed,
         "failures": failures,
         "items": items,
+        "tmp_deleted": tmp_deleted,
     }
 
 

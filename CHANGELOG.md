@@ -17,6 +17,141 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.24.0] — 2026-08-10
+
+**Health-audit release: architecture review + multi-path adversarial model
+review → 10 confirmed defect fixes (3 HIGH), zero new features.**
+
+Process (the release IS the audit): AST-based health scan (function length /
+cyclomatic complexity over all production code) → version-growth review
+(v0.18→v0.23 production lines +44%, accretive) → a full own-architecture
+read of every hook script → multi-path parallel read-only model reviews
+(gpt-5.6-sol at maximum reasoning effort, per-subsystem scopes) → every
+candidate finding independently re-verified with a runtime probe before any
+fix → red-first regression tests (8 red on the unfixed tree) → fixes → a
+**second adversarial review round targeting the fix diff itself**, which
+found 2 more real defects in/behind the fixes (both fixed + pinned) →
+323/323 green. Two of the three HIGH bugs were **live-reproduced inside the
+audit session itself** (the plugin denied its own auditor's Edit because
+its state save had silently lost the Write record).
+
+### Fixed
+
+- **HIGH — Windows state saves silently lost to the plugin's own readers
+  (`lib/state.py`).** The v0.23 session lock serialized writer-vs-writer
+  only; every read accessor (`has_read` / `was_just_blocked` /
+  `get_edited_files` / …) called `load()` lock-free. On Windows,
+  `os.replace` fails with `PermissionError` while ANY process holds the
+  target open (CPython's `open()` does not request `FILE_SHARE_DELETE`), so
+  the hooks' own readers collided with their own writers: the mutator
+  raised, the hook failed open, and the mutation vanished. Probe: 300/300
+  saves lost under 8 tight-loop readers; live state dirs carried orphan
+  `<sid>.json.<pid>.tmp` debris from these failures, and the audit session
+  itself lost two Write records this way (symptom: a false rule-04 DENY on
+  a file the session had created). Root-cause fix: read accessors now route
+  through the same lock (`_load_shared`); `save()` retries the replace with
+  a short backoff against non-cooperating *external* readers (antivirus /
+  indexers) and unlinks its temp file if it ever gives up; `load()` retries
+  once on transient `OSError` (a bare degrade returns an empty record which
+  a locked mutator would save back — full session amnesia); `gc_state`
+  sweeps day-old orphan `*.tmp`. Pinned by `TestReaderWriterCollision`
+  (4 real-accessor reader threads + 200 sequential saves → zero loss, zero
+  orphans; red pre-fix at 192/200 lost).
+- **HIGH — layer-(i) sync acknowledgement lost in the one-shot grace window
+  (`stop_guard.py`).** The primary real-world flow — blocked at (i), then a
+  recovery reply carrying `同步核对:` — never recorded the ack: the grace
+  path returned before the message was even extracted, so the same group
+  re-blocked the next post-grace edit turn, breaking the v0.23 "one
+  explicit answer per group per session" contract in exactly the flow it
+  was built for (probe: BLOCK → marker-recovery allowed with
+  `sync_acked_groups` still empty → same group BLOCK again). Fix: message
+  extraction hoisted above the guard; a grace-window reply with a sync
+  marker acks the pending groups (`_pending_sync_violations` /
+  `_ack_pending_sync_groups`, shared with layer (i)). Pinned by
+  `test_marker_in_grace_window_recovery_acks_group`.
+- **HIGH — a DENIED Write-new still registered its target as read
+  (`read_guard.py`).** The new-file branch called `add_read` *before* the
+  content checks, so a Write denied for a patch marker / secret / path
+  still granted read-before-edit authorization for content the agent never
+  saw (if another process later created that file, a Write-existing sailed
+  past `has_read`). `add_read` now runs only after every check passes.
+- **MED — rolling-patch decide-and-record made atomic (`lib/state.py`).**
+  The two-step API (`get_edit_count` then `record_small_edit`, each locked
+  separately) let two parallel hooks both read count=2 and both allow —
+  landing the forbidden 4th small edit. Replaced by
+  `try_record_small_edit(sid, path, threshold)`: one lock acquisition
+  covers decision + increment; refusal does not increment (unchanged).
+- **MED — rule-10 false positive on Python forward-reference annotations
+  (`read_guard.py`).** `password: "SecretStr"` was denied as a hardcoded
+  credential. Pure-alpha CamelCase values (`^[A-Z][A-Za-z]*$`) are now
+  skipped — a type-name shape, not a secret (real secrets carry digits /
+  symbols; the deliberate-false-negative trade matches the detector
+  philosophy). Digit-bearing values still deny (regression-pinned).
+- **MED — rule-11 false positive on URL routes (`read_guard.py`).**
+  `https://host.test/home/alice/dashboard` was denied as a POSIX user-home
+  path. The pattern now rejects matches glued to a hostname segment
+  (`(?<![\w.-])`); `file:///home/…` still denies (it IS a machine path).
+- **MED — `.txt` blanket exemption hid dependency-manifest credential leaks
+  (`read_guard.py`).** `requirements*.txt` / `constraints*.txt` are now
+  scannable despite `.txt` (an `--extra-index-url https://user:pass@…` line
+  is a real leak vector); plain `.txt` prose stays exempt, and `.asciidoc`
+  joins the prose set (same format as the already-exempt `.adoc`).
+- **MED — stale rolling counter survived delete-and-recreate
+  (`read_guard.py`).** A Write creating a fresh file at a previously-edited
+  path now resets the per-file small-edit counter (its first small edit
+  used to be denied as "attempt #4").
+- **MED — grace-path ack was not scoped to layer-(i) recoveries
+  (found by the second review round, on the C1 fix itself).** The new
+  grace-window acknowledgement fired on ANY sync-marker substring: a reply
+  merely *quoting* "sync-check" while recovering from an unrelated block
+  (e.g. layer (a)) would silently ack every pending group.
+  `record_stop_block` now records the blocking layer
+  (`last_blocked_layer`), and the grace-path ack requires it to be "(i)".
+- **MED — transient-unreadable state could still be wiped by a locked
+  mutator (found by the second review round).** `load()`'s
+  retry-then-empty-record degrade meant two consecutive `OSError`s (e.g.
+  an external scanner) handed a mutator an empty record, which it then
+  SAVED — erasing every recorded read / edit / baseline / counter.
+  Mutators now load via `_load_for_mutation`, which returns `None` on an
+  unreadable-but-existing file, and skip the mutation entirely (losing one
+  mutation is the strictly smaller failure). Pinned by a mock-based
+  regression test asserting the state file survives byte-identical.
+
+### Changed
+
+- **`read_guard.py` write branches deduplicated.** The three hand-copied
+  check sequences (Write-new / Write-existing / Edit) collapsed into one
+  shared `_run_content_checks` pipeline (patch markers → rule 10/11 →
+  edicts) — the copy-drift that produced the Write-new ordering bug is now
+  structurally impossible.
+- `gc_state.prune_old_sessions` reports orphan-tmp cleanup under a new
+  `tmp_deleted` summary key (session-file counts unchanged — the CLI
+  output and its test contract are untouched).
+- Docs sync: rule 10/11 detector catalogs (+ zh mirrors) document the new
+  carve-outs; `ARCHITECTURE.md` §2 concurrency and decision-tree notes
+  updated; two stale references fixed (`docs/RULES.md` said rules span
+  `01–11`; `ARCHITECTURE.md` still called layer (g) "a v0.9+ candidate"
+  nine versions after it shipped in v0.16).
+
+### Triaged as documented limitations (deliberately not "fixed")
+
+- Patch markers / `try-except-pass` inside string literals are still
+  scanned (a `new_string` is a file *fragment* — reliable lexical
+  string-context tracking is impossible; the why-comment escape hatch
+  covers fixtures).
+- A PEM-header sentinel constant still denies (test-pinned design; escape
+  hatch available).
+- PreToolUse-time recording vs. actual tool success stays as-is (the
+  v0.3.2 scope precedent; bounded cost documented in `lib/sync_gate.py`).
+
+Tests **310 → 323** (+13: grace-window ack, non-(i) grace-ack guard,
+denied-Write-new non-registration, stale-counter reset, annotation /
+URL-route / requirements / plain-txt / asciidoc detector matrix,
+digit-value guard, file-scheme guard, reader-writer collision,
+unreadable-state mutation guard).
+
+---
+
 ## [0.23.0] — 2026-08-07
 
 **Rule 12 (repo-wide sync: 全库更新) + a hard TL;DR length contract.**

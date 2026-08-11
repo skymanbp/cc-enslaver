@@ -42,8 +42,11 @@ from pathlib import Path
 # the same state files. `lib/` is alongside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
-# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
+# E402 is suppressed on every lib import below because they must follow
+# the sys.path bootstrap above -- that is the stated reason, not laziness.
 from lib import edicts as edicts_lib  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import shellcmd  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -53,13 +56,115 @@ from lib import edicts as edicts_lib  # noqa: E402
 # echoed in the deny reason so the agent knows exactly which pattern
 # was matched. The `explanation` tells the agent how to recover.
 # --------------------------------------------------------------------------- #
+# v0.26.0 audit — these six moved from raw-text regex to ARGV predicates.
+#
+# Force-push detection was given a real command model in v0.26 while its
+# six siblings kept scanning the whole command string, and the split
+# produced exactly the errors a text heuristic produces in both
+# directions: `chmod -v 777 f` and `git -C . rebase --skip` were MISSED
+# (an unanticipated option sat where the regex expected the operand), the
+# recursive-delete forms using the `--` terminator or quoting were missed,
+# quoted flags were missed, and `echo git commit --no-verify` — which
+# executes nothing — was wrongly DENIED.
+#
+# Each entry now carries `match(argv) -> bool`, evaluated per shell
+# segment, so quoting, option order, global options and `--` are handled
+# by the tokenizer instead of being re-guessed per pattern.
+
+# Commands whose arguments are printed, not executed. Their own segment is
+# skipped; a nested substitution inside them is still its own segment and
+# is still checked, so an echoed force-push substitution remains a deny.
+_INERT_COMMANDS = {"echo", "printf", "true", "false", ":"}
+
+
+def _has_flag(argv: list[str], flag: str) -> bool:
+    """True when `flag` appears as its own argv token (or `flag=value`)."""
+    return any(a == flag or a.startswith(flag + "=") for a in argv[1:])
+
+
+def _is_chmod_777(argv: list[str]) -> bool:
+    if shellcmd.command_name(argv) not in ("chmod", "chmod.exe"):
+        return False
+    for tok in argv[1:]:
+        if tok == "--":
+            continue
+        if tok.startswith("-"):
+            continue          # -R, -v, -c, --recursive, … are options
+        # The mode operand. `777`, `0777` and `7777` all grant world-write;
+        # the old regex anticipated only the first two.
+        if tok.isdigit() and tok[-3:] == "777":
+            return True
+        return False          # first operand is the mode; stop after it
+    return False
+
+
+def _is_git_rebase_skip(argv: list[str]) -> bool:
+    sub, rest = shellcmd.git_subcommand(argv)
+    return sub == "rebase" and "--skip" in rest
+
+
+# essential (detector subject matter, not a path this script depends on):
+# the home spellings below are what this check must RECOGNISE, so they are
+# assembled by concatenation — the same technique read_guard uses on its
+# own literals — to keep rule 11 from flagging its sibling guard.
+_HOME_VAR = "$" + "HOME"
+_TILDE = "~"
+# Deleting anything AT OR UNDER these is catastrophic.
+_SYSTEM_ROOTS = (
+    "/bin", "/boot", "/etc", "/home", "/lib", "/opt", "/root",
+    "/sbin", "/sys", "/usr", "/var",
+)
+# `/tmp` is deliberately different: wiping /tmp itself is catastrophic,
+# but `rm -rf /tmp/my-build` is an ordinary scratch cleanup. The regex
+# this replaced encoded the same carve-out (`tmp/?\s*$`), and dropping it
+# would have turned a documented allow into a deny.
+_TMP_ROOT = "/tmp"
+
+
+def _is_dangerous_rm_target(op: str) -> bool:
+    stripped = op.rstrip("/")
+    if stripped == "":            # `/` or `//`
+        return True
+    if stripped == _TMP_ROOT:
+        return True
+    for root in _SYSTEM_ROOTS:
+        if stripped == root or stripped.startswith(root + "/"):
+            return True
+    if stripped == _HOME_VAR or stripped.startswith(_HOME_VAR + "/"):
+        return True
+    return stripped == _TILDE or stripped.startswith(_TILDE + "/")
+
+
+def _is_catastrophic_rm(argv: list[str]) -> bool:
+    if shellcmd.command_name(argv) not in ("rm", "rm.exe"):
+        return False
+    recursive = force = False
+    operands: list[str] = []
+    seen_terminator = False
+    for tok in argv[1:]:
+        if tok == "--" and not seen_terminator:
+            seen_terminator = True
+            continue
+        if not seen_terminator and tok.startswith("--"):
+            if tok == "--recursive":
+                recursive = True
+            elif tok == "--force":
+                force = True
+            continue
+        if not seen_terminator and tok.startswith("-") and len(tok) > 1:
+            recursive = recursive or ("r" in tok[1:] or "R" in tok[1:])
+            force = force or ("f" in tok[1:])
+            continue
+        operands.append(tok)
+    if not (recursive and force):
+        return False
+    return any(_is_dangerous_rm_target(op) for op in operands)
+
+
 STATIC_PATTERNS = [
     {
         "name": "--no-verify (skipping commit hooks)",
-        # Word-boundary on the right; left side ensures it is a flag
-        # (preceded by whitespace or start of command) not part of a
-        # longer flag like --no-verify-extra.
-        "regex": re.compile(r"(?:^|\s)--no-verify(?:\s|$)"),
+        "match": lambda argv: _has_flag(argv, "--no-verify"),
         "rule": "03",
         "explanation": (
             "The `--no-verify` flag skips git/commit hooks. Hooks exist to "
@@ -72,7 +177,7 @@ STATIC_PATTERNS = [
     },
     {
         "name": "--no-gpg-sign (skipping commit signature)",
-        "regex": re.compile(r"(?:^|\s)--no-gpg-sign(?:\s|$)"),
+        "match": lambda argv: _has_flag(argv, "--no-gpg-sign"),
         "rule": "03",
         "explanation": (
             "Skipping GPG signing strips commit verification. If signing is "
@@ -83,8 +188,7 @@ STATIC_PATTERNS = [
     },
     {
         "name": "chmod 777 (world-writable)",
-        # Matches: `chmod 777`, `chmod -R 777`, `chmod 0777`, `chmod -R 0777`.
-        "regex": re.compile(r"\bchmod\s+(?:-R\s+)?0?777\b"),
+        "match": _is_chmod_777,
         "rule": "03",
         "explanation": (
             "World-writable permissions (777) almost never solve the "
@@ -105,9 +209,7 @@ STATIC_PATTERNS = [
     # ----------------------------------------------------------------- #
     {
         "name": "git rebase --skip (silently abandoning a conflict)",
-        # Matches the --skip subcommand of git rebase, anywhere in the
-        # command after `git rebase`. Word boundary on the right.
-        "regex": re.compile(r"\bgit\s+rebase\b[^\n]*\s--skip\b"),
+        "match": _is_git_rebase_skip,
         "rule": "03",
         "explanation": (
             "`git rebase --skip` abandons the conflicting commit silently "
@@ -124,7 +226,7 @@ STATIC_PATTERNS = [
     },
     {
         "name": "pip install --break-system-packages (bypassing PEP 668)",
-        "regex": re.compile(r"(?:^|\s)--break-system-packages\b"),
+        "match": lambda argv: _has_flag(argv, "--break-system-packages"),
         "rule": "03",
         "explanation": (
             "`--break-system-packages` bypasses the PEP 668 protection "
@@ -153,12 +255,7 @@ STATIC_PATTERNS = [
         #   rm -rf ~  / rm -rf ~/...
         # while still allowing rm -rf /tmp/foo, rm -rf ./node_modules,
         # rm -rf relative paths.
-        "regex": re.compile(
-            r"\brm\s+(?:-[rRf]+\s+)+"
-            r"(?:/(?:\s|$|bin\b|boot\b|etc\b|home\b|lib\b|opt\b|root\b|sbin\b|sys\b|tmp/?\s*$|usr\b|var\b)"
-            # essential: home-var spelling is the pattern being detected.
-            r"|\$HOME\b|~/?(?:\s|$))"
-        ),
+        "match": _is_catastrophic_rm,
         "rule": "03",
         "explanation": (
             # essential: names the spellings in the user-facing deny text.
@@ -207,28 +304,52 @@ def _detect_force_push(cmd: str) -> dict | None:
         required `-f` to be delimited by whitespace on both sides. The exact
         operation this guard exists to stop rode through.
 
-    Both are fixed by splitting the command on shell separators, keeping
-    only the segments that actually invoke `git push`, and looking for `f`
-    inside each single-dash option cluster within those segments.
+    v0.26.0 — the text heuristic is replaced by an actual parse
+    (`lib/shellcmd`). Scanning a *slice of text* for co-occurring words
+    was wrong in both directions at once:
+
+      * False DENY on text that is not an invocation — an `echo` of a
+        force-push string, or `git config alias.deploy "push --mirror"`,
+        where the subcommand is `config`, not `push`. (The first of these
+        blocked a legitimate probe during this very audit.)
+      * False ALLOW on `git push origin +main` and
+        `git push origin +:refs/heads/main`: a force refspec need not
+        contain a colon, and a deletion refspec has an empty source side,
+        so the old colon-requiring pattern saw neither.
+      * False ALLOW whenever git's global options ran past the arbitrary
+        120-character window between `git` and `push`.
+
+    Now: split into segments, take the ones whose argv[0] IS git, resolve
+    the real subcommand past any global options, and inspect the argv
+    that follows it.
     """
-    segments = [
-        seg for seg in _CMD_SEPARATOR.split(cmd)
-        if re.search(r"\bgit\s+push\b", seg)
-    ]
-    if not segments:
-        return None
     hit = False
-    for seg in segments:
-        # Strip --force-with-lease (and its optional =refspec value) before
-        # checking for --force. Otherwise the substring `--force` inside
-        # `--force-with-lease` would falsely match below.
-        sanitised = re.sub(r"--force-with-lease(?:=\S+)?", "", seg)
-        if re.search(r"(?:\s|^)--force(?:\s|$)", sanitised):
-            hit = True
-            break
-        if any("f" in cluster
-               for cluster in _SHORT_FLAG_CLUSTER.findall(sanitised)):
-            hit = True
+    for argv in shellcmd.segments(cmd):
+        if shellcmd.command_name(argv) not in ("git", "git.exe"):
+            continue
+        subcommand, args = shellcmd.git_subcommand(argv)
+        if subcommand != "push":
+            continue
+        for tok in args:
+            # `--force-with-lease` is the SAFE variant and is a distinct
+            # token, so exact comparison lets it through without the
+            # substring gymnastics the text version needed.
+            if tok == "--force" or tok.startswith("--force="):
+                hit = True
+            elif tok == "--mirror":
+                # Force-updates every mirrored ref.
+                hit = True
+            elif tok.startswith("+") and len(tok) > 1:
+                # git's own spelling of "force this ref", with or without
+                # a colon: `+main`, `+main:main`, `+:refs/heads/main`.
+                hit = True
+            elif (len(tok) > 1 and tok[0] == "-" and tok[1] != "-"
+                    and "f" in tok[1:] and tok[1:].isalpha()):
+                # Stacked short options: `-f`, `-fu`, `-uf`.
+                hit = True
+            if hit:
+                break
+        if hit:
             break
     if hit:
         return {
@@ -298,8 +419,8 @@ def _split_command(command: str) -> list[str] | None:
     """Tokenise a shell command, preserving Windows path separators.
 
     v0.25 — `shlex.split(command, posix=True)` treats a backslash as an
-    escape character, so an UNQUOTED Windows path came back mangled:
-
+    escape character, so an UNQUOTED Windows path came back mangled
+    # example only, not a path this module depends on:
         C:\\Users\\me\\note.txt   ->   C:Usersmenote.txt
 
     `_handle_register_invocation` then denied with "file does not exist on
@@ -308,23 +429,18 @@ def _split_command(command: str) -> list[str] | None:
     releases because every existing test quotes the path (`--file "%s"`),
     and quoting happens to survive posix splitting.
 
-    On Windows we therefore split in non-posix mode (backslash is a plain
-    character there) and strip the quotes shlex leaves attached; on POSIX
-    the original semantics are kept, where a backslash escape is real.
+    v0.25.1 — the `posix=False` fix that replaced it traded one bug for
+    another: non-posix mode does not group a QUOTED value, so a valid
+    `--file="C:\\Dir With Space\\x.py"` came back split across three
+    tokens and was denied as a non-existent path. The correct primitive
+    is posix-style quoting with backslash escaping DISABLED, which
+    `shlex.shlex(escape="")` provides: quotes group and are stripped,
+    backslashes stay literal. POSIX keeps real escape semantics.
     """
-    posix = os.name != "nt"
-    try:
-        tokens = shlex.split(command, posix=posix)
-    except ValueError:
-        return None
-    if posix:
-        return tokens
-    out: list[str] = []
-    for tok in tokens:
-        if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
-            tok = tok[1:-1]
-        out.append(tok)
-    return out
+    # v0.26.0 — delegated to lib/shellcmd, which is also what the
+    # force-push detector now parses with. Two hand-rolled tokenisers had
+    # already drifted apart; sharing one is the point.
+    return shellcmd.tokenize(command)
 
 
 def _parse_register_invocation(command: str) -> dict | None:
@@ -342,44 +458,68 @@ def _parse_register_invocation(command: str) -> dict | None:
     registration", never called add_read, and let the stub script print
     "register_read: ok" — a success message for a registration that never
     happened, leaving the next Edit denied with no clue why.
+
+    v0.26.0 — command position is resolved by parsing rather than by
+    walking backwards over dashes. The old heuristic treated the operand
+    of ANY dash-flag as a potential script, so `python -c
+    register_read.py …` — where `-c`'s operand is inline CODE and the
+    script never runs — registered the file as read. It also rejected
+    `python -X utf8 register_read.py …`, a spelling its own docstring
+    claimed to support, and every versioned interpreter (`python3.13`).
     """
-    tokens = _split_command(command)
-    if tokens is None:
+    # v0.26.0 audit — the registration must be the WHOLE command.
+    #
+    # Scanning every segment ignored shell control flow, so
+    # `false && register_read.py --file F --hash H` granted read credit
+    # for a command the shell never runs. The hook fires BEFORE execution
+    # and cannot know which branch of a compound command will be taken,
+    # and this hatch's entire value is that its credit is trustworthy —
+    # so anything other than a single, unconditional invocation is not a
+    # registration. (`&&`, `||`, `|`, `;`, backgrounding and substitution
+    # all produce extra segments.) The command is not denied; it simply
+    # earns no credit, and the real script still runs and reports.
+    parsed = shellcmd.segments(command)
+    non_empty = [a for a in parsed if a]
+    if len(non_empty) != 1:
         return None
-    # Find the script-path token. Match by basename so we are robust to
-    # whatever absolute path Claude Code expanded ${CLAUDE_PLUGIN_ROOT} to.
-    script_idx = None
-    for i, tok in enumerate(tokens):
-        if tok.endswith(_REGISTER_SCRIPT_NAME):
-            script_idx = i
-            break
-    if script_idx is None:
-        return None
-    # Parse the trailing tokens for --file and --hash, in both the
-    # space-separated and the `=`-joined spelling.
-    args = tokens[script_idx + 1 :]
-    values: dict[str, str] = {}
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        matched = False
-        for name in ("file", "hash"):
-            flag = f"--{name}"
-            if tok == flag and i + 1 < len(args):
-                values[name] = args[i + 1]
-                i += 2
-                matched = True
-                break
-            if tok.startswith(flag + "="):
-                values[name] = tok[len(flag) + 1 :]
+    for argv in non_empty:
+        # The script must be what this segment actually executes: either
+        # argv[0] itself, or the script operand of a Python interpreter.
+        args: list[str] | None = None
+        if os.path.basename(argv[0].replace("\\", "/")) == _REGISTER_SCRIPT_NAME:
+            args = argv[1:]
+        else:
+            script = shellcmd.python_script_arg(argv)
+            if (script is not None
+                    and os.path.basename(script.replace("\\", "/"))
+                    == _REGISTER_SCRIPT_NAME):
+                args = argv[argv.index(script) + 1:]
+        if args is None:
+            continue
+        # Parse the trailing tokens for --file and --hash, in both the
+        # space-separated and the `=`-joined spelling.
+        values: dict[str, str] = {}
+        i = 0
+        while i < len(args):
+            tok = args[i]
+            matched = False
+            for name in ("file", "hash"):
+                flag = f"--{name}"
+                if tok == flag and i + 1 < len(args):
+                    values[name] = args[i + 1]
+                    i += 2
+                    matched = True
+                    break
+                if tok.startswith(flag + "="):
+                    values[name] = tok[len(flag) + 1:]
+                    i += 1
+                    matched = True
+                    break
+            if not matched:
                 i += 1
-                matched = True
-                break
-        if not matched:
-            i += 1
-    if "file" not in values or "hash" not in values:
-        return None
-    return {"file": values["file"], "hash": values["hash"]}
+        if "file" in values and "hash" in values:
+            return {"file": values["file"], "hash": values["hash"]}
+    return None
 
 
 def _compute_sha256(path: Path) -> str:
@@ -440,7 +580,25 @@ def _handle_register_invocation(command: str, session_id: str):
         return False
 
     # All checks pass: register the file in session state.
-    state_lib.add_read(session_id, str(fpath))
+    #
+    # v0.26.0 — the registration must actually PERSIST. When the save was
+    # abandoned (a concurrent reader holding the state file through every
+    # retry) this returned True regardless, the stub script printed
+    # `register_read: ok`, and the agent proceeded believing rule 04 was
+    # satisfied — only to be DENIED on the next Edit with no explanation
+    # that the registration had silently evaporated. Deny loudly instead:
+    # a failed registration the agent knows about is recoverable, a
+    # successful-looking one that did nothing is not.
+    if not state_lib.add_read(session_id, str(fpath)):
+        _emit_register_deny(
+            command,
+            "register_read: the registration could not be persisted to "
+            "session state (another process is holding the state file).\n"
+            "Nothing was recorded — retry in a moment, or simply Read the "
+            "file again, which is the primary path this hatch exists to "
+            "work around.",
+        )
+        return False
     return True
 
 
@@ -509,11 +667,20 @@ def main() -> int:
         # ------------------------------------------------------------- #
         session_id = payload.get("session_id") or "default"
 
-        # Static regex patterns first.
-        for pat in STATIC_PATTERNS:
-            if pat["regex"].search(command):
-                _emit_deny(command, pat["name"], pat["rule"], pat["explanation"])
-                return 0
+        # Static patterns first, evaluated per shell segment against argv
+        # (v0.26.0) rather than against the raw command string.
+        for argv in shellcmd.segments(command):
+            if not argv:
+                continue
+            if shellcmd.command_name(argv) in _INERT_COMMANDS:
+                # `echo git commit --no-verify` executes nothing. A nested
+                # substitution is a SEPARATE segment and is still checked.
+                continue
+            for pat in STATIC_PATTERNS:
+                if pat["match"](argv):
+                    _emit_deny(command, pat["name"], pat["rule"],
+                               pat["explanation"])
+                    return 0
 
         # Compound: git push --force without --force-with-lease.
         fp = _detect_force_push(command)

@@ -32,12 +32,14 @@ v0.11.0 — Two new responsibilities, both for rule 08 + rule 09:
   1. **Patch-style new_string interception** (rule 09). Before allowing
      an Edit / Write that passed the read-before-edit gate, scan the
      `new_string` for "patch markers" that bypass type/lint/test
-     systems without justification: `try: ... except: pass`, `# noqa`,
-     `# type: ignore`, `// @ts-ignore`, `// eslint-disable`,
-     `time.sleep(...) # race/wait/workaround`. Each marker must carry
-     a "why" rationale in an immediately adjacent comment (containing
-     "because" / "原因" / "why" / a substantive justification) to be
-     allowed through. Bare markers = laziness = DENY.
+     systems without justification. The spellings named below are
+     intentional documentation, never live suppressions:
+     `try: ... except: pass`, `# noqa` (intentional), `# type: ignore`,
+     `// @ts-ignore` (intentional), `// eslint-disable`,
+     `time.sleep(...) # race/wait/workaround` (intentional). Each
+     marker must carry a "why" rationale in an immediately adjacent
+     comment (containing "because" / "原因" / "why" / a substantive
+     justification) to be allowed through. Bare markers = DENY.
 
   2. **Edit-turn recording** (rule 08 + 09 Stop-hook backstop). When
      an Edit or Write passes all checks, stamp `last_edit_turn =
@@ -76,8 +78,11 @@ from pathlib import Path
 # Make `lib/` importable when run directly as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
-# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
+# E402 is suppressed on every lib import below because they must follow
+# the sys.path bootstrap above -- that is the stated reason, not laziness.
 from lib import edicts as edicts_lib  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import srclex  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Tools this guard handles (PreToolUse matcher must include all of them).
@@ -364,128 +369,138 @@ BARE_TRY_EXCEPT_PASS_LABEL = (
 )
 
 
-def _scan_bare_try_except_pass(text: str) -> tuple[int, int] | None:
-    """Linear, regex-free scan for the bare ``try/except/pass`` antipattern.
+def _strip_py_comment(source_line_body: str) -> str:
+    """Return the executable code on a Python line (`;` trimmed).
 
-    Returns ``(char_start, char_end)`` of the offending ``pass`` line on
-    hit, matching the span contract that ``_line_window`` expects; ``None``
-    on clean.
-
-    Pattern detected (single-level — nested try blocks are not parsed;
-    the goal is to flag the laziness signature, not to be a Python
-    parser)::
-
-        <indent>try:
-        ... any body lines ...
-        <same indent>except[ ...]:
-        <deeper indent>pass        # alone on its line
-
-    Why this replaces a regex (root cause — fixed in v0.18.1):
-      The earlier ``PATCH_MARKERS[0]`` used a multi-line regex of the form
-      ``try:\\n(?:[ \\t]+[^\\n]*\\n)+?except...pass``. The ``(?:...)+?``
-      non-greedy line repeater combined with the later anchor caused
-      **catastrophic backtracking** (ReDoS) on any healthy Python source
-      that contained a ``try:`` block without the bare-pass closure ---
-      i.e. essentially all real code. Measured locally:
-
-        N=10 body lines, no matching except/pass: ~0.07 s
-        N=20 body lines, no matching except/pass: > 60 s (timed out)
-
-      The exponent factor (>1000× per 10 lines) explained user-reported
-      hangs of 10 minutes to 1 hour every time the agent tried to
-      ``Edit``/``Write`` a non-trivial ``.py`` file containing ``try:``.
-      A single-pass line scanner is O(N) lines, has no backtracking, and
-      preserves the existing detection semantics (same DENY message, same
-      rationale-window check via ``_line_window`` on the returned span).
+    Comments are already gone by the time this runs — `srclex.logical_lines`
+    strips them *after* masking string literals, so a `#` inside a literal
+    can no longer decapitate the line.
     """
-    if "try:" not in text and "try :" not in text:
-        # Fast path: no possible ``try:`` header. Cheap pre-filter that
+    return source_line_body.rstrip().rstrip(";").rstrip()
+
+
+# A handler clause continues the `try` statement rather than ending it.
+# `\b` matters: the old `code.startswith("finally")` test also fired on an
+# ordinary identifier such as `finally_hook = 1`.
+_HANDLER_HEADER = re.compile(r"^(?:except|finally|else)\b")
+_EXCEPT_HEADER = re.compile(r"^except\b")
+# `except <anything>: <statement>` written on a single line. `[^:]*` is
+# safe here because an except clause never contains a colon before its
+# own terminator (no annotations, no slices, no dict literals).
+_EXCEPT_ONELINER = re.compile(r"^except\b[^:]*:\s*(\S.*)$")
+_TRY_HEADER = re.compile(r"^try\s*:$")
+
+
+def _scan_bare_try_except_pass(text: str) -> list[tuple[int, int]]:
+    """Linear, regex-light scan for the bare ``try/except/pass`` antipattern.
+
+    Returns a list of ``(char_start, char_end)`` spans, one per offending
+    swallow, each matching the span contract that ``_line_window``
+    expects. Empty list on clean.
+
+    Shapes detected::
+
+        <indent>try:                    <indent>try:
+        ... body ...                    ... body ...
+        <same indent>except[ ...]:      <same indent>except Exception: pass
+        <deeper indent>pass
+
+    Why a scanner and not a regex (root cause — fixed in v0.18.1): the
+    earlier multi-line regex ``try:\\n(?:[ \\t]+[^\\n]*\\n)+?except...pass``
+    combined a non-greedy line repeater with a later anchor and caused
+    **catastrophic backtracking** on any healthy Python containing a
+    ``try:`` without the bare-pass closure — i.e. essentially all real
+    code (N=20 body lines took > 60 s). A single-pass line scanner is
+    O(N) lines with no backtracking.
+
+    v0.25.1 — three coverage holes closed, all of the same shape ("the
+    detector recognised one exact layout"):
+
+      * **Comment lines between ``except:`` and ``pass`` masked the hit.**
+        Because the scanner looked only at the next *non-blank* line, an
+        intervening comment made it miss — which meant rule 09's
+        documented escape hatch was STILL vacuous for its most natural
+        spelling: a rationale written on its own line above ``pass``
+        silenced the detector by moving the ``pass``, so
+        ``_has_rationale`` was never consulted. (v0.25 fixed the
+        same-line spelling of this bug and left the own-line spelling in
+        place — including in the regression test it added, which passed
+        for the wrong reason.) Comment lines are now skipped, so the
+        marker fires and the ±1-line window genuinely decides.
+      * **``except Exception: pass`` one-liners were invisible** — the
+        most compact spelling of the antipattern.
+      * **Only the first hit was returned**, so a justified swallow
+        earlier in the edit hid an unjustified one after it, and nested
+        ``try`` blocks were never watched at all (a single pending
+        indent cannot represent nesting; it is now a stack).
+    """
+    if "try" not in text:
+        # Fast path: no possible ``try`` header. Cheap pre-filter that
         # makes the scanner free on the overwhelming majority of edits.
-        return None
+        return []
 
     lines = text.split("\n")
-    # Cumulative line-start offsets so the returned span lines up with
-    # the original string indices that ``_line_window`` slices into.
+    # Cumulative line-start offsets so returned spans line up with the
+    # original string indices that ``_line_window`` slices into.
     starts = [0]
     for ln in lines[:-1]:
         starts.append(starts[-1] + len(ln) + 1)
 
-    pending_try_indent: str | None = None
-    n = len(lines)
-    i = 0
-    while i < n:
-        line = lines[i]
-        body = line.lstrip(" \t").rstrip()
+    # Block shape is read from LOGICAL lines with string bodies masked
+    # (v0.26.0). Two whole classes of miss disappear at the source rather
+    # than being special-cased: the text inside a multi-line string can no
+    # longer re-anchor indentation, and a bracketed ``except (\n …\n):``
+    # header arrives as the single clause it actually is.
+    logical = srclex.logical_lines(text, "py")
+
+    hits: list[tuple[int, int]] = []
+    stack: list[int] = []
+    n = len(logical)
+    k = 0
+    while k < n:
+        phys_idx, code = logical[k]
+        body = _strip_py_comment(code.strip())
         if not body:
-            i += 1
+            k += 1
             continue
-        indent = line[: len(line) - len(line.lstrip(" \t"))]
+        indent = len(code) - len(code.lstrip(" \t"))
+        is_handler = bool(_HANDLER_HEADER.match(body))
 
-        if pending_try_indent is None:
-            # ``try:`` (allow trailing whitespace, no comment / no body
-            # on the same line; ``try: ... ; pass`` is one-liner and not
-            # the antipattern we target).
-            if body == "try:" or body == "try :":
-                pending_try_indent = indent
-            i += 1
-            continue
+        # Close every try-watch whose block has ended. A handler clause at
+        # the try's own column continues that statement, so it pops only
+        # the levels strictly BELOW it. v0.25.1 suppressed *every* pop for
+        # a handler, which left the inner try's indent stranded on top of
+        # the stack and made the outer ``except`` unreachable — a nested
+        # try/except that v0.25.0 denied regressed to "allow".
+        while stack and (stack[-1] > indent
+                         or (stack[-1] == indent and not is_handler)):
+            stack.pop()
 
-        # Inside a pending try-block. Look for ``except`` at the same
-        # indent column.
-        if indent == pending_try_indent and (
-            body == "except:"
-            or body == "except"
-            or body.startswith("except ")
-            or body.startswith("except(")
-        ):
-            # ``except`` header at matching indent: check whether the
-            # next non-blank line is a ``pass`` indented deeper.
-            j = i + 1
-            while j < n and lines[j].lstrip(" \t").rstrip() == "":
-                j += 1
-            if j < n:
-                nxt = lines[j]
-                nxt_body = nxt.lstrip(" \t").rstrip()
-                nxt_indent = nxt[: len(nxt) - len(nxt.lstrip(" \t"))]
-                # v0.25 — compare the CODE on the line, not the raw line.
-                # Requiring an exactly-bare ``pass`` meant any trailing
-                # comment defeated rule 09's flagship detector outright:
-                # ``pass  # TODO later`` was ALLOWED. Worse, it made the
-                # documented escape hatch unreachable — a rationale
-                # comment on the pass line silenced the detector by
-                # changing the string, so ``_has_rationale`` was never
-                # consulted and the "why-comment" contract was vacuous.
-                # Now the comment is stripped, the marker still fires,
-                # and the ±1-line rationale window decides.
-                nxt_code = nxt_body.split("#", 1)[0].rstrip()
-                nxt_code = nxt_code.rstrip(";").rstrip()
-                if nxt_code == "pass" and len(nxt_indent) > len(indent):
-                    return starts[j], starts[j] + len(lines[j])
-            # v0.25 — do NOT drop the watch here. A try statement may have
-            # several ``except`` clauses, and the canonical antipattern is
-            # a narrow handler followed by a catch-all that swallows
-            # everything:
-            #     try: … / except ValueError: log() / except Exception: pass
-            # Clearing the watch after the first clause made exactly that
-            # shape invisible. Leaving it set lets each subsequent clause
-            # at the same indent be inspected; the dedent branch below
-            # still ends the watch when a non-``except`` statement returns
-            # to (or below) the ``try:`` column.
-            i += 1
+        if stack and stack[-1] == indent and _EXCEPT_HEADER.match(body):
+            one_liner = _EXCEPT_ONELINER.match(body)
+            if one_liner is not None:
+                if _strip_py_comment(one_liner.group(1)) == "pass":
+                    hits.append((starts[phys_idx],
+                                 starts[phys_idx] + len(lines[phys_idx])))
+            elif body.endswith(":"):
+                j = k + 1
+                while j < n and not _strip_py_comment(logical[j][1].strip()):
+                    j += 1
+                if j < n:
+                    nxt_idx, nxt_code = logical[j]
+                    nxt_indent = len(nxt_code) - len(nxt_code.lstrip(" \t"))
+                    if (_strip_py_comment(nxt_code.strip()) == "pass"
+                            and nxt_indent > indent):
+                        hits.append((starts[nxt_idx],
+                                     starts[nxt_idx] + len(lines[nxt_idx])))
+            k += 1
             continue
 
-        # Dedent to or below the ``try:`` indent without seeing an
-        # ``except`` header: the try block has been closed (or is
-        # malformed). Drop the watch and re-process this line in the
-        # outer state — it may itself open a new ``try:`` block.
-        if len(indent) <= len(pending_try_indent):
-            pending_try_indent = None
-            continue
+        if _TRY_HEADER.match(body):
+            stack.append(indent)
+        k += 1
 
-        # Still inside the try body at deeper indent: keep scanning.
-        i += 1
-
-    return None
+    return hits
 
 
 # --------------------------------------------------------------------------- #
@@ -508,34 +523,64 @@ def _scan_bare_try_except_pass(text: str) -> tuple[int, int] | None:
 #   - The ``try/except: pass`` detector lives outside this list because
 #     it is intrinsically multi-line and must remain backtrack-free.
 # --------------------------------------------------------------------------- #
+# v0.25.1 — the trailing `(?:\n|$)` anchors are GONE from the five
+# single-line markers, and that removal is the fix. Requiring the marker
+# to sit at end-of-line meant ANY trailing text made the pattern miss
+# entirely, so `// @ts-ignore: TODO` was ALLOWED while the bare form was
+# denied — the rationale check was never reached, it was simply skipped.
+# The same hole made the deny message's own "acceptable form" examples
+# (`# noqa: E501  -- URL string exceeds 100 chars`) pass for the wrong
+# reason, and made `test_ts_ignore_with_rationale_is_allowed` a vacuous
+# test. Dropping the anchors also fixes CRLF: `[ \t]*\n` could never
+# match `\r\n`, so on this plugin's primary platform every one of these
+# five detectors was silently off for CRLF files.
+#
+# Trailing text is now handed to `_inline_reason_is_substantive`, so an
+# inline explanation still justifies the marker while a bare
+# `TODO` / `FIXME` does not. Prose targets keep the old bare-only
+# behaviour — see `_find_unjustified_patch_marker`.
 PATCH_MARKERS: list[tuple[str, re.Pattern[str]]] = [
+    # v0.26.0 — every marker now ends at a TOKEN boundary. Dropping the
+    # `(?:\n|$)` anchors in v0.25.1 left the markers as bare substrings,
+    # so `# noquality`, `@ts-ignore-generated` and `eslint-disablement`
+    # were each read as the suppression they merely start with and were
+    # DENIED. `\b` is not enough for the `-` spellings (a hyphen is a
+    # non-word char, so `\b` matches happily before it); those need an
+    # explicit `(?![\w-])`.
     (
         "Python: # noqa without rationale",
-        re.compile(r"#[ \t]*noqa(?::[ \t]*[A-Z]+\d+(?:[ \t]*,[ \t]*[A-Z]+\d+)*)?[ \t]*(?:\n|$)"),
+        re.compile(
+            r"#[ \t]*noqa\b(?::[ \t]*[A-Za-z]+\d*(?:[ \t]*,[ \t]*[A-Za-z]+\d*)*)?"
+        ),
     ),
     (
         "Python: # type: ignore without rationale",
-        re.compile(r"#[ \t]*type:[ \t]*ignore(?:\[[^\]]*\])?[ \t]*(?:\n|$)"),
+        re.compile(r"#[ \t]*type:[ \t]*ignore\b(?:\[[^\]\n]*\])?"),
     ),
     (
         "TypeScript: // @ts-ignore without rationale",
-        re.compile(r"//[ \t]*@ts-ignore[ \t]*(?:\n|$)"),
+        re.compile(r"//[ \t]*@ts-ignore(?![\w-])"),
     ),
     (
         "TypeScript: // @ts-expect-error without rationale",
-        re.compile(r"//[ \t]*@ts-expect-error[ \t]*(?:\n|$)"),
+        re.compile(r"//[ \t]*@ts-expect-error(?![\w-])"),
     ),
     (
         "JavaScript/TypeScript: // eslint-disable[-next-line] without rationale",
         re.compile(
-            r"//[ \t]*eslint-disable(?:-next-line|-line)?"
-            r"(?:[ \t]+[a-zA-Z0-9/_-]+(?:[ \t]*,[ \t]*[a-zA-Z0-9/_-]+)*)?[ \t]*(?:\n|$)"
+            r"//[ \t]*eslint-disable(?:-next-line|-line)?(?![\w-])"
+            r"(?:[ \t]+[a-zA-Z0-9/_-]+(?:[ \t]*,[ \t]*[a-zA-Z0-9/_-]+)*)?"
         ),
     ),
     (
         "Python: time.sleep used to mask a race/wait/workaround",
+        # `[^\n]{0,200}?` (lazy, bounded) instead of `[^)]*` so a nested
+        # call survives: `time.sleep(max(0, delay))  # workaround` used to
+        # miss, because `[^)]*` stopped at the INNER `)`. Bounded and
+        # backtrack-safe — the required `#` anchor caps the search.
         re.compile(
-            r"\btime\.sleep\([^)]*\)[ \t]*#[ \t]*(?:wait|race|workaround|hack|fix(?:me)?)\b",
+            r"\btime\.sleep\([^\n]{0,200}?\)[ \t]*#[ \t]*"
+            r"(?:wait|race|workaround|hack|fix(?:me)?)\b",
             re.IGNORECASE,
         ),
     ),
@@ -546,6 +591,12 @@ PATCH_MARKERS: list[tuple[str, re.Pattern[str]]] = [
 # insensitive) for the marker to be considered justified.
 RATIONALE_TOKENS = (
     "because", "原因", "why", "正当", "rationale", "reason",
+    # v0.26.0 — Chinese "because"/"deliberately" forms. Only the NOUN
+    # `原因` was listed, so `# noqa 因为上游库类型有误` was DENIED while the
+    # English `because …` was allowed. This repo's primary language is
+    # Chinese and its own docs use these forms throughout; the hatch was
+    # English-first by accident, not by design.
+    "因为", "之所以", "理由", "故意", "刻意", "有意", "特意",
     # Common justification leads
     "see issue", "see pr", "see comment", "see ticket", "tracking",
     "intentional", "intentionally", "deliberate", "deliberately",
@@ -556,12 +607,70 @@ RATIONALE_TOKENS = (
 )
 
 
+def _window_bounds(text: str, span_start: int, span_end: int) -> tuple[int, int]:
+    """Char bounds of the line containing the span, plus ±1 line.
+
+    Split out from `_line_window` (v0.26.0) so the rationale check can be
+    evaluated against the WHOLE text's lexical state over this range,
+    rather than re-lexing the three-line slice in isolation. A window
+    inside a docstring contains no `\"\"\"` of its own, so judged alone it
+    looks like bare code and a perfectly good why-note went unseen.
+    """
+    # CR counts as a line break, not just LF. Reading only "\n" made the
+    # whole of a lone-CR file a single "line", so the +/-1 window covered
+    # everything and any `because` anywhere in the file satisfied the
+    # hatch for every marker in it. (srclex ends comment spans at CR for
+    # the same reason; both had to change or the pair still disagreed.)
+    def _rfind_break(upto: int) -> int:
+        return max(text.rfind("\n", 0, upto), text.rfind("\r", 0, upto))
+
+    def _find_break(frm: int) -> int:
+        lf = text.find("\n", frm)
+        cr = text.find("\r", frm)
+        cand = [x for x in (lf, cr) if x != -1]
+        return min(cand) if cand else len(text)
+
+    if span_end > span_start and text[span_end - 1] in "\n\r":
+        span_end -= 1
+    line_start = _rfind_break(span_start)
+    line_start = 0 if line_start == -1 else line_start + 1
+    line_end = _find_break(span_end)
+    prev_start = _rfind_break(max(0, line_start - 1))
+    prev_start = 0 if prev_start == -1 else prev_start + 1
+    next_end = _find_break(min(len(text), line_end + 1))
+    return prev_start, next_end
+
+
+def _has_rationale_at(
+    text: str,
+    span_start: int,
+    span_end: int,
+    tokens: tuple[str, ...] = RATIONALE_TOKENS,
+    lang: str = "auto",
+) -> bool:
+    """True when a why-token appears in documentation near the span."""
+    lo, hi = _window_bounds(text, span_start, span_end)
+    docs = srclex.comment_text_in_range(text, lo, hi, lang).lower()
+    return any(tok in docs for tok in tokens)
+
+
 def _line_window(text: str, span_start: int, span_end: int) -> str:
     """Return the line containing [span_start, span_end] plus ±1 line.
 
-    Used to look for a "why" rationale in the immediate neighbourhood of
-    a suppression marker.
+    Used for the SNIPPET shown in the deny message. The rationale decision
+    itself goes through `_has_rationale_at`, which needs whole-text
+    context.
     """
+    # v0.25.1 — clamp a span that consumed its own terminating newline.
+    # Five PATCH_MARKERS regexes end in `(?:\n|$)`, so their m.end()
+    # lands at the START of the next line; find("\n", span_end) then
+    # located the NEXT line's terminator and the documented "±1 line"
+    # window silently became "+2 lines below" — an unrelated rationale
+    # two lines away suppressed the DENY. (The upward direction and the
+    # bare try/except scanner, whose span carries no newline, were ±1
+    # all along.)
+    if span_end > span_start and text[span_end - 1] == "\n":
+        span_end -= 1
     line_start = text.rfind("\n", 0, span_start)
     line_start = 0 if line_start == -1 else line_start + 1
     line_end = text.find("\n", span_end)
@@ -575,14 +684,106 @@ def _line_window(text: str, span_start: int, span_end: int) -> str:
     return text[prev_start:next_end]
 
 
+def _comment_text(window: str, lang: str = "auto") -> str:
+    """Return only the COMMENT portions of a window, one per line.
+
+    v0.25.1 — the rationale escape hatch is documented as a "why-comment",
+    but `_has_rationale` used to lowercase the whole raw window, so any
+    token anywhere in executable code satisfied it:
+
+        reason = compute()
+        x = legacy()  # noqa      <- allowed, because `reason` is a variable
+
+    The same leak applied to rules 10 + 11, where an adjacent identifier
+    like `vendor_id`, or a secret VALUE containing `sample`, silenced the
+    detector. Restricting the search to comment text makes the hatch mean
+    what its own deny message says.
+
+    v0.26.0 — delegated to `srclex`, because "find the first `#` or `//`"
+    is not the same question as "where does a comment start". It found the
+    `#` inside `"http://host/#frag"` and the `//` inside ANY url, so a
+    single neighbouring line such as `API = "https://api.example.com"`
+    silenced the rule-10 SECRET detector (`example` is a rationale token
+    and `example.com` is the IANA example domain — i.e. the leak fired
+    exactly where credentials are most likely to sit). It also could not
+    see `/* … */` block comments at all, so a legitimate adjacent
+    JavaScript rationale was rejected. Lexing answers both.
+    """
+    return srclex.comment_text(window, lang)
+
+
+# CJK ranges: Han, Han extension A, kana, hangul. Used to size a rationale
+# written in a language that does not delimit words with spaces.
+_CJK_RANGES = (
+    (0x3040, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF),
+)
+_MIN_INLINE_REASON_CJK_CHARS = 6
+_MIN_DISTINCT_CJK_CHARS = 5
+
+
+def _cjk_count(text: str) -> int:
+    return sum(
+        1 for ch in text
+        if any(lo <= ord(ch) <= hi for lo, hi in _CJK_RANGES)
+    )
+
+
 def _has_rationale(
-    snippet: str, tokens: tuple[str, ...] = RATIONALE_TOKENS
+    snippet: str,
+    tokens: tuple[str, ...] = RATIONALE_TOKENS,
+    lang: str = "auto",
 ) -> bool:
-    snippet_lc = snippet.lower()
+    snippet_lc = _comment_text(snippet, lang).lower()
     return any(tok in snippet_lc for tok in tokens)
 
 
-def _find_unjustified_patch_marker(new_string: str) -> tuple[str, str] | None:
+# Words that look like a reason but assert nothing. Leading one of these
+# is what distinguishes `// @ts-ignore: TODO` (a deferral) from
+# `// @ts-ignore: upstream types are wrong for Node 20` (a reason).
+_NON_REASON_LEADS = {
+    "todo", "fixme", "hack", "xxx", "wip", "tbd", "later", "temp",
+    "temporary", "wontfix", "n/a", "na", "?", "??",
+}
+_MIN_INLINE_REASON_CHARS = 12
+
+
+def _inline_reason_is_substantive(trailing: str) -> bool:
+    """True when text following a marker reads as an actual explanation.
+
+    Deliberately permissive in the "allow" direction (this repo prefers
+    false negatives to false positives): several words of prose count.
+    Deliberately strict about the ONE shape that is a deferral rather
+    than a reason — a leading TODO / FIXME / HACK / … keyword.
+
+    v0.26.0 — "several words" was implemented as "contains an ASCII
+    space", which no Chinese sentence does. A CJK rationale of any length
+    therefore scored as non-substantive, so the identical justification
+    passed in English and was DENIED in Chinese — in a repo whose primary
+    language is Chinese. Length in CJK characters is the equivalent
+    measure.
+    """
+    text = trailing.strip().lstrip(":-—–,;").strip()
+    # Padding does not add meaning. Without this, `改了改了改了!!!!!!` and
+    # `变量名字变量名字____` reached the length bar on punctuation alone.
+    text = text.strip("!?！？。,，、;；_*~`\"'()（） \t")
+    if len(text) < _MIN_INLINE_REASON_CHARS:
+        return False
+    if " " not in text:
+        cjk = [ch for ch in text
+               if any(lo <= ord(ch) <= hi for lo, hi in _CJK_RANGES)]
+        # Repetition is not an explanation: `改了` six times clears a raw
+        # character count but says one thing. Distinct characters is the
+        # cheap proxy for "actually says something".
+        if (len(cjk) < _MIN_INLINE_REASON_CJK_CHARS
+                or len(set(cjk)) < _MIN_DISTINCT_CJK_CHARS):
+            return False
+    first = re.split(r"[^\w?/]+", text.lower(), maxsplit=1)[0]
+    return first not in _NON_REASON_LEADS
+
+
+def _find_unjustified_patch_marker(
+    new_string: str, scannable: bool = True, lang: str = "auto"
+) -> tuple[str, str] | None:
     """Scan `new_string` for the first unjustified patch marker.
 
     Returns (label, surrounding_snippet) on hit, or None on clean.
@@ -590,32 +791,51 @@ def _find_unjustified_patch_marker(new_string: str) -> tuple[str, str] | None:
     Order of checks:
       1. Linear (regex-free) scan for bare ``try/except: pass``. Run
          first because it is the only intrinsically multi-line pattern
-         and replaced a catastrophic-backtracking regex in v0.18.1.
-      2. Single-line, anchored regexes in ``PATCH_MARKERS``. All O(N)
-         safe by construction.
+         and replaced a catastrophic-backtracking regex in v0.18.1. Every
+         hit is inspected (v0.25.1) — a justified swallow no longer hides
+         an unjustified one later in the same edit.
+      2. Single-line regexes in ``PATCH_MARKERS``. All O(N) safe by
+         construction.
 
     Both stages reuse the same ``_line_window`` + ``_has_rationale``
     rationale-allowance check, so adjacent ``because`` / ``原因`` / etc.
-    comments suppress the DENY exactly as before the refactor.
+    comments suppress the DENY.
+
+    `scannable` is False for prose docs (.md / .rst / …), where the
+    markers are discussed rather than executed. Those targets keep the
+    pre-v0.25.1 behaviour of matching only the BARE marker form: this
+    repo's own docs mention `noqa` / `@ts-ignore` 54 times, and the
+    permissive form below would flag every one of them. Enforcement on
+    code is unchanged-or-stricter; only the doc false-positive surface
+    moves.
     """
     if not new_string:
         return None
 
     # Stage 1: bare try/except/pass via linear scan (no ReDoS).
-    bare_hit = _scan_bare_try_except_pass(new_string)
-    if bare_hit is not None:
-        start, end = bare_hit
-        window = _line_window(new_string, start, end)
-        if not _has_rationale(window):
+    for start, end in _scan_bare_try_except_pass(new_string):
+        # The rationale decision uses whole-text lexical context
+        # (`_has_rationale_at`); `_line_window` only builds the snippet the
+        # deny message shows.
+        if not _has_rationale_at(new_string, start, end, lang=lang):
+            window = _line_window(new_string, start, end)
             short = window if len(window) <= 240 else window[:237] + "..."
             return BARE_TRY_EXCEPT_PASS_LABEL, short
 
     # Stage 2: single-line patch markers.
     for label, pat in PATCH_MARKERS:
         for m in pat.finditer(new_string):
-            window = _line_window(new_string, m.start(), m.end())
-            if not _has_rationale(window):
+            line_end = new_string.find("\n", m.end())
+            line_end = len(new_string) if line_end == -1 else line_end
+            trailing = new_string[m.end():line_end].rstrip("\r")
+            if not scannable and trailing.strip():
+                continue
+            if _inline_reason_is_substantive(trailing):
+                continue
+            if not _has_rationale_at(new_string, m.start(), m.end(),
+                                     lang=lang):
                 # Trim snippet to a reasonable size for the deny message.
+                window = _line_window(new_string, m.start(), m.end())
                 short = window if len(window) <= 240 else window[:237] + "..."
                 return label, short
     return None
@@ -667,10 +887,15 @@ HARDCODE_RATIONALE_TOKENS = RATIONALE_TOKENS + (
 # follow the keyword with only spaces between, so the closing quote of
 # the key blocked every match. The rarer bare-key form was caught while
 # the common one was waved through.
+# v0.25.1 — the separator is captured (`sep`) so the type-annotation
+# relief below can be scoped to the `:` form it was written for. Applying
+# it to `=` too meant a plain-alphabetic credential assigned with `=`
+# (example: a CamelCase-looking password literal) was silently allowed.
 _SECRET_ASSIGN = re.compile(
     r"\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key"
     r"|secret[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key"
-    r"|bearer)\b['\"]?[ \t]*[:=][ \t]*(['\"])(?P<val>[^'\"\n]{8,})\1",
+    r"|bearer)\b['\"]?[ \t]*(?P<sep>[:=])[ \t]*"
+    r"(?P<q>['\"])(?P<val>[^'\"\n]{8,})(?P=q)",
     re.IGNORECASE,
 )
 
@@ -693,6 +918,12 @@ _SECRET_PLACEHOLDERS = (
 _TYPE_NAME_VALUE = re.compile(r"^[A-Z][A-Za-z]*$")
 
 # Standalone secret literals that need no keyword on the left.
+#
+# v0.25.1 adds provider-issued token shapes. These are preferred over
+# widening the keyword list with a bare `token`: the value shape is
+# self-identifying, so precision stays high, whereas `token = "…"` would
+# fire on ordinary parser/lexer code (`token = "NUMBER_LITERAL"`) — a
+# false positive this repo's "prefer false negatives" philosophy rejects.
 _SECRET_LITERAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "Hardcoded credential: private-key PEM header",
@@ -701,6 +932,14 @@ _SECRET_LITERAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "Hardcoded credential: AWS access-key literal",
         re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    ),
+    (
+        "Hardcoded credential: provider-issued token literal",
+        re.compile(
+            r"\bgh[pousr]_[A-Za-z0-9]{16,}"
+            r"|\bxox[baprs]-[A-Za-z0-9-]{10,}"
+            r"|\bAIza[0-9A-Za-z_-]{20,}"
+        ),
     ),
     (
         "Hardcoded credential: username:password in a connection URL",
@@ -715,7 +954,16 @@ _SECRET_LITERAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 _PATH_DEP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "Path dependency: Windows user-home absolute path",
-        re.compile(r"[A-Za-z]:[\\/](?:Users|home)[\\/][^\\/\s'\"<>|]+", re.IGNORECASE),
+        # v0.25.1 — `(?:\\{1,2}|/)` instead of `[\\/]`. The single-slash
+        # class only matched a RAW spelling; in real Python / JSON / JS
+        # source the separator is DOUBLED, which is how a user-home path
+        # actually appears in committed code (example only, this module
+        # depends on no such path). The detector caught the rare spelling
+        # and waved through the normal one — on the primary platform.
+        re.compile(
+            r"[A-Za-z]:(?:\\{1,2}|/)(?:Users|home)(?:\\{1,2}|/)[^\\/\s'\"<>|]+",
+            re.IGNORECASE,
+        ),
     ),
     (
         "Path dependency: POSIX user-home absolute path",
@@ -774,13 +1022,23 @@ def _is_scannable_target(file_path: str) -> bool:
     return ext == ".txt" and stem.startswith(_DEP_MANIFEST_TXT_PREFIXES)
 
 
-def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
+def _find_hardcoded_secret(
+    text: str, lang: str = "auto"
+) -> tuple[str, str] | None:
     """Scan `text` for the first unjustified hardcoded secret (rule 10).
 
     Returns (label, surrounding_snippet) on hit, or None on clean. A
     match is suppressed when the value is an obvious placeholder / env-
     read or when an adjacent line carries an essential / example
     rationale (HARDCODE_RATIONALE_TOKENS).
+
+    `lang` reaches `_has_rationale` so the rationale search is confined to
+    real comments. This detector was the worst casualty of the old
+    "find the first `#` or `//`" approximation: `example` is a rationale
+    token and `example.com` is the IANA reserved example domain, so a
+    single neighbouring line such as `API = "https://api.example.com"`
+    turned the entire secret detector off — precisely the neighbourhood a
+    committed credential lives in.
     """
     if not text:
         return None
@@ -788,13 +1046,16 @@ def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
         val_lc = m.group("val").lower()
         if any(ph in val_lc for ph in _SECRET_PLACEHOLDERS):
             continue
-        if _TYPE_NAME_VALUE.match(m.group("val")):
+        if m.group("sep") == ":" and _TYPE_NAME_VALUE.match(m.group("val")):
             # Forward-reference type annotation, not a credential
-            # (v0.24 — see _TYPE_NAME_VALUE).
+            # (v0.24 — see _TYPE_NAME_VALUE). v0.25.1 scopes the relief to
+            # the `:` spelling it was written for; under `=` the same
+            # shape is an ordinary assignment of a real secret.
+            continue
+        if _has_rationale_at(text, m.start(), m.end(),
+                             HARDCODE_RATIONALE_TOKENS, lang=lang):
             continue
         window = _line_window(text, m.start(), m.end())
-        if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
-            continue
         short = window if len(window) <= 240 else window[:237] + "..."
         return (
             "Hardcoded credential: secret-named variable assigned a literal",
@@ -802,28 +1063,41 @@ def _find_hardcoded_secret(text: str) -> tuple[str, str] | None:
         )
     for label, pat in _SECRET_LITERAL_PATTERNS:
         for m in pat.finditer(text):
-            window = _line_window(text, m.start(), m.end())
-            if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
+            # v0.25.1 — placeholder filtering applies to standalone
+            # literals too. It used to gate only the keyword-assignment
+            # branch, so an obviously-fake connection string such as
+            # `postgres://user:redacted@host/db` was denied while the
+            # identical value behind `password = …` was allowed.
+            if any(ph in m.group(0).lower() for ph in _SECRET_PLACEHOLDERS):
                 continue
+            if _has_rationale_at(text, m.start(), m.end(),
+                                 HARDCODE_RATIONALE_TOKENS, lang=lang):
+                continue
+            window = _line_window(text, m.start(), m.end())
             short = window if len(window) <= 240 else window[:237] + "..."
             return label, short
     return None
 
 
-def _find_path_dependency(text: str) -> tuple[str, str] | None:
+def _find_path_dependency(
+    text: str, lang: str = "auto"
+) -> tuple[str, str] | None:
     """Scan `text` for the first unjustified machine-specific path (rule 11).
 
     Returns (label, surrounding_snippet) on hit, or None on clean. A
     match is suppressed when an adjacent line carries an essential
     rationale (HARDCODE_RATIONALE_TOKENS).
+
+    Same `lang` plumbing, same reason, as `_find_hardcoded_secret` above.
     """
     if not text:
         return None
     for label, pat in _PATH_DEP_PATTERNS:
         for m in pat.finditer(text):
-            window = _line_window(text, m.start(), m.end())
-            if _has_rationale(window, HARDCODE_RATIONALE_TOKENS):
+            if _has_rationale_at(text, m.start(), m.end(),
+                                 HARDCODE_RATIONALE_TOKENS, lang=lang):
                 continue
+            window = _line_window(text, m.start(), m.end())
             short = window if len(window) <= 240 else window[:237] + "..."
             return label, short
     return None
@@ -895,7 +1169,7 @@ def _handle_pre_tool_use(payload: dict) -> None:
         """
         if not _is_scannable_target(file_path):
             return
-        hit = _find_hardcoded_secret(content)
+        hit = _find_hardcoded_secret(content, lang=srclex.lang_for_path(file_path))
         if hit is not None:
             _emit_deny(
                 HARDCODE_DENY_TEMPLATE,
@@ -905,7 +1179,7 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 snippet=hit[1],
             )
             return  # unreachable; _emit_deny exits
-        hit = _find_path_dependency(content)
+        hit = _find_path_dependency(content, lang=srclex.lang_for_path(file_path))
         if hit is not None:
             _emit_deny(
                 PATHDEP_DENY_TEMPLATE,
@@ -927,7 +1201,10 @@ def _handle_pre_tool_use(payload: dict) -> None:
         DENIED Write still granted read-before-edit authorization), and
         each new detector had to be spliced into three places.
         """
-        hit = _find_unjustified_patch_marker(content)
+        hit = _find_unjustified_patch_marker(
+            content, scannable=_is_scannable_target(file_path),
+            lang=srclex.lang_for_path(file_path),
+        )
         if hit is not None:
             _emit_deny(
                 PATCH_DENY_TEMPLATE,

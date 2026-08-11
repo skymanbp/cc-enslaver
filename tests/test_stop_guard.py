@@ -29,6 +29,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before this import
 from _helpers import SCRIPTS_DIR, run_hook  # noqa: E402
 
 GUARD = str(SCRIPTS_DIR / "stop_guard.py")
@@ -718,14 +719,19 @@ class TestRule10FileClaimVerification(_StopBase):
 class TestTildePathClaimRegression(unittest.TestCase):
     """v0.21.1 — 8.3 short-name (tilde) paths must extract as file claims.
 
+    Every user-home path in this class is an example / fixture: the path
+    SHAPE is the subject under test, and nothing depends on a real layout.
+
     Root cause of the pre-existing windows-latest CI red: the GitHub
     Windows runner's TEMP is a DOS 8.3 short path whose user segment
-    carries a tilde (C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\...). The
+    carries a tilde — an example only:
+    C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\... — and the
     _PATH_TOKEN character class did not include the tilde, so any claim
     whose path contained one produced ZERO extractions. Layer (g) then
     silently no-op'd, so the three TestRule10 block-cases returned None
     (no block) and failed — but only on the runner. Developer machines
-    with a tilde-free temp (e.g. C:\\Users\\skyma\\...) extracted fine and
+    with a tilde-free temp (an example only:
+    C:\\Users\\skyma\\...) extracted fine and
     passed, masking the bug.
 
     These call _extract_file_claims directly with a hardcoded tilde path
@@ -740,6 +746,7 @@ class TestTildePathClaimRegression(unittest.TestCase):
 
     def test_tilde_english_edit_claim_extracts(self) -> None:
         claims = self._claims(
+            # fixture: the tilde path shape IS the subject under test
             r"I edited C:\Users\RUNNER~1\AppData\Local\Temp\t\x.py."
         )
         self.assertTrue(
@@ -752,18 +759,22 @@ class TestTildePathClaimRegression(unittest.TestCase):
 
     def test_tilde_create_claim_extracts(self) -> None:
         claims = self._claims(
+            # fixture: the tilde path shape IS the subject under test
             r"I created C:\Users\RUNNER~1\AppData\Local\Temp\t\new.py."
         )
         self.assertTrue(claims, "tilde create claim must extract")
         self.assertEqual(claims[0][2], "create")
 
     def test_tilde_chinese_edit_claim_extracts(self) -> None:
+        # fixture: the tilde path shape IS the subject under test
         claims = self._claims("我修改了 `C:\\Users\\RUNNER~1\\Temp\\y.py`。")
         self.assertTrue(claims, "tilde path (zh) must extract")
         self.assertIn("~", claims[0][1])
 
     def test_non_tilde_path_still_extracts(self) -> None:
         # Guard against over-narrowing: ordinary paths keep working.
+        # fixture: an example of the ordinary tilde-free user-home shape,
+        # spelled out because the SHAPE is exactly what is under test here
         claims = self._claims(r"I edited C:\Users\skyma\Temp\t\x.py.")
         self.assertTrue(claims)
         self.assertNotIn("~", claims[0][1])
@@ -2009,6 +2020,206 @@ class TestNestedFenceTldrExtraction(unittest.TestCase):
         self.assertIsNotNone(
             self.sg._find_overlong_tldr(reply),
             msg="the canonical yaml schema block must remain measurable",
+        )
+
+
+class TestDoneClaimCoverageV0251(_StopBase):
+    """v0.25.1 — `_has_done_claim` gates ALL nine layers.
+
+    A completion phrased outside DONE_PATTERNS did not merely skip one
+    check: stop_guard returned immediately, so evidence, convergence,
+    fidelity, rule 08, rule 09, file-claims, TL;DR and the sync gate
+    were all bypassed and the edit flag was cleared on the way out.
+    """
+
+    def _blocked(self, message: str) -> bool:
+        _, out, _ = self._stop(message)
+        return out is not None
+
+    def test_previously_missed_wordings_now_claim_completion(self) -> None:
+        # No evidence in any of these → layer (a) must block, which is
+        # only reachable once the wording registers as a done-claim.
+        for label, msg in [
+            ("implemented", "Implemented the fix; ship it."),
+            ("finished", "Finished the refactor."),
+            ("is complete", "The migration is complete."),
+            ("chinese 已完成", "已完成。可以直接发布了。"),
+        ]:
+            with self.subTest(case=label):
+                self.assertTrue(self._blocked(msg), msg=label)
+
+    def test_negated_statements_are_not_done_claims(self) -> None:
+        """An honest report of failure must not be treated as a claim."""
+        for label, msg in [
+            ("not done", "Not done; tests failed and I need more input."),
+            ("is not fixed", "This is not fixed. The parser still crashes."),
+            ("all settings substring",
+             "Not all settings are loaded, so I stopped here."),
+            ("chinese 尚未", "尚未完成了修复，等你确认方案。"),
+        ]:
+            with self.subTest(case=label):
+                self.assertFalse(self._blocked(msg), msg=label)
+
+    def test_windows_transcript_counts_as_evidence(self) -> None:
+        """This plugin's primary platform emits PowerShell prompts.
+
+        Neither `PS C:\\repo>` nor `C:\\repo>` matched the POSIX-only
+        prompt patterns, so a Windows user pasting a genuine transcript
+        was still told they had produced no evidence.
+        """
+        bs = chr(92)
+        for label, transcript in [
+            ("powershell", "PS C:" + bs + "repo> checker.exe\nOK\n"),
+            ("cmd", "C:" + bs + "repo> checker.exe\nOK\n"),
+        ]:
+            with self.subTest(case=label):
+                _, out, _ = self._stop("Fixed.\n" + transcript)
+                # Scoped to layer (a): this test is about evidence
+                # detection, not the whole stack. A reply this bare
+                # correctly fails a later layer.
+                reason = "" if out is None else out.get("reason", "")
+                self.assertNotIn(
+                    "FAILED at Layer (a)", reason,
+                    msg=f"{label}: a real transcript was called no-evidence",
+                )
+
+    def test_prose_without_a_transcript_still_lacks_evidence(self) -> None:
+        """Reverse twin: the Windows patterns must not match prose."""
+        _, out, _ = self._stop("Fixed. Everything works on C: drive now.")
+        self.assertIsNotNone(out)
+        self.assertIn("FAILED at Layer (a)", out.get("reason", ""))
+
+
+class TestTldrMustCarryContentV0251(_StopBase):
+    """v0.25.1 — layer (h) presence must mean an actual takeaway.
+
+    A bare `tldr:` satisfied the presence half while the LENGTH half
+    then measured nothing, so the emptiest possible summary passed both.
+    """
+
+    BODY = (
+        "Fixed.\n\n$ python -m unittest\nRan 12 tests\nOK\n\n"
+        "收敛: 真解决了吗 / 更好方案 / 哪些没验 / 验证是否合理\n"
+        "忠实: 请求覆盖 / 无降级 / 无遗漏\n"
+    )
+
+    def _blocked_for_tldr(self, tail: str) -> bool:
+        _, out, _ = self._stop(self.BODY + tail)
+        if out is None:
+            return False
+        # The status table lists EVERY layer, so a bare "(h)" substring
+        # would match on any block; assert on the failing-layer header.
+        return "FAILED at Layer (h)" in out.get("reason", "")
+
+    def test_empty_and_quoted_markers_are_rejected(self) -> None:
+        for label, tail in [
+            ("bare marker", "tldr:\n"),
+            ("empty string value", 'tldr: ""\n'),
+            ("blockquoted only", "> tldr: quoted from the spec\n"),
+        ]:
+            with self.subTest(case=label):
+                self.assertTrue(self._blocked_for_tldr(tail), msg=label)
+
+    def test_real_tldr_still_passes(self) -> None:
+        for label, tail in [
+            ("inline value", "tldr: 修好了检测器，测试全过。\n"),
+            ("list under marker", "tldr:\n  - 修好了检测器，测试全过。\n"),
+        ]:
+            with self.subTest(case=label):
+                self.assertFalse(self._blocked_for_tldr(tail), msg=label)
+
+    def test_twin_layer_h_actually_fires_on_these_shapes(self) -> None:
+        """v0.26.0 — the twin the PASS-only test above was missing.
+
+        Round-4 audit found `test_real_tldr_still_passes` vacuous: it can
+        succeed whenever layer (h) never fires at all, and it passes on
+        the pre-fix tree, so it does not show the content detector
+        recognised either form. Each shape below is the same form with its
+        CONTENT removed or requoted, and must block.
+        """
+        for label, tail in [
+            ("no tldr at all", "所有测试通过。\n"),
+            ("value-less marker", "tldr:\n"),
+            ("punctuation only", "tldr: ！！！\n"),
+            ("quoted from elsewhere", "> tldr: 别人说的\n"),
+            ("non-canonical fence", "```text\ntldr: 引用的示例\n```\n"),
+        ]:
+            with self.subTest(case=label):
+                self.assertTrue(self._blocked_for_tldr(tail), msg=label)
+
+
+class TestGraceAckScopeV0251(_StopBase):
+    """v0.25.1 — a grace-window ack covers only the groups it was shown.
+
+    The recovery turn is still an editing turn. If it touches files that
+    violate a DIFFERENT group, that group became pending AFTER the
+    block, was never presented, and was never answered — yet the ack
+    used to silence it for the rest of the session.
+    """
+
+    def _write_config(self) -> None:
+        cfg_dir = self.tmpdir / ".claude" / "cc-enslaver"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / ".git").mkdir(exist_ok=True)
+        (cfg_dir / "sync-gate.toml").write_text(
+            '[[groups]]\nname = "alpha"\nwhen = ["a/*"]\nrequire = ["ax/*"]\n'
+            '\n[[groups]]\nname = "beta"\nwhen = ["b/*"]\nrequire = ["bx/*"]\n',
+            encoding="utf-8",
+        )
+
+    def _edit(self, rel: str) -> None:
+        """Record an edited file via the real read_guard Write path.
+
+        The target must NOT pre-exist: an existing-but-unread file takes
+        read_guard's read-before-edit branch and is DENIED, so nothing
+        would be recorded and the sync gate would never see it.
+        """
+        target = self.tmpdir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        run_hook(
+            [str(SCRIPTS_DIR / "read_guard.py")],
+            {"session_id": self.sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Write",
+             "tool_input": {"file_path": str(target), "content": "x\n"}},
+            env_overrides=self.env,
+        )
+
+    def test_ack_does_not_swallow_a_group_never_presented(self) -> None:
+        self._write_config()
+        body = (
+            "Fixed.\n\n$ python -m unittest\nRan 3 tests\nOK\n\n"
+            "收敛: 真解决了吗 / 更好方案 / 哪些没验 / 验证是否合理\n"
+            "忠实: 请求覆盖 / 无降级 / 无遗漏\n"
+            "根因: x / 影响范围: y / 方案: z\n"
+            "架构定位: x / 风险: y\n"
+            "tldr: 修好了。\n"
+        )
+        # Turn 5: only group alpha is violated → layer (i) blocks on it.
+        self._edit("a/one.py")
+        _, out, _ = self._stop(body, turn_count=5)
+        self.assertIsNotNone(out, msg="layer (i) should have blocked")
+        self.assertIn("alpha", out.get("reason", ""))
+
+        # Turn 6 (grace window): the recovery reply answers alpha, but
+        # this turn also edited a file that newly violates beta.
+        self._edit("b/one.py")
+        self._stop(body + "\n同步核对: alpha 已核对，prompts 无需改。\n",
+                   turn_count=6)
+
+        # Turn 9 (past the [last+1, last+3] grace window, which the
+        # turn-5 block opened over turns 6-8): beta was never presented,
+        # so it must still be able to block — while alpha, which WAS
+        # presented and answered, must stay silent.
+        self._edit("b/two.py")
+        _, out, _ = self._stop(body, turn_count=9)
+        self.assertIsNotNone(
+            out, msg="beta was acked without ever being presented",
+        )
+        reason = out.get("reason", "")
+        self.assertIn("beta", reason)
+        self.assertNotIn(
+            "group 'alpha'", reason,
+            msg="an answered group must not re-block (v0.24 contract)",
         )
 
 

@@ -98,19 +98,36 @@ The edict `text` / `note` strings themselves are passed through
 verbatim — they're whatever you wrote in `edicts.toml`. Only the
 framing language switches.
 
-**Built-in rules always run first.** The order in `read_guard.py` is:
+**Built-in rules run first, with one documented exception.** The order in
+`read_guard.py` is:
 
 1. read-before-edit guard (rule 04 + 08)
 2. patch-style marker guard (rule 09)
 3. hardcoded-secret guard (rule 10)
 4. path-dependency guard (rule 11)
 5. **圣旨 scan**
+6. rolling-patch frequency guard (rule 09, v0.13) — the one built-in layer
+   that runs *after* the edict scan, because it is a counter over the
+   session rather than a content check, and it must not increment for a
+   write that some earlier layer is going to deny anyway
 
-Order in `bash_guard.py`:
+Order in `bash_guard.py` (**inverted in v0.25.0** — it used to run the
+escape hatch first):
 
-1. `--no-verify` / `--no-gpg-sign` / force-push / `chmod 777` (rule 03 + 09)
-2. `register_read.py` escape hatch (v0.4.0)
+1. static deny patterns: `--no-verify` / `--no-gpg-sign` / `chmod 777` /
+   `git rebase --skip` / `--break-system-packages` / `rm -rf` on a root
+   path (rule 03 + 09)
+2. force-push detection (parsed through `lib/shellcmd`, not a regex)
 3. **圣旨 scan**
+4. `register_read.py` escape hatch (v0.4.0)
+
+The v0.25.0 inversion is observable, which is why the old ordering above
+was worth correcting rather than glossing: under the documented-but-wrong
+order a `register_read` command returned before anything else ran, so it
+was never scanned by edicts — and `register_read.py --file F --hash H &&
+git push --force` was **allowed**. Under the real order every deny check
+clears first, and a command destined for denial no longer mutates session
+state.
 
 You cannot define an edict that whitelists `--no-verify` — the built-in
 hook fires before reaching the edict layer.

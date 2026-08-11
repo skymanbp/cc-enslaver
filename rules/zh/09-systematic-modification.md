@@ -72,7 +72,7 @@ severity: must
 |---|---|---|---|
 | **Edit/Write 内容层** | `PreToolUse(Edit\|Write)` | new_string 含未带 "why" 注释的补丁标记 | **DENY** |
 | **Edit/Write 频率层**（v0.13） | `PreToolUse(Edit\|Write)` | 同一文件本会话第 4 次"小幅 Edit" (≤ 10 行 且 < 200 字符) 而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | **DENY** |
-| **Bash 命令层** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY**（v0.3 bash_guard） |
+| **Bash 命令层** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 打到根路径 / `git push --force`（非 `--force-with-lease`） | **DENY**（v0.3 bash_guard，v0.14 扩充；v0.26 起按解析后的 argv 判定） |
 | **收尾层** | `Stop` layer (f) | 本轮做了 Edit 但最终回复缺"根因 + 影响 + 方案"标记 | **BLOCK** |
 
 ### Edit/Write 频率层 — rolling-patch 计数器（v0.13）
@@ -98,23 +98,67 @@ DENY 时给出的恢复路径：
 
 | 模式 | 拒绝理由 |
 |---|---|
-| `try:` … `except …:` … `pass`（单层扫描） | 静默吞错（rule 03） |
-| `^\s*#\s*noqa\b`（无紧随的解释注释） | 屏蔽 lint（rule 03） |
-| `^\s*#\s*type:\s*ignore\b`（无紧随的解释注释） | 屏蔽类型检查（rule 03） |
-| `//\s*@ts-ignore\b`（无紧随的解释注释） | 屏蔽 TS 报错（rule 03） |
-| `//\s*eslint-disable(?:-next-line)?\b`（无解释） | 屏蔽 lint（rule 03） |
-| `time\.sleep\([^)]*\)\s*#\s*(wait|race|workaround)` | 用 sleep 掩盖竞态（rule 03） |
+| `try:` … `except …:` … `pass`（全部子句 / 嵌套块 / 单行形） | 静默吞错（rule 03） |
+| `#\s*noqa\b`（无理由） | 屏蔽 lint（rule 03） |
+| `#\s*type:\s*ignore\b`（无理由） | 屏蔽类型检查（rule 03） |
+| `//\s*@ts-ignore\b` / `//\s*@ts-expect-error\b`（无理由） | 屏蔽 TS 报错（rule 03） |
+| `//\s*eslint-disable(?:-next-line)?\b`（无理由） | 屏蔽 lint（rule 03） |
+| `time\.sleep(…)\s*#\s*(wait|race|workaround)`（含嵌套调用） | 用 sleep 掩盖竞态（rule 03） |
 
-**吞错行的扫描方式（v0.25）**：`try/except: pass` 检测器比对该行的**代码**，而非原始文本：
+**标记的拼写不等于标记本身（v0.25.1）**：五个单行标记不再要求行尾锚点。
+
+- **CRLF 不再能击穿它们**。旧的 `[ \t]*(?:\n|$)` 锚点匹配不到 `\r\n`，于是在
+  Windows 上这五个检测器全部静默失效。
+- **尾随文本不再让标记隐形**。`// @ts-ignore: TODO` 此前**根本不匹配** —— 它被
+  放行，而理由检查从未运行，反倒是裸形态被拦。现在尾随文本会被判定：是解释则
+  放行，是光秃秃的延期词（TODO / FIXME / HACK / WIP / later）则不放行。
+- **散文档**（`.md` / `.rst` / `.txt` / `.adoc`）仍只匹配裸形态 —— 那里的标记是
+  被讨论的对象，不是生效的屏蔽。
+
+**吞错行的扫描方式（v0.25，v0.25.1 扩展）**：`try/except: pass` 检测器比对该行的**代码**，而非原始文本：
 
 - 行尾注释不再能绕过它 —— `pass  # TODO later` 照样拦。此前要求 `pass` 必须
   完全裸露，反而让下面那条 why 注释逃生口**对这个标记根本不可达**：加理由注释
-  是靠"改变了字符串"让检测器沉默的，理由本身从没被读过。逃生口到 v0.25 才真正生效。
+  是靠"改变了字符串"让检测器沉默的，理由本身从没被读过。
+- **handler 头与吞错行之间的注释行**也不再掩蔽它。那是同一个缺陷换了个拼写：
+  把理由写在 `pass` 上面独立一行 —— 最自然的写法 —— 会把 `pass` 挪出扫描器
+  视野，于是逃生口仍不可达，而 v0.25 那条自称钉住它的回归测试是因为错误的
+  原因才通过的。
+- `except Exception: pass` **单行形**会被检出，**嵌套** `try` 会被跟踪（用栈，
+  而非单个待定缩进），且一次编辑里的**每个**命中都会被检查 —— 带理由的吞错
+  不再掩护后面无理由的那个。
 - 一个 `try` 语句的**每个** `except` 子句都会被检查，不再只看第一个。于是那个
   典型形态 —— 先一个窄 handler、再一个吞掉一切的兜底（`except ValueError: log()`
   之后跟 `except Exception: pass`）—— 不再隐形。
 
-**允许的形式**：每个屏蔽标记必须在同一行或紧邻上一行/下一行带**理由注释**（含 "because" / "原因" / "why" / "正当" / 显式说明），例如：
+**理由必须写在注释里（v0.25.1）**：逃生口此前搜索的是原始的 ±1 行窗口，于是理由
+token 出现在**任何可执行代码**里都算数 —— 裸标记旁边有一句 `reason = compute()`
+就够了。现在只认注释文本，这本来就是 deny 消息一直声称的契约。
+
+**「什么算注释」改由词法判定（v0.26.0）**：「找第一个 `#` 或 `//`」和「注释从哪里
+开始」不是同一个问题：它会找到 `"http://host/#frag"` 里的 `#`、以及**任何** URL 里的
+`//`，于是相邻一行 `API = "https://api.example.com"` 就能让检测器沉默 —— 并且通过
+共用的逃生口，把 rule 10 的密钥检测器一起关掉。注释提取现在走真正的词法器
+（[`lib/srclex.py`](../../hooks/scripts/lib/srclex.py)），随之而来：
+
+- `/* … */` **块注释被认可**（此前完全看不见，合法的相邻 JavaScript/TypeScript
+  理由会被误拒）；
+- 写在 **docstring 里的理由算数** —— 它是文档不是数据 —— 而普通字符串字面量里的
+  token 不算；
+- 窗口按**全文**的词法状态判定，而不是孤立地重新词法分析三行（docstring 内部的
+  切片自身没有定界符，单看就像裸代码）。
+
+**逃生口不再只认英文（v0.26.0）**：此前表里只有名词 `原因`，于是最自然的中文
+「因为」被 DENY，而英文 `because` 放行。现在 `因为` / `之所以` / `理由` / `故意` /
+`刻意` / `有意` / `特意` 都是理由 token。相关地，「读起来像真解释」的启发式此前
+要求有 ASCII 空格，而中文句子永远没有 —— 现改为按 CJK 字数衡量，于是同一条理由
+用哪种语言写都被接受。
+
+**标记在词边界收尾（v0.26.0）**：v0.25.1 去掉行尾锚点后，标记退化成裸子串，于是
+`# noquality`、`@ts-ignore-generated`、`eslint-disablement` 都被当成它们仅仅以之
+开头的那个屏蔽标记，被误拦。
+
+**允许的形式**：每个屏蔽标记必须在同一行或紧邻上一行/下一行带**理由注释**（含 "because" / "原因" / "因为" / "why" / "正当" / 显式说明），例如：
 
 ```python
 # noqa: E501  -- URL string exceeds 100 chars; splitting hurts readability

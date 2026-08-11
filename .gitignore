@@ -15,6 +15,7 @@ venv/
 *.swp
 *.swo
 *~
+.ce/
 
 # --- OS ---
 .DS_Store

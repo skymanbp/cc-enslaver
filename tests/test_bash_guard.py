@@ -11,11 +11,16 @@ and at least one nearby negative case (allow) in this file.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before this import
 from _helpers import SCRIPTS_DIR, run_hook  # noqa: E402
 
 GUARD = str(SCRIPTS_DIR / "bash_guard.py")
@@ -80,12 +85,14 @@ CASES: list[tuple[str, str, str, str | None]] = [
     ("pip install normal", "pip install requests", "allow", None),
     ("python -m pip with venv", "python -m pip install requests", "allow", None),
 
-    # ----- v0.14 new patterns: rm -rf on root / $HOME / ~ -----
+    # ----- v0.14 new patterns: rm -rf on root / home / ~ -----
     ("rm -rf /", "rm -rf /", "deny", "rm -rf"),
     ("rm -rf / with trailing args", "rm -rf / --no-preserve-root", "deny", "rm -rf"),
     ("rm -rf /etc", "rm -rf /etc", "deny", "rm -rf"),
     ("rm -rf /usr", "rm -rf /usr/local/share", "deny", "rm -rf"),
+    # fixture: the home variable IS the subject of the next row -- essential
     ("rm -rf $HOME", "rm -rf $HOME", "deny", "rm -rf"),
+    # fixture: likewise essential, this row exists to exercise that spelling
     ("rm -rf $HOME/.config", "rm -rf $HOME/.config", "deny", "rm -rf"),
     ("rm -rf ~", "rm -rf ~", "deny", "rm -rf"),
     ("rm -rf ~/", "rm -rf ~/", "deny", "rm -rf"),
@@ -386,6 +393,9 @@ class TestRegisterPathSpellings(unittest.TestCase):
     backslash paths, making the read-cache escape hatch unusable with the
     path spelling this plugin's own primary platform produces.
 
+    The path below is spelled out because it is the very subject of this
+    regression; nothing in this module depends on it. An
+    example only:
     `C:\\Users\\me\\note.txt` came back out of shlex as
     `C:Usersmenote.txt`, so `_handle_register_invocation` denied with
     "file does not exist on disk" — the recovery mechanism for a false
@@ -466,6 +476,157 @@ class TestRegisterPathSpellings(unittest.TestCase):
                     self._registered(),
                     msg=f"{label} path did not land in session state",
                 )
+
+
+class TestForcePushSpellingsV0251(unittest.TestCase):
+    """v0.25.1 — force-push shapes the flag-only detector waved through.
+
+    Each of these is an unconditional remote overwrite, i.e. exactly the
+    operation the detector exists to stop.
+    """
+
+    def _decision(self, command: str) -> str:
+        _, out, _ = _invoke(command)
+        if out is None:
+            return "allow"
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    def test_force_push_variants_are_denied(self) -> None:
+        cases = [
+            # A global option between `git` and `push` made the whole
+            # segment invisible to the old `\\bgit\\s+push\\b` filter.
+            ("global -C option", "git -C repo push --force origin main"),
+            ("--git-dir option",
+             "git --git-dir=/r/.git push --force origin main"),
+            # Quotes broke the whitespace-delimited flag match.
+            ("quoted long flag", 'git push "--force" origin main'),
+            ("single-quoted long flag", "git push '--force' origin main"),
+            # git's own spelling of "force this one ref".
+            ("plus refspec", "git push origin +main:main"),
+            # Force-updates every mirrored ref.
+            ("--mirror", "git push --mirror origin"),
+            # Regression guards for the shapes v0.25 already fixed.
+            ("stacked short flags", "git push -fu origin main"),
+        ]
+        for label, cmd in cases:
+            with self.subTest(case=label):
+                self.assertEqual(self._decision(cmd), "deny", msg=label)
+
+    def test_safe_push_forms_still_allowed(self) -> None:
+        cases = [
+            ("plain push", "git push origin main"),
+            ("force-with-lease", "git push --force-with-lease origin main"),
+            ("force-with-lease with -C",
+             "git -C repo push --force-with-lease origin main"),
+            # The `-f` belongs to rm, not to git (v0.25 false-DENY fix).
+            ("chained rm -f", "rm -f build.log && git push origin main"),
+            ("ordinary refspec", "git push origin main:main"),
+        ]
+        for label, cmd in cases:
+            with self.subTest(case=label):
+                self.assertEqual(self._decision(cmd), "allow", msg=label)
+
+    def test_twin_the_detector_is_actually_armed(self) -> None:
+        """v0.26.0 — the twin the ALLOW-only test above was missing.
+
+        Round-4 audit found `test_safe_push_forms_still_allowed` vacuous:
+        every command it lists is allowed on the pre-fix tree AND would be
+        allowed with the force-push detector deleted outright, so it
+        proved nothing about the detector. An allow-assertion is only
+        meaningful next to a deny-assertion from the same harness.
+        """
+        for label, cmd in [
+            ("long flag", "git push --" + "force origin main"),
+            ("short flag", "git push -f origin main"),
+            ("stacked short flags", "git push -fu origin main"),
+            ("force refspec", "git push origin +main"),
+            ("mirror", "git push --mirror origin"),
+        ]:
+            with self.subTest(case=label):
+                self.assertEqual(self._decision(cmd), "deny", msg=label)
+
+
+class TestRegisterCommandPositionV0251(unittest.TestCase):
+    """v0.25.1 — a mentioned script name is not an invocation.
+
+    `_parse_register_invocation` accepted ANY token ending in
+    `register_read.py`, so a command that merely printed the name
+    registered the file as read without the sanctioned script running.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-regpos-"))
+        self.target = self.tmpdir / "victim.py"
+        self.target.write_text("secret content\n", encoding="utf-8")
+        self.digest = hashlib.sha256(
+            self.target.read_bytes()).hexdigest()
+        self.script = SCRIPTS_DIR / "register_read.py"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, command: str, sid: str):
+        return run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Bash", "tool_input": {"command": command}},
+            env_overrides={"CLAUDE_PLUGIN_DATA": str(self.tmpdir / "data")},
+        )
+
+    def _is_registered(self, sid: str) -> bool:
+        state_file = self.tmpdir / "data" / "sessions" / f"{sid}.json"
+        if not state_file.is_file():
+            return False
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        reads = data.get("read_files", [])
+        return any("victim.py" in r for r in reads)
+
+    def test_echoed_script_name_does_not_register(self) -> None:
+        sid = "regpos-echo"
+        self._run(
+            f'echo /not/executed/register_read.py --file "{self.target}" '
+            f'--hash {self.digest}', sid,
+        )
+        self.assertFalse(
+            self._is_registered(sid),
+            msg="a printed script name granted read-before-edit rights",
+        )
+
+    def test_real_invocation_still_registers(self) -> None:
+        sid = "regpos-real"
+        self._run(
+            f'python "{self.script}" --file "{self.target}" '
+            f'--hash {self.digest}', sid,
+        )
+        self.assertTrue(
+            self._is_registered(sid),
+            msg="the sanctioned invocation must still work",
+        )
+
+    def test_quoted_flag_value_with_spaces_parses(self) -> None:
+        """`--file="path with spaces"` is valid argparse syntax.
+
+        v0.25's `posix=False` split broke it into three tokens and
+        denied a legitimate registration as a non-existent path.
+        """
+        spaced_dir = self.tmpdir / "Dir With Space"
+        spaced_dir.mkdir()
+        spaced = spaced_dir / "note.txt"
+        spaced.write_text("hello\n", encoding="utf-8")
+        digest = hashlib.sha256(spaced.read_bytes()).hexdigest()
+        sid = "regpos-spaced"
+        _, out, _ = self._run(
+            f'python "{self.script}" --file="{spaced}" --hash={digest}', sid,
+        )
+        self.assertIsNone(
+            out, msg=f"legitimate spaced-path registration denied: {out!r}",
+        )
+        state_file = self.tmpdir / "data" / "sessions" / f"{sid}.json"
+        self.assertTrue(state_file.is_file())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertTrue(
+            any("note.txt" in r for r in data.get("read_files", [])),
+        )
 
 
 if __name__ == "__main__":

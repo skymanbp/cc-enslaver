@@ -17,6 +17,441 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.26.0] — 2026-08-10
+
+**Fourth-round audit — the previous release's own fix diff was reviewed, and
+the mechanism was replaced instead of the symptoms.**
+
+Three parallel read-only reviews of the uncommitted v0.25.1 fix diff, plus a
+first-party pass, produced **37 findings**. Every claim was re-adjudicated
+against the real code with first-party runtime probes before being accepted:
+**33 reproduced**, **3 were recorded as by-design** (a permissive inline-reason
+heuristic; the deliberate prose-doc exemption; the Bash write-path, carried
+over), and **1 was refuted** — a reviewer called
+`test_negated_statements_are_not_done_claims` vacuous when it in fact fails
+with 4 failures on the pre-fix tree.
+
+The 33 collapse into three root causes, so the release ships **four shared
+models** rather than ~30 individual patches.
+
+### Root cause α — the detector encoded a *spelling*, not the concept
+
+Every guard substituted a text test for a structured idea, and each audit round
+produced a fresh crop of the same defect. v0.25.1 named this exact root cause
+and then fixed *instances* of it; the mechanism survived and regenerated.
+
+- **`#` / `//` inside a string counted as a comment.** One neighbouring
+  `API = "https://api.example.com"` line silenced the **rule-10 secret
+  detector** outright — `example` is a rationale token and `example.com` is the
+  IANA example domain, so the leak fired precisely where committed credentials
+  live. Same leak disabled **rule 11**. Block comments (`/* because … */`) were
+  invisible in the other direction, falsely denying legitimate JS/TS.
+- **Block structure read from *physical* lines.** A multi-line string body
+  re-anchored indentation and hid a later swallow; a bracketed
+  `except (\n …\n):` header was never inspected; and a handler clause suppressed
+  **every** stack pop, which **REGRESSED** nested `try/except` from deny
+  (v0.25.0) to allow (v0.25.1) — while the rewrite's own docstring claimed
+  nesting was now handled by a stack.
+- **Force-push detection over co-occurring words.** Denied an `echo` of a
+  force-push string and `git config alias.deploy "push --mirror"` (subcommand
+  is `config`); missed `git push origin +main` (a force refspec needs no
+  colon), `+:refs/heads/main`, and any push whose global options outran a
+  120-character window.
+- **"Command position" by walking backwards over dashes.** `python -c
+  register_read.py …` registered a file as read though the script never ran;
+  `python -X utf8 register_read.py …` — the spelling its own docstring
+  advertised — and `python3.13` were rejected; shlex's default `#` commenter
+  truncated a legal Windows path.
+
+Replaced by three new shared models plus a schema:
+[`lib/srclex.py`](hooks/scripts/lib/srclex.py) (tolerant source lexer:
+comments vs docstrings vs data literals, literal masking with preserved
+offsets, bracket-joined logical lines),
+[`lib/mdctx.py`](hooks/scripts/lib/mdctx.py) (markdown fence/blockquote
+context — now consumed by **both** halves of Stop layer (h), which previously
+disagreed about which fences count, letting a `tldr:` in a ```text example
+satisfy presence while the length half measured nothing), and
+[`lib/shellcmd.py`](hooks/scripts/lib/shellcmd.py) (tokenise → segments →
+argv → git subcommand / python script operand).
+
+### Root cause β — hardening scoped to the observed instance, never the class
+
+- `lib/state.py` `_normalized` repaired `read_files` and left `session_id`
+  raising `KeyError` from `save()` — swallowed as failing-open, so the Read was
+  never recorded and the **next edit was falsely denied as unread**. Its own
+  docstring claimed a top-level `{}` was repaired. Now schema-driven across
+  every collection and numeric field, and the stored `session_id` is written
+  back authoritatively (a record whose stored id disagreed with its filename
+  redirected every later write to a different file).
+- auto-GC compared a **raw** session id against **sanitised, 64-truncated**
+  filenames, so for any non-canonical id the live session was not excluded.
+- `manage_edicts._dump_edict` coerced only `id`; a wrongly-typed `text` /
+  `severity` / `note` raised, and `_write_edicts` re-serialises **every** edict
+  on any add/remove, so one bad field broke the whole CLI.
+
+### Root cause γ — the claim outran the change
+
+- Four v0.25.1 tests passed unchanged on the pre-fix tree; each now carries a
+  twin assertion (remove the rationale → must DENY; the detector is armed).
+- `TestPluginIsSelfRewritable` said it pinned "the whole tree" but globbed only
+  `hooks/scripts` — **six of the ten test modules were self-locked** by the
+  same bare lint suppression on their own `sys.path` bootstrap (verified by
+  replaying the pre-fix detector over the pre-fix content of every
+  `tests/*.py` at `83e5487`). Glob widened; the offending sites now carry
+  house-style adjacent rationales.
+
+### Also fixed
+
+- Marker regexes end at **token boundaries**: `# noquality`,
+  `@ts-ignore-generated` and `eslint-disablement` were false **DENIES**.
+- The rationale hatch accepts **Chinese** (`因为` / `故意` / `理由` / …). Only
+  the noun `原因` was listed, so the most natural Chinese "because" was denied
+  while English `because` passed — in a Chinese-primary repo. The
+  "substantive inline reason" heuristic required an ASCII space, which no
+  Chinese sentence has; it now measures CJK length instead.
+- The rationale search is evaluated against **whole-text** lexical state
+  (`_has_rationale_at`) rather than re-lexing the ±1-line window in isolation,
+  where a docstring has no delimiter of its own and looked like bare code.
+- Done-claim negation: `not yet done`, `isn't done` / `aren't fixed` (the old
+  `\bn't\b` could never match — there is no word boundary before `n` in
+  "isn't", so it was unreachable dead code) and `Nothing is done.` A clause
+  boundary now bounds the search, which keeps `没有遗漏，已完成` a genuine claim.
+- Layer (h): a punctuation-only `tldr: !!!` and a blockquote nested under a
+  list item (`- > tldr: …`) no longer satisfy the gate.
+
+### Not changed (recorded, not silently decided)
+
+- **Layer (i)'s primary ack path still acknowledges every pending group.**
+  v0.25.1 scoped only the *grace* path. Applying that scoping here would
+  contradict the documented v0.23 design ("a marker covers the pending
+  groups"); leaving them different means waiting out the grace window bypasses
+  the scoping. This is a **contract question**, not a defect — surfaced rather
+  than decided unilaterally.
+- **Windows-prompt evidence inside a fenced example** was reported as a defect
+  and is **refuted here**: evidence patterns are *meant* to match pasted
+  transcripts, which live in fences, and the pre-existing POSIX `$` prompts
+  behave identically. Flagging only the Windows spelling would be inconsistent.
+
+### Re-audit of this release's own fix code
+
+The fix was itself put through a second read-only review before shipping —
+because the defect this release exists to correct was *introduced by the
+previous release's fix*. It found **8 more real defects in the new code**, all
+fixed here, plus one mistake of mine that the existing suite caught:
+
+- **HIGH — `$( … )`, backticks and `( … )` were not segmented.** The text
+  heuristic the shell model replaced caught these *by accident*, so the model
+  would have been a **regression**: `$(git push --force)` executes a force push.
+  Grouping and substitution delimiters are now separators, and a shell's `-c`
+  operand is tokenised recursively.
+- **HIGH — an escaped `\"""` ended a triple-quoted block early**, exposing the
+  rest as code and comments, so string content could satisfy the rationale
+  hatch. Delimiters preceded by an odd number of backslashes no longer close.
+  Relatedly, a triple-quoted block only counts as *documentation* when it
+  starts its own line — `SQL = """… because …"""` is data.
+- **MED ×3 in the markdown model** — a closing fence carrying an info string
+  (```` ```still-inside ````) closed its parent, making quoted fixture content
+  countable; `yaml-not` / `yamlish` matched the canonical `yaml` by prefix; a
+  4-space-indented fence opened a fence (CommonMark allows at most 3).
+- **MED ×2 in done-claim negation** — `cannot` / `unable` / `绝非` / `并非` were
+  missing (the damaging direction: an honest "not done" report gets blocked),
+  while `not only fixed but tested`, `no longer broken - fixed` and the double
+  negative `不得不承认已完成` were wrongly suppressed.
+- **MED — punctuation padding reached the rationale length bar**
+  (`改了改了改了!!!!!!`, `变量名字变量名字____`), as did pure repetition.
+
+**Reverted:** an attempt to make a bare ``` fence countable, on the theory that
+an untagged schema block would be missed. It broke
+`test_non_yaml_fence_fixture_is_not_measured` — a deliberate v0.23 contract
+(quoting someone else's overlong tldr in a bare fence must not self-trip). The
+existing pinned contract won over the speculative false positive.
+
+**Accepted as documented limitations** (not fixed): `//` inside a JavaScript
+regex character class reads as a comment; a JS template literal's `${…}`
+interior is treated as string data; and the blockquote-peeling loop is bounded
+at 8 nested list markers. Each needs a real JS parser or an unbounded scan to
+do properly, and each fails in the conservative direction.
+
+### Documentation audit — 41 confirmed defects, and the gate that stops them recurring
+
+A separate whole-repo documentation audit ran against this release before it
+shipped: 7 surface auditors, each finding adversarially re-verified, **41
+confirmed**. A first-party spot-check of the ten mechanically verifiable
+claims reproduced all ten, including two that indict this release's own
+notes (see below).
+
+They are not 41 independent oversights. Every one is a hand-maintained
+**closed-set enumeration** — how many rules, how many slash commands, how many
+Bash patterns are denied, which `lib/` modules exist, how many tests run — with
+nothing deriving it back from the code. The counts were last correct at v0.24.0
+and drifted through three releases unchallenged. This repo already solved that
+problem once, for versions: v0.22.1 shipped a stale manifest and the fix was a
+*gate*, not a corrected number. Documentation had no gate.
+
+- **New: [`tests/test_doc_sync.py`](tests/test_doc_sync.py)** — derives every
+  pinned fact from the code at runtime (rule files on disk, command files,
+  `bash_guard.STATIC_PATTERNS`, `hooks/scripts/lib/*.py`, `hooks.json`,
+  the checklist's own section headers, `unittest discover`). Claim sites are a
+  **closed set**: a registered regex that matches nothing fails as "stale
+  registration", so rewording a pinned sentence breaks the build instead of
+  escaping the gate. It also pins the Bash deny inventory across all six
+  surfaces that present it as complete, the structure trees' module
+  inventories, and that every repo-relative markdown link resolves.
+- **`i18n_check.py` gained enforcement-token parity** — every backtick code
+  span on a line that states a `DENY` must appear in each translation. File-set
+  and header-structure parity were both green while `prompts/zh/` listed four
+  of the seven patterns `bash_guard` denies: a zh session was handed a strictly
+  smaller deny set than an en session, on every single turn. Scoped to DENY
+  lines deliberately — comparing all code spans produces 24 false positives
+  across `rules/`.
+- The gate immediately found a defect the 57-agent audit missed:
+  `prompts/user-prompt.md`, the **English skeleton**, also omitted
+  `--no-gpg-sign`.
+- **Two corrections to this release's own notes**, both first-party verified,
+  both instances of root cause γ above: "all seven test modules were
+  self-locked" was wrong in both halves (**six**, of **ten**), and the rationale
+  hatch was described as "previously English-only" when the pre-fix token tuple
+  already contained `原因` and `正当` — only the *noun* forms were listed.
+- Also corrected: rule 10 / 11 documented an escape hatch two releases out of
+  date (it has been comment-only since v0.25.1 and lexically decided since
+  v0.26.0); `docs/EDICTS.md` documented the pre-v0.25 bash_guard ordering, which
+  is observably different; `docs/ARCHITECTURE.md` still asserted the phantom
+  read-record reasoning that v0.25 disproved, called `bash_guard` stateless, and
+  counted three hook scripts where four are registered; the checklist's F5
+  closed-set omitted `@ts-expect-error`, so an agent could tick every box and
+  still be denied; and `systematic-debug` cited "规则 02.6" for a principle that
+  lives in rule 07.
+
+### Second audit round — 16 parallel read-only reviews
+
+A further sixteen independent read-only reviews were run over the whole
+codebase, each with a different lens. Fifteen reported; the sync-gate lens
+returned nothing and **was not run** — that gap is recorded rather than
+papered over. Most of what came back was already-documented limitations or
+inherent to a regex hook; what follows is what was independently confirmed
+against the real code and fixed at the root:
+
+- **`lib/srclex`** — a bare triple-quoted *expression* was treated as a
+  docstring, so `"""because …"""` dropped anywhere silenced the secret
+  detector; docstring status is now decided by POSITION (module/class/
+  function-leading), which also makes `r"""…"""` work. A lone CR no longer
+  lets a `#` comment run to end-of-file, and POSIX single quotes no longer
+  honour backslash escapes.
+- **`lib/mdctx` + layer (h)** — `_tldr_items` did not apply the `countable`
+  test to CONTINUATION lines, so a blockquoted continuation was measured as
+  the agent's own tldr: the two-halves-disagree bug this module was created
+  to end, recurring one level down. Fence geometry corrected for tab
+  indentation (a tab is 4 columns), list-nested fences, and backticks in a
+  backtick fence's info string. Lazy blockquote continuation is
+  deliberately NOT implemented — see the note in `_is_quoted`.
+- **Done-claim semantics** — `far from done` / `hardly done` read as
+  completions and BLOCKED honest failure reports; a Chinese double negative
+  anywhere in the clause disabled a nearer real negation; Chinese
+  connectives (`所以`, `但是`, …) are now clause boundaries, so
+  `没有遗漏…所以…已经完成了` is correctly a claim; `Work complete` matched
+  nothing and therefore skipped all nine layers.
+- **Layer (g)** — `我确认 v0.23 修改了 X` parsed as a self-claim because a
+  version could sit in the 12-character subject gap.
+- **`lib/state`** — a `JSONDecodeError` reset the session to an empty
+  record and the next mutator saved it back: total, SILENT amnesia. It now
+  retries, then quarantines the file and says so. `save()` and `add_read()`
+  return whether the write landed, so `register_read` can no longer print
+  `ok` for a registration that evaporated.
+- **`bash_guard`** — the six static patterns still matched raw text while
+  force-push had a parse model. They now match parsed argv: `chmod -v 777`,
+  `git -C . rebase --skip`, `rm -rf -- "$HOME"` and quoted flags are caught;
+  `echo git commit --no-verify` no longer denies.
+- **`register_read`** — a registration inside a compound command
+  (`false && …`) earned read credit for something the shell never runs;
+  only a single unconditional invocation counts now. `python -cpass foo.py`
+  and `python --version foo.py` no longer register.
+- **`manage_edicts`** — regex fields moved from triple-quoted literals to
+  basic strings (the literal form silently rewrote any pattern containing
+  `'''`), DEL is escaped, and the result is parsed before it is committed,
+  so one bad field can no longer disable every edict while the CLI reports
+  success.
+- **`i18n_check`** — enforcement parity only recognised the literal `DENY`,
+  leaving rule 12's entire `BLOCK` contract unchecked. It now covers
+  BLOCK/拒绝/拦截 and requires only machine-shaped tokens, after a first cut
+  demanded translators reproduce English prose examples.
+- **The doc gate's own holes** — the current release's narrative was
+  exempted as "history" while it describes the release being shipped, which
+  is how five stale `378 → 474` statements sat next to a green gate;
+  inventories were one-way (a deleted module could linger in the tree);
+  `hooks.json` was regex-scraped into a subset check an empty set satisfied;
+  and `rules/09` was missing from the Bash-deny surfaces, which is why its
+  row still named four patterns after every other surface was fixed.
+- **Its docstring overstated itself** — "closed set", "every value derived
+  at runtime" and "the numbers were last correct at v0.24.0" were all false
+  (v0.24's README already said "9-rule"). Corrected in place, with the
+  uncovered areas enumerated.
+
+Tests **474 → 542**.
+
+**Verification honesty:** unlike the first round, these assertions were NOT
+replayed against a pre-fix tree — both rounds are uncommitted, so no such
+tree exists to replay against. The evidence is per-fix runtime probes on the
+real code plus the reviewers' own reproductions; two regressions were caught
+by the existing suite during the work (`rm -rf /usr/local/share`, and this
+release's new test module self-locking twice).
+
+## [0.25.1] — 2026-08-10
+
+**Third-round audit: 94 review findings → 21 first-party reproductions →
+SIX root-cause fixes. Zero new features.**
+
+Process: three parallel read-only reviews of the `83e5487` tree, split by
+subsystem (read_guard/register_read · Stop layers + sync_gate + i18n ·
+bash_guard + state + config IO). They returned **94 findings (29 HIGH)**.
+Rather than trust that, every high-signal claim was re-run against the real
+code by a first-party probe: **21 reproduced**. Those 21 are not 21 bugs —
+they collapse into **six root causes**, and are fixed as six systematic
+changes, per rule 09's own "systematic ≫ patching". Red-first evidence:
+the new assertions replayed on the pre-fix tree produce **37 failures + 4
+errors**; the fixed tree is **378/378 green** (350 → 378).
+
+### Root cause 1 — the detectors described a *string*, not a *concept*
+
+Nine of the 21 were one spelling away from the pattern:
+
+- **CRLF defeated all five single-line rule-09 markers.** They anchored on
+  `[ \t]*(?:\n|$)`, which cannot match `\r\n` — so on this plugin's own
+  primary platform every one of them was silently off for a CRLF file.
+- **Any trailing text made a marker invisible.** `// @ts-ignore` followed by
+  a bare deferral keyword matched *nothing*, so it was allowed without the
+  rationale check ever running — while the bare form was denied. The same
+  hole made the deny message's own "acceptable form" examples pass for the
+  wrong reason, and made `test_ts_ignore_with_rationale_is_allowed` a
+  vacuous test. The anchors are gone; trailing text now goes to
+  `_inline_reason_is_substantive`, which accepts an explanation and rejects
+  a deferral.
+- **`time.sleep(max(0, delay))` slipped past** — `[^)]*` stopped at the
+  inner `)`.
+- **Doubled backslashes bypassed rule 11.** `[\\/]` matched only a raw
+  single-separator spelling; in real Python / JSON / JS source the
+  separator is doubled (`"C:\\Users\\bob"`), which is how a user-home path
+  actually appears in committed code. The detector caught the rare spelling
+  and waved through the normal one.
+- **The rule-10 type-annotation relief leaked.** v0.24 added a skip for
+  `password: "SecretStr"` (a forward reference, not a credential) but
+  applied it to `=` as well, so a plain-alphabetic credential assigned with
+  `=` was allowed. The relief is now scoped to the `:` spelling it was
+  written for.
+- **Four force-push shapes were missed** — `git -C repo push --force`
+  (a global option between `git` and `push` hid the whole segment),
+  quoted `"--force"`, `git push origin +main:main` (git's own spelling of
+  "force this ref"), and `git push --mirror`.
+- **`except Exception: pass` one-liners were invisible**, as was any
+  `try/except/pass` nested inside another `try` (a single pending indent
+  cannot represent nesting; it is now a stack), and only the *first* hit
+  in an edit was ever inspected.
+
+Additionally: provider-issued token shapes (`ghp_…`, `xox…`, `AIza…`) are
+now denied on sight, chosen over widening the keyword list with a bare
+`token` — the value shape is self-identifying, whereas `token = "…"` would
+fire on ordinary lexer code. Placeholder filtering now also covers
+standalone literals, so an obviously fake `postgres://user:redacted@host/db`
+stops being denied while the identical value behind `password = …` was not.
+
+### Root cause 2 — parsed config values used without a type check
+
+`severity = ["must"]` and `mode = []` are **valid TOML**, and
+`value not in SET` raises `TypeError: unhashable type: 'list'`. That escaped
+`edicts.load()` and `sync_gate.load()` — both documented as never raising —
+and unwound into the outer failing-open handlers: rules 04 + 08 switched
+**off for the entire session**, and Stop layer (i) went down together with
+the turn-boundary `clear_edit_flag` on the same path. This is the v0.25
+`UnicodeDecodeError` finding recurring through a different door: that fix
+hardened *how the file is read*, this one hardens *what the parsed values
+may be*. Session state is now shape-normalised too — a top-level `[]` used
+to raise inside `has_read` (failing open → an unread file became editable)
+and a top-level `{}` raised inside `add_read` (a successful Read went
+unrecorded → the next edit was falsely denied).
+
+`manage_edicts` also still called raw `tomllib.load`: v0.25 created
+`lib/tomlio.py` precisely so a BOM or a non-UTF-8 save could not disable
+enforcement, wired the two hook-side loaders to it, and never swept the
+tree — so the same file the hooks read fine still crashed
+`edict list / add / remove`. That is the repo-wide-sync omission rule 12
+exists to catch, committed by the release that introduced the shared module.
+
+### Root cause 3 — the rationale escape hatch was wrong in both directions
+
+`_has_rationale` lowercased the entire raw window, so a token anywhere in
+executable code satisfied it (`reason = compute()` next to a bare marker);
+rules 10 + 11 leaked the same way through an adjacent identifier or a secret
+*value* containing `sample`. Meanwhile the hatch was **unreachable** in its
+most natural spelling, because a comment line between `except:` and `pass`
+moved the swallow out of the scanner's sight — v0.25 fixed the same-line
+variant and shipped a regression test that passed for the wrong reason.
+Rationale is now read from comment text only, comment lines no longer mask
+the swallow, and every "a rationale allows this" test carries a **twin** that
+strips the rationale and asserts DENY.
+
+Prose docs (`.md` / `.rst` / …) keep their pre-v0.25.1 behaviour exactly:
+only the bare marker form counts there. This repo's own docs mention the
+marker spellings 54 times; the permissive form would have flagged them all.
+
+### Root cause 4 — presence checks standing in for meaning
+
+- **`_has_done_claim` gates all nine Stop layers**, and `已完成` /
+  `Implemented the fix` / `Finished the refactor` / `the migration is
+  complete` were not in `DONE_PATTERNS`. A completion phrased that way did
+  not skip one check — stop_guard returned immediately and cleared the edit
+  flag on the way out.
+- **Negated text counted as a claim.** `Not done; tests failed.` and
+  `This is not fixed` were read as completions, so an honest report of
+  failure could be blocked; `all set` as an unbounded substring even matched
+  inside "Not all settings are loaded".
+- **An empty `tldr:` satisfied layer (h).** The presence test looked for the
+  keyword anywhere, the length test then measured nothing, and the emptiest
+  possible summary — including a blockquoted `> tldr:` quoting someone
+  else — passed both halves.
+- **Windows transcripts were not evidence.** `PS C:\repo>` and `C:\repo>`
+  matched none of the POSIX-only prompt patterns, so a Windows user pasting
+  a genuine command transcript was told they had produced none.
+
+### Root cause 5 — state lifecycle
+
+`_maybe_auto_gc` passed `exclude_session=None`, reasoning that the live
+session's file is too new to cross the threshold. True for a session that
+just started; **false for a resumed one**, whose reads, baselines, rolling
+counters and sync acknowledgements auto-GC would delete out from under it.
+The id now comes from the hook payload `main()` already drains. Separately,
+a GC marker that *parses* but carries a non-numeric `ts` raised `TypeError`
+outside the guarding `try`, escaping `_maybe_auto_gc` — which `main()` calls
+**before** `emit()`, so one mistyped marker file silently suppressed the
+entire SessionStart injection, edicts included.
+
+### Root cause 6 — the grace-window sync ack was unscoped
+
+A recovery turn is still an editing turn. If it touched files violating a
+*different* group, that group became pending after the block, was never
+presented, and was never answered — yet the ack silenced it for the rest of
+the session. The layer-(i) block now records which groups it presented
+(`last_blocked_groups`), and the ack intersects with that set.
+
+### Deliberately not changed
+
+- **Bash writes still bypass the edit-tracking signal** (all three reviews
+  reported it). Two different things wear one hat here. "An agent uses
+  `python -c` to dodge read_guard" is *adversarial evasion*, which this
+  plugin's threat model — a lazy-but-cooperative agent, soft injection plus
+  a physical backstop, failing-open throughout — does not claim to stop. The
+  half that *is* worth fixing is ordinary use: a `sed` / codegen / formatter
+  run genuinely edits files, and those edits do not reach Stop layers
+  (e)/(f)/(g)/(i). That needs its own design round and false-positive
+  tuning, not a corner of a defect release.
+- **Marker polarity** (`tldr: I did not perform a sync-check` satisfies the
+  markers) and **grace-window scoping to a recovery chain** are contract
+  changes about enforcement strictness, not defects. Recorded for the user.
+- The **layer-(i) grace ack stays scoped to layer-(i) recoveries** —
+  reaffirmed by the user on 2026-08-10 after v0.25 surfaced it.
+
+Tests **350 → 378**.
+
+---
+
 ## [0.25.0] — 2026-08-10
 
 **Second-round audit release: 12 confirmed defect fixes, zero new features.**
@@ -781,7 +1216,10 @@ one-sentence plain-language summary at the end of every done-claim reply.
 
 - **Canonical YAML reply schema** taught in the soft-layer injection
   ([`prompts/session-start.md`](prompts/session-start.md) §3 +
-  [`prompts/en/session-start.md`](prompts/en/session-start.md) §3):
+  `prompts/en/session-start.md` §3 — that path was the English mirror at
+  the time; v0.21 promoted English to the skeleton at `prompts/`, so the
+  link is left unlinked rather than pointed at a file that no longer
+  exists):
   a ```yaml `cc-enslaver:` block with fields `改前 / 改中 / 收敛 / 忠实 /
   收尾 / tldr` (English mirror: `before / edits / convergence / fidelity
   / closing / tldr`). Modification tasks use the full schema;

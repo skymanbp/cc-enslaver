@@ -31,9 +31,9 @@
 | You try to | Who blocks | Recovery |
 |---|---|---|
 | Edit a pre-existing file you have NOT Read this session | `PreToolUse(Edit\|Write)` DENY | Read the full file first, then Edit |
-| Edit/Write containing unjustified `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` / `time.sleep` workaround | `PreToolUse(Edit\|Write)` DENY | Add an adjacent why-comment, or actually fix the root cause |
-| Edit/Write into **code** containing an unjustified hardcoded secret (secret-named literal ≥ 8 chars / PEM private-key header / `AKIA…` / credentials-in-a-URL) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 10) | Externalize to env / secret store, use a marked placeholder, or add an adjacent why-comment |
-| Edit/Write into **code** containing an unjustified user-specific absolute path (`C:\Users\…` / `/home\|/Users/…` / `$HOME` / `%USERPROFILE%` / quoted `~/…`) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 11) | Derive the path at runtime (plugin root / cwd / env / arg), or add an adjacent why-comment. Prose-doc + lockfile targets are exempt |
+| Edit/Write containing an unjustified suppression marker — `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` / `time.sleep` workaround | `PreToolUse(Edit\|Write)` DENY | Add an adjacent why-comment (in a comment, any language — `because` / `因为` / `essential` all count), or actually fix the root cause |
+| Edit/Write into **code** containing an unjustified hardcoded secret (secret-named literal ≥ 8 chars / PEM private-key header / `AKIA…` / provider token `ghp_…` `xox…` `AIza…` / credentials-in-a-URL) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 10) | Externalize to env / secret store, use a marked placeholder, or add an adjacent why-comment |
+| Edit/Write into **code** containing an unjustified user-specific absolute path (`C:\Users\…` / `/home/<user>/…` / `/Users/<user>/…` / `$HOME` / `%USERPROFILE%` / quoted `~/…`) | `PreToolUse(Edit\|Write)` DENY (v0.22, rule 11) | Derive the path at runtime (plugin root / cwd / env / arg), or add an adjacent why-comment. Prose-doc + lockfile targets are exempt |
 | 4th small Edit (≤ 10 lines AND < 200 chars) to the same file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | `PreToolUse(Edit\|Write)` DENY (v0.13) | Combine pending fixes into one large Edit, or `Write` to replace the whole file, or stop and surface to user |
 | Bash containing `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Find the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing verification evidence / containing a hedge / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 9-layer BLOCK | Read the status table in the block reason; fix the FAIL row |
@@ -109,8 +109,8 @@ cc-enslaver:
 - Citing a file you haven't Read this session → rule 04 + 08 (**PreToolUse will DENY**)
 - Citing a symbol you haven't Grep'd this session → rule 04
 - About to do a ≤ 5 line "quick fix" → rule 02 + 09
-- About to write `# noqa` / `@ts-ignore` / `eslint-disable` without why → rule 09 (**PreToolUse will DENY**)
-- About to run `--no-verify` / `git push --force` / `chmod 777` → rule 03 + 09 (**Bash hook will DENY**)
+- About to write `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` without why → rule 09 (**PreToolUse will DENY**)
+- About to run `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ → rule 03 + 09 (**Bash hook will DENY**)
 - About to inline a secret / API key / token / private key / credentials-in-a-URL as a code literal → rule 10 (**PreToolUse will DENY**)
 - About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into code → rule 11 (**PreToolUse will DENY**)
 - Tests pass = declare done (without asking "why was it failing before") → rule 06

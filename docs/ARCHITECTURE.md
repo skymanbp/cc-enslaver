@@ -41,7 +41,32 @@ catches the lazy behaviour, often via a different signal.
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
 - Stop guard (v0.6.0 → … → v0.23.0, rule 01 + 06 + 07 + 08 + 09 + 12 + TL;DR enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) + [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py)
-- Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session.
+- **Shared judgement models (v0.26.0)** — three modules that exist because
+  every guard had been answering a *structural* question with a *textual*
+  test, and each audit round regenerated the same defect class:
+  - [`../hooks/scripts/lib/srclex.py`](../hooks/scripts/lib/srclex.py) —
+    tolerant source lexer. Answers "is this `#` a comment, a docstring, or
+    data?", "where does this literal end?", and "which physical lines form
+    one logical line?". Deliberately a **lexer, not a parser**: an Edit's
+    `new_string` is usually not a syntactically complete unit, so `ast` /
+    `tokenize` would raise on ordinary input and force a fallback that
+    recreates the original bug. Consumed by `read_guard`'s rule 09/10/11
+    detectors. It is what makes the rationale hatch mean "a why-**comment**"
+    (previously `line.find("#")` found the `#` inside a URL, so one
+    neighbouring `https://api.example.com` line disabled the secret detector).
+  - [`../hooks/scripts/lib/mdctx.py`](../hooks/scripts/lib/mdctx.py) —
+    markdown line context (fence state + info string, blockquote including
+    nesting under list items) and the single `countable` predicate meaning
+    "would a reader attribute this line to the agent?". Consumed by **both**
+    halves of Stop layer (h); they previously carried partial private copies
+    of this judgement and disagreed about which fences count.
+  - [`../hooks/scripts/lib/shellcmd.py`](../hooks/scripts/lib/shellcmd.py) —
+    shell command model: tokenise → segments → argv, plus `git_subcommand`
+    (skipping value-taking global options) and `python_script_arg` (knowing
+    that `-c` / `-m` take code/module operands, not scripts). Consumed by
+    `bash_guard`'s force-push detector *and* its register parser, which were
+    two independent text heuristics that had already drifted apart.
+- Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session. **v0.25.1 extends this to the parsed values, not just the bytes**: `severity = ["must"]` / `mode = []` are valid TOML, and `value not in SET` raises `TypeError: unhashable type` — which escaped the same two loaders through a different door. Both now type-check before the membership test, and `manage_edicts.py` was finally routed through this module too (v0.25 wired the two hook-side loaders and never swept the tree, so `edict list / add / remove` still crashed on a file the hooks read fine — the repo-wide-sync omission rule 12 exists to catch).
 
 Five hook entries across four events:
 
@@ -65,22 +90,37 @@ then Edit X → DENY. v0.3.2 records on PreToolUse(Read) and gates on
 PreToolUse(Edit/Write); both share a scope by construction.
 
 The trade-off: recording in Pre is speculative (happens before the tool
-result is known). A Read of a non-existent path leaves a phantom record,
-but Edit's `os.path.exists` short-circuit covers it (Edit on a missing
-file is allowed and Claude Code rejects it downstream).
+result is known). **Only targets that already exist are recorded (v0.25).**
+The earlier reasoning here — that a phantom record for a not-yet-existing
+path was harmless because Edit's `os.path.exists` short-circuit covers it —
+was wrong, and the code now says so explicitly. That short-circuit only
+holds while the file is *still* missing: Read a build artifact before it
+exists (an ordinary workflow), let the build create it, and the stale
+record satisfies `has_read`, so an Edit — or a whole-file Write — lands on
+content the session has never seen, with rule 04 disabled for that path for
+the rest of the session. A missing target still records an mtime baseline,
+which is exactly what Stop layer (g) needs to adjudicate "I created X".
 
-#### Why three scripts (not one)
+#### Why four scripts (not one)
 
-Each script has a different responsibility and a different failure mode:
+Four scripts are registered as hooks (`inject_context.py`, `read_guard.py`,
+`bash_guard.py`, `stop_guard.py` — the last since v0.6.0). Each has a
+different responsibility and a different failure mode:
 - `inject_context.py` is purely additive: always exit 0, only emit
   `additionalContext`. Never reads or writes disk state.
 - `read_guard.py` owns per-session disk state, with both recording and
   gating in PreToolUse (Read/Write/Edit). Its failure mode is state-file
   corruption.
-- `bash_guard.py` is stateless string inspection. Its failure mode is regex
-  bug.
+- `bash_guard.py` inspects commands and also mutates session state (the
+  `register_read` escape hatch) and reads `edicts.toml` off disk. Since
+  v0.26 its two structural decisions — force-push detection and
+  register-command parsing — go through the `lib/shellcmd` parse model
+  rather than regexes over the raw command string, so its failure mode is
+  a mis-parse, not just a regex bug.
+- `stop_guard.py` is read-only with respect to the turn's work but owns the
+  Stop decision tree and the one-shot block state.
 
-Collapsing them into one script would chain three independent failure modes
+Collapsing them into one script would chain independent failure modes
 behind a single try/except — a bug in any one would mask the others. Keeping
 them separate also lets each script load only the imports it actually needs.
 
@@ -300,6 +340,27 @@ lines — are measured; anything ambiguous is not measured, failing open).
 The block reuses layer (h) with an "overlong" table note and its own
 recovery text (`_RECOVERY_H_LONG`).
 
+**v0.25.1 layer (h) presence must mean content**: a bare `tldr:`, a
+`tldr: ""`, or a blockquoted `> tldr: …` (quoting someone else) used to
+satisfy the presence half outright, while the length half then measured
+nothing — so the emptiest possible summary passed both. `_has_tldr` now
+requires the marker to introduce actual text, on its own line or on the
+next non-blank one, and ignores blockquoted markers.
+
+**v0.25.1 `_has_done_claim` is the gate on all nine layers.** Every layer
+is downstream of it, so a completion phrased outside `DONE_PATTERNS` did
+not skip one check — stop_guard returned immediately and cleared the edit
+flag on the way out. `已完成` / `Implemented` / `Finished` /
+`is/are complete` were all silently exempt and are now covered. The
+converse was also true: a bare keyword search read `Not done; tests
+failed.` and `This is not fixed` as completions (and unbounded `all set`
+matched inside "Not all settings"), so an honest report of failure could
+be blocked. Matches preceded by a negator are now skipped and the scan
+continues, so a later unnegated claim still counts. Evidence detection
+(layer (a)) also learned the Windows prompt shapes `PS C:\repo>` and
+`C:\repo>`, which matched none of the POSIX-only patterns — a Windows
+user pasting a genuine transcript was told they had produced none.
+
 **v0.23.0 layer (i) — rule 12 repo-wide sync gate**: `read_guard.py`
 records every ACCEPTED Edit / Write path into the session's
 `edited_files` set; at Stop, `lib/sync_gate.py` loads the project's
@@ -316,6 +377,19 @@ edited-file set cannot re-block an already-answered group on later
 unrelated edits. fnmatch semantics: `*` crosses path separators;
 matching is normcased. No config → the layer never fires (per-project
 opt-in). Loader and evaluator are failing-open.
+
+**v0.25.1 — the grace-window ack is scoped to the groups the block
+presented.** A recovery turn is still an editing turn: if it touched
+files violating a *different* group, that group became pending only
+after the block, was never shown to the agent, and was never answered —
+yet `_ack_pending_sync_groups` re-derived "everything pending now" and
+silenced it for the rest of the session. The layer-(i) block now records
+its presented group names (`last_blocked_groups`), and the ack
+intersects with that set (falling back to the pending set when no list
+was recorded, i.e. a block from before this field existed). The related
+question of whether the ack should also honour recoveries from layers
+other than (i) is a **contract** question about enforcement strictness,
+reaffirmed as "stay strict" by the user on 2026-08-10.
 
 **Why layers (e)+(f) are scoped to edit turns**: a pure analysis /
 answer turn should not be forced to surface think-before-write or
@@ -399,8 +473,8 @@ hardcoding) and rule 11 (no non-essential path dependency):
 
 | Detector (function) | Flags (high-confidence only) | Rule |
 |---|---|---|
-| `_find_hardcoded_secret` | assignment to a secret-named identifier (`password` / `api_key` / `secret` / `token` / `private_key` / …) with a ≥ 8-char string literal; PEM `-----BEGIN … PRIVATE KEY-----`; AWS `AKIA…` access-key; credentials embedded in a connection URL (`://user:pass@`) | 10 |
-| `_find_path_dependency` | machine-specific **user-home** absolute paths (`C:\Users\…` / `/home/…` / `/Users/…`), plus `$HOME` / `%USERPROFILE%` / quoted `~/…` inside a string literal | 11 |
+| `_find_hardcoded_secret` | assignment to a secret-named identifier (`password` / `api_key` / `secret` / `private_key` / …) with a ≥ 8-char string literal, bare **or quoted** key; PEM `-----BEGIN … PRIVATE KEY-----`; AWS `AKIA…` access-key; provider-issued token literals (`ghp_…` / `xox…` / `AIza…`, v0.25.1); credentials embedded in a connection URL (`://user:pass@`) | 10 |
+| `_find_path_dependency` | machine-specific **user-home** absolute paths (`C:\Users\…` / `/home/…` / `/Users/…`) with **raw or escaped** separators (v0.25.1), plus `$HOME` / `%USERPROFILE%` / quoted `~/…` inside a string literal | 11 |
 
 Two scoping refinements keep false positives low, honouring the repo's
 "宁可漏报不误报" detector philosophy:
@@ -413,6 +487,15 @@ Two scoping refinements keep false positives low, honouring the repo's
   `changeme`, `xxxx`, `<…>`, `your-`, and `os.environ` / `getenv` /
   `process.env` reads) are skipped by construction. "Essential"
   hardcoding declares itself; lazy hardcoding does not.
+  The rule-09 base set gained the Chinese "because"/"deliberately" forms
+  in v0.26 (`因为` / `之所以` / `理由` / `故意` / `刻意` / `有意` / `特意`)
+  alongside `reason` / `tracking` / `vendor` — only the noun `原因` had
+  been listed, so the most natural Chinese spelling was rejected while
+  English `because` passed, in a Chinese-primary repo. The token must sit
+  in **comment text** (v0.25.1) and "comment" is decided by the
+  [`lib/srclex`](../hooks/scripts/lib/srclex.py) lexer (v0.26), so a `#`
+  inside a URL is not one while `/* … */` blocks and own-line docstrings
+  are.
 - **Prose-doc + lockfile targets are exempt** (`_is_scannable_target`
   returns False for `.md` / `.markdown` / `.rst` / `.txt` / `.adoc` /
   `.asciidoc` and `*.lock` / `package-lock.json` / `yarn.lock` /
@@ -427,6 +510,40 @@ Two scoping refinements keep false positives low, honouring the repo's
   skipped; and the POSIX `/home/…` pattern rejects matches glued to a
   hostname (`https://host/home/alice/…` is a route, not a path).
 
+  **v0.25.1 corrections to the two clauses above.** The CamelCase relief
+  is now scoped to the `:` spelling it was written for — it applied to
+  `=` as well, so `password = "SuperSecret"` was silently allowed. The
+  placeholder filter now also covers the standalone literal patterns, not
+  only keyword assignments, so an obviously fake
+  `postgres://user:redacted@host/db` stops being denied. And the rule-09
+  patch check is **no longer literally all-files**: prose targets keep
+  matching only the *bare* marker form, because v0.25.1 dropped the
+  end-of-line anchors (see below) and this repo's own docs name those
+  markers 54 times. Enforcement on code is unchanged-or-stricter; only
+  the doc false-positive surface moved.
+
+**Rule-09 marker matching (v0.25.1).** The five single-line patterns no
+longer end in `[ \t]*(?:\n|$)`, and removing that anchor is the fix:
+
+- `\r\n` could never match it, so on Windows — this plugin's primary
+  platform — all five detectors were silently off for CRLF files.
+- *Any* trailing text made a marker match nothing at all, so
+  `// @ts-ignore` + a bare deferral keyword was ALLOWED while the bare
+  form was denied, and the rationale check was never reached. Trailing
+  text now goes to `_inline_reason_is_substantive`, which accepts an
+  explanation and rejects a leading TODO / FIXME / HACK / WIP / later.
+
+`_scan_bare_try_except_pass` returns **every** hit (a justified swallow no
+longer hides an unjustified one), tracks nested `try` blocks with a stack,
+recognises `except X: pass` one-liners, and **skips comment lines** when
+locating the swallow — that last one is what finally makes rule 09's
+why-comment hatch reachable for its most natural spelling (a rationale on
+its own line above `pass` used to move the `pass` out of the scanner's
+sight, so `_has_rationale` was never consulted). `_has_rationale` itself
+now reads **comment text only** (`_comment_text`); it used to lowercase
+the whole raw window, so any token in ordinary code — `reason =
+compute()` — satisfied the hatch.
+
 Unlike rule 09, rule 10 / 11 have **no Stop layer** — content detectors
 are `PreToolUse`-only by precedent (the sibling `# noqa` / `@ts-ignore`
 detectors have no Stop twin), and a Stop layer would double-jeopardy an
@@ -434,15 +551,20 @@ already-blocked write.
 
 #### `Bash` bypass-pattern blocking
 
-`bash_guard.py` (matcher `Bash`) inspects the `tool_input.command` string and
-denies four patterns:
+`bash_guard.py` (matcher `Bash`) inspects the `tool_input.command` and denies
+**six static patterns plus a separately-implemented force-push detector**
+(the force-push case parses the command rather than matching a regex, so it
+does not live in `STATIC_PATTERNS`):
 
-| Pattern (regex) | Why |
+| Pattern | Why |
 |---|---|
 | `--no-verify` (whitespace-bounded) | Skipping commit/push hooks ships unchecked code. Rule 03. |
 | `--no-gpg-sign` | Skipping commit signature verification. Rule 03. |
-| `git push --force` / `-f`, *not* `--force-with-lease` | Force-push is irreversible and can overwrite teammates' work. Rule 03. The safer `--force-with-lease` variant is allowed. |
-| `chmod (-R)? 0?777` | World-writable permissions never solve the underlying access issue and create security risk. Rule 03. |
+| `chmod 777` (regex `chmod (-R)? 0?777`) | World-writable permissions never solve the underlying access issue and create security risk. Rule 03. |
+| `git rebase --skip` (v0.14) | Silently abandoning a conflicting commit discards work instead of resolving it. Rule 03. |
+| `--break-system-packages` (v0.14) | Bypassing PEP 668 to write into a managed interpreter. Rule 03. |
+| `rm -rf` on a root path / `$HOME` / `~` (v0.14) | Unrecoverable deletion of a whole tree. Rule 03. |
+| `git push --force` / `-f` / `+refspec` / `--mirror`, *not* `--force-with-lease` — **detector, not a static pattern** | Force-push is irreversible and can overwrite teammates' work. Rule 03. The safer `--force-with-lease` variant is allowed. |
 
 Each match emits the same deny shape as `read_guard.py`, with a reason that
 explains the rule violation and how to address the real underlying problem.
@@ -452,15 +574,46 @@ Word-boundary care: `--no-verify-extra` (longer flag) does not match;
 `git push --force-with-lease` is stripped before the `--force` check, so it
 also does not match.
 
-**Sub-command scoping (v0.25).** Force-push detection splits the command on
-shell separators (`&&`, `||`, `;`, `|`, newline) and inspects only the
-segments that invoke `git push`. Scanning the whole string gave errors in
-both directions: `rm -f build.log && git push origin main` was denied as a
-force push (the `-f` belongs to `rm`; likewise `make -f`, `docker build -f`),
-while `git push -fu origin main` — a real force push, since git accepts
-stacked short options — never matched a whitespace-delimited `-f` token.
-Within a `git push` segment the check now looks for `f` inside any
-single-dash option cluster.
+**Sub-command scoping (v0.25, re-implemented as a parse model in v0.26).**
+Force-push detection began as a split on a fixed separator list (`&&`, `||`,
+`;`, `|`, newline) plus text matching inside the `git push` segments. That
+fixed the original both-directions error — `rm -f build.log && git push
+origin main` was denied as a force push (the `-f` belongs to `rm`; likewise
+`make -f`, `docker build -f`), while `git push -fu origin main`, a real force
+push since git accepts stacked short options, never matched a
+whitespace-delimited `-f` token.
+
+Since v0.26 the same decision is made through [`lib/shellcmd.py`](../hooks/scripts/lib/shellcmd.py):
+tokenise → segments → argv → git sub-command. The separator set is larger
+(it includes `$(…)`, backticks and subshell parentheses), it recurses into a
+shell's `-c` operand, and it requires `argv[0]` to actually *be* git with the
+sub-command resolved past global options. The text heuristic it replaced was
+catching `$(git push --force)` only by accident, which is why the model had
+to cover command substitution before it could ship: that command really does
+execute. In the other direction `git config alias.deploy "push --mirror"`
+(sub-command is `config`) and an `echo` of a force-push string are no longer
+denied.
+
+**Force-push spellings (v0.25.1).** Four more unconditional-overwrite forms
+were passing. The segment filter matched `git push` adjacently, so a global
+option between them (`git -C repo push --force`, `git --git-dir=… push`) hid
+the whole segment; quote characters are now stripped before matching, since
+`git push "--force"` is the same operation the whitespace-delimited pattern
+could not see past; and two spellings that carry no `--force` flag at all are
+now recognised — `git push origin +main:main` (git's own "force this ref"
+syntax) and `git push --mirror` (force-updates every mirrored ref).
+
+**Register-invocation command position (v0.25.1).** `_parse_register_invocation`
+accepted *any* token ending in `register_read.py`, so
+`echo /not/executed/register_read.py --file F --hash H` registered `F` as read
+without the sanctioned script ever running (a differently-named neighbour such
+as `unregister_read.py` matched the suffix too). The token must now be in
+command position: the first word of its shell segment, or the argument of a
+Python interpreter. Tokenisation also moved to `shlex.shlex(escape="")` on
+Windows — `posix=True` mangles unquoted backslash paths (the v0.25 bug) while
+`posix=False` fails to group a quoted `--file="C:\Dir With Space\x.py"` (the
+v0.25 *fix's* bug); disabling escape handling gives quote grouping and literal
+backslashes at once.
 
 If the user has explicitly authorised a bypass, `bash_guard` will still deny.
 The agent should surface the deny reason to the user and let the user run the
@@ -497,17 +650,25 @@ session state. Motivation:
   the file on disk and only registers if it matches the agent's claim.
   An agent that has not actually opened the file can't produce the
   current on-disk hash, so the hatch can't be abused.
-- **Argument parsing (v0.25).** The command is tokenised in non-posix mode
-  on Windows (with quote-stripping) because `shlex.split(posix=True)` treats
-  a backslash as an escape: an unquoted `C:\Users\me\note.txt` came back as
-  `C:Usersmenote.txt`, so the hatch denied with "file does not exist on
+- **Argument parsing (v0.25, superseded by the v0.26 command model).**
+  The original bug: `shlex.split(posix=True)` treats a backslash as an
+  escape, so an unquoted `C:\Users\me\note.txt` came back as
+  `C:Usersmenote.txt` and the hatch denied with "file does not exist on
   disk" — the recovery path for a false rule-04 DENY was itself broken on
   this plugin's primary platform. It went unnoticed for 21 releases because
-  every test quoted the path, and quoting survives posix splitting. Both
-  `--file X` and `--file=X` are accepted, matching what `register_read.py`'s
-  own argparse accepts; previously the `=` spelling made the hook classify
-  the command as "not a registration", so nothing was registered while the
-  stub script still printed `register_read: ok`.
+  every test quoted the path, and quoting survives posix splitting.
+  Parsing now lives in [`lib/shellcmd.py`](../hooks/scripts/lib/shellcmd.py)
+  and runs in **posix mode with escape handling disabled** (plus
+  `commenters=""`, so a `#` in a path no longer truncates the command) —
+  not the non-posix mode v0.25 introduced. Both `--file X` and `--file=X`
+  are accepted, matching what `register_read.py`'s own argparse accepts;
+  previously the `=` spelling made the hook classify the command as "not a
+  registration", so nothing was registered while the stub script still
+  printed `register_read: ok`. The script operand is now identified by
+  argv position rather than by scanning backwards for dashes, so
+  `python -c register_read.py …` no longer registers anything (the script
+  never runs) while `python -X utf8 register_read.py …` and `python3.13`
+  are recognised.
 
 Flow:
 
@@ -644,13 +805,24 @@ Agent calls Read, Edit, or Write
     ▼
 PreToolUse hook fires (matcher Read|Edit|Write) → read_guard.py
     │
-    ├─ tool=Read                                   → record path, ALLOW (silent)
-    ├─ tool=Write, target does not exist on disk   → record path, ALLOW (new file)
-    ├─ tool=Write, target exists & is recorded     → record (no-op), ALLOW
+    ├─ tool=Read                                   → record path (only if it
+    │                                                 exists) + mtime baseline,
+    │                                                 ALLOW (silent)
     ├─ tool=Write, target exists but unrecorded    → DENY (rule 04)
+    ├─ tool=Edit,  target exists but unrecorded    → DENY (rule 04)
     ├─ tool=Edit,  target does not exist on disk   → ALLOW (Claude Code rejects)
-    ├─ tool=Edit,  target exists & is recorded     → ALLOW (silent)
-    └─ tool=Edit,  target exists but unrecorded    → DENY (rule 04)
+    └─ otherwise → CONTENT CHECKS run on new_string / content, in order:
+           patch marker (rule 09)      → DENY
+           hardcoded secret (rule 10)  → DENY
+           path dependency (rule 11)   → DENY
+           圣旨 deny_edit regex        → DENY
+           rolling-patch counter       → DENY on the 4th small edit
+         all clear → record read + edit-turn signal + edited_files, ALLOW
+
+    (Every write branch runs the same content pipeline — the older diagram
+     showed Write-new and recorded-Edit as bare ALLOWs, which read as "no
+     content checks apply here". They do; a new file is denied for a
+     hardcoded secret exactly like an existing one.)
 
 State file: ${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json (or fallback paths)
 
@@ -661,8 +833,12 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
     │
     ├─ command matches --no-verify                       → DENY (rule 03)
     ├─ command matches --no-gpg-sign                     → DENY (rule 03)
-    ├─ git push segment has --force / -f cluster (no --force-with-lease) → DENY (rule 03)
     ├─ command matches chmod 0?777                       → DENY (rule 03)
+    ├─ command matches git rebase --skip        (v0.14)  → DENY (rule 03)
+    ├─ command matches --break-system-packages  (v0.14)  → DENY (rule 03)
+    ├─ command matches rm -rf on root / $HOME / ~ (v0.14)→ DENY (rule 03)
+    ├─ a git push segment force-updates (--force / -f cluster / +refspec /
+    │        --mirror, but not --force-with-lease)       → DENY (rule 03)
     ├─ command matches a must 圣旨 deny_bash regex       → DENY (edict)
     │        (v0.25: every deny check above runs BEFORE the step below, so a
     │         registration can no longer shield the rest of a compound command)
@@ -703,6 +879,9 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn` + `record_edited_file`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn` + `get_edited_files`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
 | `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), `hooks/scripts/lib/tomlio.py` (config reader), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` + `tests/test_sync_gate.py` (sync-gate cases) |
+| `hooks/scripts/lib/srclex.py` (v0.26) | `hooks/scripts/read_guard.py` (every rule 09/10/11 content detector + the rationale hatch), this doc §2 (shared-models list), `tests/test_v026_models.py` (`TestSrclex` + the rule-09/10/11 regression classes). Changing what counts as a comment / docstring / literal changes what the rationale hatch accepts, so the twin assertions in `TestRationaleHatchV026` must be re-checked in BOTH directions. |
+| `hooks/scripts/lib/mdctx.py` (v0.26) | `hooks/scripts/stop_guard.py` — **both** halves of layer (h) (`_has_tldr` presence + `_tldr_items` length). They must stay on one model; the defect this replaced was exactly the two disagreeing. Also this doc §2, `tests/test_v026_models.py` (`TestMdctx`, `TestTldrContextV026`) + `tests/test_stop_guard.py` (`TestTldrLayerH`, `TestTldrLengthLayerH`). |
+| `hooks/scripts/lib/shellcmd.py` (v0.26) | `hooks/scripts/bash_guard.py` — **both** the force-push detector and `_parse_register_invocation`. It exists so those two stop being independent text heuristics that drift; a change here needs both directions re-checked (real bypasses still denied, innocent commands still allowed). Also this doc §2, `tests/test_v026_models.py` (`TestShellcmd`, `TestForcePushCommandModelV026`, `TestRegisterCommandModelV026`) + `tests/test_bash_guard.py`. |
 | `hooks/scripts/lib/tomlio.py` (v0.25) | **Both** TOML config loaders — `hooks/scripts/lib/edicts.py` and `hooks/scripts/lib/sync_gate.py`. A change here changes how *every* hand-edited config degrades, so it needs both `tests/test_edicts.py` and `tests/test_sync_gate.py` re-checked. It exists precisely so the BOM / non-UTF-8 hardening is not hand-copied into two loaders that then drift apart. |
 | `.claude/cc-enslaver/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
 | `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5 |

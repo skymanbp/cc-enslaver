@@ -80,7 +80,7 @@ of files at once. Before running one:
 |---|---|---|---|
 | **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` contains an unjustified patch marker | **DENY** |
 | **Edit/Write frequency** (v0.13) | `PreToolUse(Edit\|Write)` | same file, 4th "small edit" (≤ 10 lines AND < 200 chars) in one session without a systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | **DENY** |
-| **Bash command** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` | **DENY** (v0.3 bash_guard) |
+| **Bash command** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on a root path / `git push --force` (not `--force-with-lease`) | **DENY** (v0.3 bash_guard, extended v0.14; matched against parsed argv since v0.26) |
 | **Closing** | `Stop` layer (f) | this turn did Edit but the final reply lacks "root cause + impact + solution" markers | **BLOCK** |
 
 ### Edit/Write frequency layer — rolling-patch counter (v0.13)
@@ -107,27 +107,80 @@ The following patterns, when present in `new_string` **without an accompanying "
 
 | Pattern | Reason |
 |---|---|
-| `try:` … `except …:` … `pass` (single-level scan) | Silent exception-swallowing (rule 03) |
-| `^\s*#\s*noqa\b` (without immediately adjacent rationale comment) | Lint suppression (rule 03) |
-| `^\s*#\s*type:\s*ignore\b` (without rationale) | Type-checker suppression (rule 03) |
-| `//\s*@ts-ignore\b` (without rationale) | TS suppression (rule 03) |
+| `try:` … `except …:` … `pass` (all clauses, nested blocks, one-liners) | Silent exception-swallowing (rule 03) |
+| `#\s*noqa\b` (without rationale) | Lint suppression (rule 03) |
+| `#\s*type:\s*ignore\b` (without rationale) | Type-checker suppression (rule 03) |
+| `//\s*@ts-ignore\b` / `//\s*@ts-expect-error\b` (without rationale) | TS suppression (rule 03) |
 | `//\s*eslint-disable(?:-next-line)?\b` (without rationale) | Lint suppression (rule 03) |
-| `time\.sleep\([^)]*\)\s*#\s*(wait\|race\|workaround)` | Sleep masking a race (rule 03) |
+| `time\.sleep(…)\s*#\s*(wait\|race\|workaround)` (nested calls included) | Sleep masking a race (rule 03) |
 
-**Swallow-line scanning (v0.25).** The `try/except: pass` detector compares the
-**code** on the swallow line, not the raw text:
+**Marker spelling is not the pattern (v0.25.1).** The five single-line markers no
+longer require end-of-line:
+
+- **CRLF no longer defeats them.** The old `[ \t]*(?:\n|$)` anchor cannot match
+  `\r\n`, so on Windows every one of these detectors was silently off.
+- **Trailing text no longer makes a marker invisible.** `// @ts-ignore: TODO`
+  used to match *nothing at all* — it was allowed without the rationale check
+  ever running, while the bare form was denied. Trailing text is now evaluated:
+  an explanation justifies the marker, a bare deferral keyword (TODO / FIXME /
+  HACK / WIP / later) does not.
+- **Prose docs** (`.md` / `.rst` / `.txt` / `.adoc`) keep matching only the bare
+  form, because there the markers are being discussed, not executed.
+
+**Swallow-line scanning (v0.25, extended v0.25.1).** The `try/except: pass`
+detector compares the **code** on the swallow line, not the raw text:
 
 - A trailing comment no longer defeats it — `pass  # TODO later` is intercepted.
   Requiring an exactly-bare `pass` had made the why-comment escape hatch below
   *unreachable for this marker*: a rationale comment silenced the detector by
-  changing the string, so the rationale was never actually read. The escape
-  hatch only became real in v0.25.
+  changing the string, so the rationale was never actually read.
+- A **comment line between the handler header and the swallow** no longer masks
+  it either. That was the same defect one spelling over: a rationale written on
+  its own line above `pass` — the most natural way to write it — moved the
+  `pass` out of the scanner's sight, so the hatch stayed unreachable and the
+  v0.25 regression test that claimed to pin it passed for the wrong reason.
+- `except Exception: pass` **one-liners** are detected, **nested** `try` blocks
+  are tracked (a stack, not a single pending indent), and **every** hit in an
+  edit is inspected — a justified swallow no longer hides an unjustified one.
 - Every `except` clause of a `try` statement is inspected, not just the first,
   so the canonical shape — a narrow handler followed by a catch-all that
   swallows everything (`except ValueError: log()` then `except Exception: pass`)
   — is no longer invisible.
 
-**Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing "because" / "原因" / "why" / a concrete justification, e.g.:
+**The rationale must be a comment (v0.25.1).** The hatch used to search the raw
+±1-line window, so a token anywhere in executable code satisfied it —
+`reason = compute()` next to a bare marker was enough. Only comment text counts
+now, which is what the deny message always claimed.
+
+**What counts as a comment is decided lexically (v0.26.0).** "Find the first `#`
+or `//`" is not the same question as "where does a comment start": it found the
+`#` inside `"http://host/#frag"` and the `//` inside *any* URL, so one
+neighbouring line such as `API = "https://api.example.com"` silenced the
+detector — and, via the shared hatch, the rule-10 secret detector with it.
+Comment extraction now goes through a real lexer
+([`lib/srclex.py`](../hooks/scripts/lib/srclex.py)), which also means:
+
+- `/* … */` **block comments are honoured** (they were invisible before, so a
+  legitimate adjacent JavaScript/TypeScript rationale was rejected);
+- a why-note in a **docstring counts** — it is documentation, not data — while
+  a token inside an ordinary string literal does not;
+- the window is judged against the **whole text's** lexical state, not by
+  re-lexing three lines in isolation (a slice inside a docstring carries no
+  delimiter of its own and, judged alone, looked like bare code).
+
+**The hatch is not English-only (v0.26.0).** Only the noun `原因` was listed, so
+the most natural Chinese "because" (`因为`) was DENIED while English `because`
+passed. `因为` / `之所以` / `理由` / `故意` / `刻意` / `有意` / `特意` are now
+rationale tokens. Relatedly, the "reads like an actual explanation" heuristic
+required an ASCII space, which no Chinese sentence has — it now measures CJK
+length instead, so the same justification is accepted in either language.
+
+**Markers end at a token boundary (v0.26.0).** Dropping the end-of-line anchors
+in v0.25.1 left the markers as bare substrings, so `# noquality`,
+`@ts-ignore-generated` and `eslint-disablement` were each read as the
+suppression they merely start with, and DENIED.
+
+**Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing "because" / "原因" / "因为" / "why" / a concrete justification, e.g.:
 
 ```python
 # noqa: E501  -- URL string exceeds 100 chars; splitting hurts readability

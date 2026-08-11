@@ -111,8 +111,18 @@ def prune_old_sessions(
 
     sessions_dir = state_lib.state_dir()
     cutoff = time.time() - (threshold_days * 86400)
+    # v0.26.0 — derive the excluded filename with the SAME function that
+    # created it. Interpolating the raw session id assumed the id and the
+    # filename were identical, but `_safe_session_filename` replaces every
+    # non-alphanumeric character and truncates to 64 chars — so for any
+    # non-canonical id the exclusion silently matched nothing and auto-GC
+    # could delete the LIVE session's reads, baselines, rolling counters
+    # and sync acks. Same root cause as the v0.25.1 miss it follows: the
+    # fix passed a session id but never made the comparison agree with the
+    # naming rule.
     excluded_filename = (
-        f"{exclude_session}.json" if exclude_session else None
+        state_lib._safe_session_filename(exclude_session)
+        if exclude_session else None
     )
 
     scanned = 0

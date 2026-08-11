@@ -61,10 +61,17 @@ The following, when present in the incoming content **without an adjacent
 
 | Pattern | Example (illustrative) |
 |---|---|
-| Windows user-home path | `C:\Users\skyma\data.csv` |
+| Windows user-home path (raw **or** escaped separators) | `C:\Users\skyma\data.csv` |
 | POSIX user-home path | `/home/alice/proj/` |
 | shell home variable literal | `$HOME`, `%USERPROFILE%` |
 | tilde path in a quote | `"~/proj/data"` |
+
+**Escaped separators count (v0.25.1).** The Windows pattern used a
+single-character separator class, so it only ever matched a raw spelling.
+In real Python / JSON / JavaScript source the separator is **doubled** —
+that is how a user-home path actually appears in committed code — and the
+detector caught the rare form while waving through the normal one, on the
+platform this rule pack is most often run on.
 
 The portable alternatives the detector wants you to reach for:
 `Path(__file__).resolve().parent…`, `os.environ["CC_PLUGIN_DATA"]`,
@@ -83,9 +90,19 @@ The user's scope is *non-essential* path dependency. An essential,
 genuinely-fixed path (a documented example, a test fixture pinned to a
 known layout, a platform path that truly cannot move) is allowed through
 when the offending line, or an immediately adjacent line (±1), carries a
-rationale token: `because` / `原因` / `essential` / `必须` / `example` /
-`fixture` / `placeholder` / `占位` / `sample` / `test data`. A bare
-user-home path with no rationale = the non-essential case = **DENY**.
+rationale token **inside a comment**: `because` / `原因` / `因为` /
+`之所以` / `理由` / `故意` / `刻意` / `essential` / `必须` / `必需` /
+`example` / `fixture` / `placeholder` / `占位` / `sample` / `test data`,
+plus the shared leads (`see issue` / `tracking` / `intentional` /
+`third-party` / `per spec` …). A bare user-home path with no rationale =
+the non-essential case = **DENY**.
+
+The hatch is shared with rules 09 and 10, and the same two corrections
+apply — see [rule 10's escape hatch](10-no-hardcoding.md) for the detail:
+the token must be **comment text** (v0.25.1, so `reason = compute()` no
+longer silences a detector), and **"comment" is decided lexically**
+(v0.26.0, so a `#` inside a URL is not one, while `/* … */` blocks and
+own-line docstrings are). The Chinese forms were added in v0.26.0 as well.
 
 ## Must do (MUST)
 

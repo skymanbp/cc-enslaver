@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Callable
 
 try:
+    # because the ignore is unused on 3.11+ where tomllib resolves
     import tomllib  # type: ignore[unused-ignore]
 except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and every caller must fail open

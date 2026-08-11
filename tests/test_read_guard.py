@@ -33,6 +33,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before this import
 from _helpers import SCRIPTS_DIR, run_hook  # noqa: E402
 
 GUARD = str(SCRIPTS_DIR / "read_guard.py")
@@ -1435,6 +1436,366 @@ class TestDetectorHardeningV025(unittest.TestCase):
         self.assertEqual(self._decision(out), "allow")
 
 
+class TestRationaleWindowContract(unittest.TestCase):
+    """v0.25.1 — the rationale window must be exactly ±1 line.
+
+    Five PATCH_MARKERS regexes end in `(?:\\n|$)` and so consume the
+    marker line's terminating newline; `_line_window` then measured the
+    "next line" from a position that was already past it, silently
+    widening the documented "same line or immediately adjacent line"
+    contract to TWO lines below the marker. An unrelated `# because …`
+    two lines away suppressed the DENY. (The window above, and the
+    bare try/except scanner whose span carries no newline, were ±1 all
+    along — pinned here as controls.)
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-window-"))
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir / "data")}
+        self.sid = f"window-{uuid.uuid4().hex[:8]}"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _decide(self, new_string: str, case: str) -> str:
+        sid = f"{self.sid}-{case}"
+        target = self.tmpdir / f"win_{case}.py"
+        target.write_text("zzz\n", encoding="utf-8")
+        run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Read", "tool_input": {"file_path": str(target)}},
+            env_overrides=self.env,
+        )
+        _, out, _ = run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Edit",
+             "tool_input": {"file_path": str(target), "old_string": "zzz",
+                            "new_string": new_string}},
+            env_overrides=self.env,
+        )
+        if out is None:
+            return "allow"
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    def test_rationale_two_lines_below_is_out_of_window(self) -> None:
+        nl, nq = chr(10), "# no" + "qa"
+        src = "x = unused  " + nq + nl + "y = 1" + nl \
+            + "z = 2  # because unrelated" + nl
+        self.assertEqual(self._decide(src, "below2"), "deny")
+
+    def test_rationale_one_line_below_is_in_window(self) -> None:
+        nl, nq = chr(10), "# no" + "qa"
+        src = "x = unused  " + nq + nl \
+            + "# because third-party stub is wrong" + nl + "y = 1" + nl
+        self.assertEqual(self._decide(src, "below1"), "allow")
+
+    def test_twin_same_layout_without_the_rationale_denies(self) -> None:
+        """v0.26.0 — the missing half of the test above.
+
+        Round-4 audit found the two window tests vacuous: both assert only
+        ALLOW, and both pass on the pre-fix tree, so neither shows the
+        marker detector fired at all. Removing ONLY the rationale — same
+        layout, same line count — is what proves the window decided.
+        """
+        nl, nq = chr(10), "# no" + "qa"
+        # No rationale TOKEN anywhere -- "third-party" is itself one, so a
+        # naive twin would still be allowed and stay just as vacuous.
+        src = "x = unused  " + nq + nl \
+            + "# stub" + nl + "y = 1" + nl
+        self.assertEqual(self._decide(src, "below1-twin"), "deny")
+
+    def test_rationale_one_line_above_is_in_window(self) -> None:
+        nl, nq = chr(10), "# no" + "qa"
+        src = "# because third-party stub is wrong" + nl \
+            + "x = unused  " + nq + nl + "y = 1" + nl
+        self.assertEqual(self._decide(src, "above1"), "allow")
+
+    def test_twin_same_layout_above_without_the_rationale_denies(self) -> None:
+        nl, nq = chr(10), "# no" + "qa"
+        src = "# stub" + nl \
+            + "x = unused  " + nq + nl + "y = 1" + nl
+        self.assertEqual(self._decide(src, "above1-twin"), "deny")
+
+    def test_rationale_two_lines_above_is_out_of_window(self) -> None:
+        # Control: the upward direction was never over-extended.
+        nl, nq = chr(10), "# no" + "qa"
+        src = "# because unrelated" + nl + "y = 1" + nl \
+            + "x = unused  " + nq + nl
+        self.assertEqual(self._decide(src, "above2"), "deny")
+
+
+class TestDetectorHardeningV0251(unittest.TestCase):
+    """v0.25.1 — the round-3 audit's read_guard findings.
+
+    Every "a rationale allows this" case is paired with a TWIN that
+    strips the rationale and asserts DENY. Without the twin a test can
+    pass because the detector never fired at all, which is exactly how
+    `test_ts_ignore_with_rationale_is_allowed` and v0.25's own
+    `pass + rationale comment` case passed for years while the escape
+    hatch they claimed to pin was unreachable.
+    """
+
+    NOQA = "# no" + "qa"
+    TSIG = "//" + " @ts-" + "ignore"
+    NL = chr(10)
+    BS = chr(92)
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-v0251-"))
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.tmpdir / "data")}
+        self.counter = 0
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _decide(self, new_string: str, suffix: str = ".py") -> str:
+        """Edit a fresh file in a fresh session; return allow/deny.
+
+        A new file + session per call keeps the rolling-patch counter
+        from denying the 4th small edit for reasons unrelated to the
+        detector under test.
+        """
+        self.counter += 1
+        sid = f"v0251-{uuid.uuid4().hex[:8]}"
+        target = self.tmpdir / f"t{self.counter}{suffix}"
+        target.write_text("zzz\n", encoding="utf-8")
+        run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Read", "tool_input": {"file_path": str(target)}},
+            env_overrides=self.env,
+        )
+        _, out, _ = run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Edit",
+             "tool_input": {"file_path": str(target), "old_string": "zzz",
+                            "new_string": new_string}},
+            env_overrides=self.env,
+        )
+        if out is None:
+            return "allow"
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    # --- rule 09: marker spellings ------------------------------------ #
+    def test_crlf_does_not_defeat_markers(self) -> None:
+        """CRLF is the norm on this plugin's primary platform.
+
+        The five single-line markers anchored on `[ \\t]*\\n`, which
+        cannot match `\\r\\n`, so every one of them was silently off for
+        a CRLF file.
+        """
+        for label, eol in [("LF", self.NL), ("CRLF", chr(13) + self.NL)]:
+            with self.subTest(eol=label):
+                self.assertEqual(
+                    self._decide("x = y  " + self.NOQA + eol), "deny",
+                )
+
+    def test_trailing_text_reaches_the_rationale_check(self) -> None:
+        """A suffix must not make the marker invisible.
+
+        A marker followed by a bare deferral keyword used to match
+        nothing at all, so it was allowed without the rationale check
+        ever running. A deferral is not a reason; an explanation is.
+        """
+        cases = [
+            ("bare", self.TSIG, "deny"),
+            ("deferral suffix", self.TSIG + ": TO" + "DO", "deny"),
+            ("deferral suffix, wordy",
+             self.TSIG + ": TO" + "DO fix this later", "deny"),
+            ("explanation suffix",
+             self.TSIG + ": upstream types are wrong for Node 20", "allow"),
+        ]
+        for label, marker, expected in cases:
+            with self.subTest(case=label):
+                self.assertEqual(
+                    self._decide(marker + self.NL + "legacy();" + self.NL),
+                    expected, msg=label,
+                )
+
+    def test_nested_call_in_sleep_still_detected(self) -> None:
+        for label, call in [("flat", "time.sleep(0.5)"),
+                            ("nested", "time.sleep(max(0, delay))"),
+                            ("nested cast", "time.sleep(float(delay))")]:
+            with self.subTest(case=label):
+                self.assertEqual(
+                    self._decide(call + "  # workaround" + self.NL), "deny",
+                )
+
+    # --- rule 09: try/except/pass layouts ----------------------------- #
+    def _try_block(self, handler_body: str) -> str:
+        return ("try:" + self.NL + "    risky()" + self.NL
+                + "except Exception:" + self.NL + handler_body)
+
+    def test_swallow_layouts_and_rationale_twins(self) -> None:
+        """Layout must not decide the verdict; the rationale must.
+
+        The own-line-rationale pair is the load-bearing one: before
+        v0.25.1 the ALLOW half passed because a comment between the
+        handler header and the swallow moved the swallow out of the
+        scanner's sight, so `_has_rationale` was never consulted. The
+        DENY twin (same layout, non-reason comment) is what proves the
+        escape hatch is now genuinely reachable.
+        """
+        deferral = "# TO" + "DO revisit"
+        reason = "# because upstream guarantees idempotency"
+        cases = [
+            ("bare pass", "    pass" + self.NL, "deny"),
+            ("own-line rationale",
+             "    " + reason + self.NL + "    pass" + self.NL, "allow"),
+            ("own-line non-reason TWIN",
+             "    " + deferral + self.NL + "    pass" + self.NL, "deny"),
+            ("same-line rationale",
+             "    pass  " + reason + self.NL, "allow"),
+            ("same-line non-reason TWIN",
+             "    pass  " + deferral + self.NL, "deny"),
+            ("handled, no pass", "    log()" + self.NL, "allow"),
+        ]
+        for label, body, expected in cases:
+            with self.subTest(case=label):
+                self.assertEqual(
+                    self._decide(self._try_block(body)), expected, msg=label,
+                )
+
+    def test_one_liner_handler_is_detected(self) -> None:
+        src = ("try:" + self.NL + "    risky()" + self.NL
+               + "except Exception: " + "pass" + self.NL)
+        self.assertEqual(self._decide(src), "deny")
+
+    def test_justified_swallow_does_not_hide_a_later_one(self) -> None:
+        """Only the FIRST hit used to be inspected."""
+        src = ("try:" + self.NL + "    a()" + self.NL
+               + "except ValueError:" + self.NL
+               + "    pass  # because a missing row is optional here" + self.NL
+               + "try:" + self.NL + "    b()" + self.NL
+               + "except Exception:" + self.NL + "    pass" + self.NL)
+        self.assertEqual(self._decide(src), "deny")
+
+    # --- rule 09: rationale must be a comment ------------------------- #
+    def test_rationale_must_live_in_a_comment(self) -> None:
+        code_token = ("reason = compute()" + self.NL
+                      + "x = legacy()  " + self.NOQA + self.NL)
+        comment_token = ("# reason: third-party stub is wrong" + self.NL
+                         + "x = legacy()  " + self.NOQA + self.NL)
+        self.assertEqual(self._decide(code_token), "deny",
+                         msg="an identifier is not a why-comment")
+        self.assertEqual(self._decide(comment_token), "allow")
+
+    # --- prose docs keep their pre-v0.25.1 behaviour ------------------ #
+    def test_prose_marker_behaviour_is_unchanged(self) -> None:
+        """.md must not become a false-positive farm.
+
+        This repo's own docs mention the marker spellings 54 times, all
+        with trailing text. Prose therefore keeps matching only the BARE
+        form — identical to the pre-v0.25.1 anchored patterns.
+        """
+        bare = "x = y  " + self.NOQA + self.NL
+        # Short trailing text (a table cell / list item) is not an
+        # explanation, so this is exactly where prose and code differ.
+        tabulated = "| `" + self.NOQA + "` |" + self.NL
+        explained = "- `" + self.NOQA + "` is a lint suppression" + self.NL
+        self.assertEqual(self._decide(bare, suffix=".md"), "deny",
+                         msg="the bare form is denied in prose, as before")
+        self.assertEqual(self._decide(tabulated, suffix=".md"), "allow")
+        self.assertEqual(self._decide(tabulated, suffix=".py"), "deny",
+                         msg="code must not get the prose allowance")
+        # A substantive trailing explanation justifies the marker in any
+        # file type — that is the rationale contract, not an exemption.
+        self.assertEqual(self._decide(explained, suffix=".py"), "allow")
+
+    # --- rule 10 -------------------------------------------------------- #
+    def test_type_annotation_relief_is_scoped_to_colon(self) -> None:
+        pw = "pass" + "word"
+        self.assertEqual(
+            self._decide(pw + ': "SecretStr"' + self.NL), "allow",
+            msg="forward-reference annotation is not a credential",
+        )
+        self.assertEqual(
+            self._decide(pw + ' = "SuperSecret"' + self.NL), "deny",
+            msg="an `=` assignment of the same shape IS a credential",
+        )
+
+    def test_provider_token_literals_are_detected(self) -> None:
+        real = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+        self.assertEqual(self._decide("t = " + '"' + real + '"' + self.NL),
+                         "deny")
+
+    def test_placeholder_url_is_allowed(self) -> None:
+        """Placeholder filtering used to gate only the keyword branch."""
+        url = "DSN = " + '"postgres://user:redacted@host/db"' + self.NL
+        self.assertEqual(self._decide(url), "allow")
+
+    # --- rule 11 -------------------------------------------------------- #
+    def test_escaped_windows_path_is_detected(self) -> None:
+        """A doubled separator is how the path appears in real source."""
+        bs2 = self.BS * 2
+        for label, sep in [("single backslash", self.BS),
+                           ("escaped backslash", bs2),
+                           ("forward slash", "/")]:
+            with self.subTest(case=label):
+                line = ('p = "C:' + sep + "Users" + sep + 'bob"' + self.NL)
+                self.assertEqual(self._decide(line), "deny", msg=label)
+
+
+class TestStateSchemaTolerance(unittest.TestCase):
+    """v0.25.1 — valid JSON with the wrong shape must not break gating."""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ccens-schema-"))
+        self.data = self.tmpdir / "data"
+        (self.data / "sessions").mkdir(parents=True)
+        self.env = {"CLAUDE_PLUGIN_DATA": str(self.data)}
+        self.target = self.tmpdir / "mod.py"
+        self.target.write_text("zzz\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _edit_decision(self, sid: str) -> str:
+        _, out, _ = run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Edit",
+             "tool_input": {"file_path": str(self.target),
+                            "old_string": "zzz", "new_string": "x = 1"}},
+            env_overrides=self.env,
+        )
+        if out is None:
+            return "allow"
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    def test_list_shaped_state_does_not_bypass_the_gate(self) -> None:
+        """A top-level `[]` raised AttributeError inside has_read.
+
+        read_guard's outer handler swallowed it as failing-open, so an
+        unread file became editable.
+        """
+        sid = "schema-list"
+        (self.data / "sessions" / f"{sid}.json").write_text(
+            "[]", encoding="utf-8")
+        self.assertEqual(self._edit_decision(sid), "deny")
+
+    def test_dict_without_read_files_still_records(self) -> None:
+        """A top-level `{}` raised KeyError inside add_read.
+
+        The Read was then never recorded and the next edit was falsely
+        denied.
+        """
+        sid = "schema-empty"
+        (self.data / "sessions" / f"{sid}.json").write_text(
+            "{}", encoding="utf-8")
+        run_hook(
+            [GUARD],
+            {"session_id": sid, "hook_event_name": "PreToolUse",
+             "tool_name": "Read",
+             "tool_input": {"file_path": str(self.target)}},
+            env_overrides=self.env,
+        )
+        self.assertEqual(self._edit_decision(sid), "allow")
+
+
 class TestStateUnreadableFailsOpen(unittest.TestCase):
     """v0.25 — an unreadable state file must not become a false DENY.
 
@@ -1515,6 +1876,18 @@ class TestPluginIsSelfRewritable(unittest.TestCase):
     def _production_scripts(self) -> list[Path]:
         scripts = sorted(SCRIPTS_DIR.glob("*.py"))
         scripts += sorted((SCRIPTS_DIR / "lib").glob("*.py"))
+        # v0.26.0 — the test tree is in scope too. The docstring above
+        # already claimed this test "pins the invariant for the whole
+        # tree", but the glob covered only hooks/scripts, and ALL SEVEN
+        # test modules were in fact self-locked by the same bare lint
+        # suppression on their own sys.path bootstrap — the identical
+        # marker, in the identical position, that this class was created
+        # to fix five scripts for. Fixing the observed instances and not
+        # sweeping the rest is the audit's root cause beta; a claim
+        # outrunning its glob is root cause gamma. Widening the glob
+        # closes both. (The marker is not spelled out here: this file is
+        # itself in scope now, and a bare mention would self-lock it.)
+        scripts += sorted(Path(__file__).resolve().parent.glob("*.py"))
         return [p for p in scripts if p.name != "__init__.py"]
 
     def test_every_hook_script_can_be_rewritten(self) -> None:

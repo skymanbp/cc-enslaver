@@ -13,8 +13,10 @@ argument-hint: "[--apply] [--older-than DAYS]   (默认 dry-run + 30 天)"
 ## 安全默认
 
 **默认 `--dry-run` 模式**（只打印不删除）。要真正删除必须显式加 `--apply`。
-mtime 是最近一次 `state_lib.add_read` 的时间戳；30 天没活动的几乎肯定
-是已死会话。
+mtime 是该会话状态**最近一次被写入**的时间戳 —— 不只是 Read：记录编辑、
+Stop 拦截、滚动补丁计数、mtime 基线、同步 ack 等九个以上的 mutator 都会
+刷新它。所以一个只改文件、不读新文件的会话同样是"活跃"的。30 天没有任何
+写入的，几乎肯定是已死会话。
 
 ## 你（receiving agent）要做的
 

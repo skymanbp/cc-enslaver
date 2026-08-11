@@ -25,10 +25,12 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before this import
 from _helpers import SCRIPTS_DIR, run_hook  # noqa: E402
 
 # Library is importable directly for unit tests.
 sys.path.insert(0, str(SCRIPTS_DIR))
+# because the sys.path bootstrap above must run before this import
 from lib import edicts as edicts_lib  # noqa: E402
 
 INJECT = str(SCRIPTS_DIR / "inject_context.py")
@@ -77,6 +79,31 @@ class TestLoader(_EdictsBase):
         finally:
             os.environ.clear()
             os.environ.update(old)
+
+    def test_non_string_severity_does_not_raise(self) -> None:
+        """v0.25.1 — `severity = ["must"]` is valid TOML.
+
+        `list not in set` raises `TypeError: unhashable type: 'list'`,
+        which escaped load() — a function whose own docstring promises
+        it never raises — and unwound through every downstream check in
+        read_guard into the outer failing-open handler, switching rules
+        04 + 08 OFF for the whole session.
+        """
+        for label, value in [("list", '["must"]'),
+                             ("integer", "1"),
+                             ("table", "{ level = \"must\" }")]:
+            with self.subTest(case=label):
+                self.write_edicts(f"""
+                    [[edicts]]
+                    id = "E01"
+                    text = "no mongoose"
+                    severity = {value}
+                    deny_edit = ['''mongoose''']
+                """)
+                loaded = self._load_in_env()
+                self.assertEqual(len(loaded), 1, msg=label)
+                self.assertEqual(loaded[0].severity, "must",
+                                 msg="must fall back, not crash")
 
     def test_no_file_returns_empty(self) -> None:
         self.assertEqual(self._load_in_env(), [])
@@ -1086,9 +1113,9 @@ class TestManageCLICwdFallback(unittest.TestCase):
         self.assertIn("round trip", out)
 
     def test_path_subcommand_reports_cwd_location_when_env_unset(self) -> None:
-        # `path` with no existing file should point at the cwd-derived
-        # write target, not at $HOME, so the operator knows where the
-        # writer would land.
+        # example only, in prose: `path` with no existing file should point
+        # at the cwd-derived write target, not at $HOME, so the operator
+        # knows where the writer would land.
         rc, out, _ = self._run("path", cwd=self.proj)
         self.assertEqual(rc, 0)
         self.assertIn("does not exist yet", out)

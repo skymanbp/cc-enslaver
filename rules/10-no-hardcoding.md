@@ -71,6 +71,7 @@ placeholder value or an adjacent "why" rationale**, are intercepted:
 | secret-named **quoted key** = quoted literal (v0.25) | `"api_key": "…10+ chars…"` |
 | private-key PEM header | `-----BEGIN … PRIVATE KEY-----` |
 | AWS access-key literal | `AKIA` + 16 upper-alnum |
+| provider-issued token literal (v0.25.1) | `ghp_…` / `xox…` / `AIza…` |
 | credentials in a URL | `postgres://user:pw@host/db` |
 
 The quoted-key row closes a gap that mattered: the separator had to
@@ -80,21 +81,55 @@ most common shape a committed credential takes, and `.json` is fully
 scannable. The rarer bare-key spelling was caught while the common one
 was waved through.
 
+The provider-token row is preferred over widening the keyword list with a
+bare `token`: those value shapes are self-identifying, whereas
+`token = "…"` would fire on ordinary lexer / parser code
+(`token = "NUMBER_LITERAL"`) — a false positive this rule pack's "prefer
+false negatives" philosophy rejects.
+
 A value is treated as a harmless placeholder (not flagged) when it
 contains `example` / `changeme` / `your-` / `<…>` / `${…}` / `dummy` /
 `redacted`, or is an env-read (`os.environ[…]`, `getenv`, `process.env`).
+Since v0.25.1 that filter applies to the standalone literal patterns too,
+not only to keyword assignments: an obviously fake
+`postgres://user:redacted@host/db` used to be denied while the identical
+value behind `password = …` was allowed.
+
 A pure-alpha CamelCase value (`^[A-Z][A-Za-z]*$`) is also skipped
 (v0.24): `password: "SecretStr"` is a Python forward-reference type
 annotation, not a credential — real secrets carry digits or symbols.
+**That relief is scoped to the `:` spelling (v0.25.1).** It applied to `=`
+as well, so `password = "SuperSecret"` — a plain assignment of a
+plain-alphabetic credential — was silently allowed.
 
 ### Escape hatch — operationalizing "non-essential"
 
 The user's scope is *non-essential* hardcoding. "Essential / example /
 fixture" literals are allowed through when the offending line, or an
-immediately adjacent line (±1), carries a rationale token: `because` /
-`原因` / `essential` / `必须` / `example` / `fixture` / `placeholder` /
-`占位` / `sample` / `test data`. A bare secret with no rationale = the
-non-essential case = **DENY**.
+immediately adjacent line (±1), carries a rationale token **inside a
+comment**: `because` / `原因` / `因为` / `之所以` / `理由` / `故意` /
+`刻意` / `essential` / `必须` / `必需` / `example` / `fixture` /
+`placeholder` / `占位` / `sample` / `test data`, plus the shared leads
+(`see issue` / `tracking` / `intentional` / `third-party` / `per spec` …).
+A bare secret with no rationale = the non-essential case = **DENY**.
+
+Two corrections to how this hatch is decided, because earlier revisions of
+this section described neither:
+
+- **It must be a comment (v0.25.1).** The token used to be searched for in
+  the raw text of the window, so ordinary code such as
+  `reason = compute()` silenced an adjacent detector. Only comment text
+  counts now.
+- **"Comment" is decided lexically (v0.26.0).** A `#` or `//` is only a
+  comment when the lexer says so, which cuts both ways. A neighbouring
+  `API = "https://api.example.com"` no longer counts as a rationale — that
+  `#`-free URL used to register as a comment containing `example`, which
+  disabled this detector at exactly the place credentials cluster. In the
+  other direction, `/* … */` block comments and own-line docstrings now
+  count, and a token sitting inside an ordinary data string does not.
+  The Chinese forms above were added in the same release: only the noun
+  `原因` had been listed, so the most natural Chinese spelling (`因为`)
+  was rejected while English `because` passed — in a Chinese-primary repo.
 
 ## Must do (MUST)
 

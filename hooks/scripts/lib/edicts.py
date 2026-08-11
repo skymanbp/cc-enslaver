@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
+    # because the ignore is unused on 3.11+ where tomllib resolves
     import tomllib  # type: ignore[unused-ignore]
 except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and edicts must fail open
@@ -214,7 +215,16 @@ def _parse_one(raw: dict) -> Edict | None:
         return None
 
     severity = raw.get("severity", "must")
-    if severity not in _VALID_SEVERITIES:
+    # v0.25.1 — the isinstance guard is the fix, not decoration. TOML
+    # happily parses `severity = ["must"]`, and `list not in set` raises
+    # `TypeError: unhashable type: 'list'`. That escaped load() — whose
+    # own docstring promises it never raises — and unwound through every
+    # downstream check in read_guard (edicts load first on the Edit/Write
+    # path) into the outer failing-open handler, switching rules 04 + 08
+    # OFF for the entire session. Same defect class as the v0.25
+    # UnicodeDecodeError fix: that one hardened HOW the file is read,
+    # this one hardens WHAT the parsed values may be.
+    if not isinstance(severity, str) or severity not in _VALID_SEVERITIES:
         _warn(
             f"edict {eid}: severity {severity!r} not in {sorted(_VALID_SEVERITIES)}; "
             f"falling back to 'must'"

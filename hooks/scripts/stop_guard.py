@@ -164,8 +164,11 @@ from pathlib import Path
 # Make `lib/` importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import state as state_lib  # noqa: E402
-# noqa: E402 on both lib imports because they must follow the sys.path bootstrap
+# E402 is suppressed on every lib import below because they must follow
+# the sys.path bootstrap above -- that is the stated reason, not laziness.
 from lib import sync_gate as sync_gate_lib  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import mdctx  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -184,6 +187,7 @@ DONE_PATTERNS = [
     # Chinese — explicit completion
     re.compile(r"已解决"),
     re.compile(r"已修复"),
+    re.compile(r"已完成"),
     re.compile(r"完成了"),
     re.compile(r"完工"),
     re.compile(r"搞定"),
@@ -196,16 +200,135 @@ DONE_PATTERNS = [
     re.compile(r"\bdone\b", re.IGNORECASE),
     re.compile(r"\bcompleted\b", re.IGNORECASE),
     re.compile(r"\bresolved\b", re.IGNORECASE),
+    # v0.25.1 — wordings that were missing. This list is not cosmetic:
+    # `_has_done_claim` gates EVERY one of the nine layers, so a
+    # completion phrased outside it skipped the whole enforcement stack
+    # and cleared the edit flag on the way out. `已完成。`,
+    # `Implemented the fix`, `Finished the refactor` and `the migration
+    # is complete` were all silently exempt.
+    re.compile(r"\bimplemented\b", re.IGNORECASE),
+    re.compile(r"\bfinished\b", re.IGNORECASE),
+    # `is/are complete` rather than bare `complete`, which is far more
+    # often an imperative ("complete the migration") than a claim.
+    re.compile(r"\b(?:is|are|was|were)\s+complete\b", re.IGNORECASE),
+    # v0.26.0 audit — the predicative form with the noun in front.
+    # `Work complete. Ready to ship.` matched nothing, and a done-claim
+    # that matches nothing skips ALL NINE layers and clears the edit flag.
+    # Anchored to a small noun set so the imperative ("complete the
+    # migration") still does not match.
+    re.compile(
+        r"\b(?:work|task|job|migration|refactor|refactoring|fix|fixes|"
+        r"change|changes|update|updates|implementation|build|setup|"
+        r"cleanup)\s+complete\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bready\s+to\s+ship\b", re.IGNORECASE),
     # English — soft "should be done" phrasings (also red flags)
-    re.compile(r"all set", re.IGNORECASE),
+    # `\ball\s+set\b` — the old unbounded `all set` substring matched
+    # inside "Not all settings are loaded".
+    re.compile(r"\ball\s+set\b", re.IGNORECASE),
     re.compile(r"should\s+work\s+now", re.IGNORECASE),
     re.compile(r"that\s+should\s+do\s+it", re.IGNORECASE),
 ]
+
+# Negators that invert a done-claim. `Not done; tests failed.` and
+# `This is not fixed` are the OPPOSITE of a completion claim, but the
+# bare keyword search treated them as one — so an honest report of
+# failure could be blocked for lacking convergence evidence (v0.25.1).
+#
+# v0.26.0 — the v0.25.1 spelling required the negator to sit IMMEDIATELY
+# before the claim (`[\s，,、]{0,4}$`), which three ordinary English
+# negations do not:
+#   * `not yet done`      — one intervening word
+#   * `isn't done`        — `\bn't\b` can NEVER match: in "isn't" the
+#                           character before `n` is `s`, so there is no
+#                           word boundary. The alternative was dead code.
+#   * `Nothing is done.`  — `nothing` was not a negator at all.
+# The replacement models the actual question — "is this claim inside a
+# negated clause?" — by cutting at the nearest clause boundary and
+# allowing a few intervening words. The comma IS a clause boundary, which
+# is what keeps `没有遗漏，已完成` ("no omissions, completed") a genuine
+# claim rather than a negation.
+# A dash introduces a new clause too — `no longer broken - fixed` negates
+# "broken", not "fixed".
+# v0.26.0 audit — Chinese CONNECTIVES are clause boundaries too. Chinese
+# runs without spaces, so `_WORDISH` counts an entire unspaced clause as
+# ONE word: `没有遗漏这部分工作所以这次已经完成了` ("nothing was omitted, so
+# this time it IS done") put the negator within the gap budget and the
+# genuine completion claim was suppressed. Splitting at 所以 / 但是 / …
+# models the actual sentence structure instead of guessing at distance.
+_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?;。！？；，,\n—–-]"
+    r"|所以|因此|因而|于是|於是|但是|但|不过|不過|然而|可是"
+)
+_NEGATION_WORD = re.compile(
+    r"\bnot\b|\bno\b|\bnone\b|\bnever\b|\bnothing\b|\bwithout\b|\bfail\w*\b"
+    r"|\bcannot\b|\bunable\b"
+    # Degree-negations that deny completion without a plain negator.
+    # `I am far from done` read as a completion claim and was BLOCKED for
+    # lacking evidence — the damaging direction this function exists to
+    # avoid.
+    r"|\bfar\s+from\b|\bhardly\b|\bbarely\b|\bnowhere\s+near\b|\bshort\s+of\b"
+    r"|n['’]t\b|没有|没|尚未|未|不|无法|尚待|還沒|还没|并非|並非|绝非|絕非|非|未能",
+    re.IGNORECASE,
+)
+_WORDISH = re.compile(r"[A-Za-z0-9一-鿿]+")
+# How many words may sit between the negator and the claim it negates.
+_MAX_NEGATION_GAP_WORDS = 3
+
+# Double negatives are AFFIRMATIVE: `不得不承认已完成` ("cannot but admit it
+# is done") is a completion claim, not a denial of one.
+_DOUBLE_NEGATIVE = re.compile(r"不得不|不能不|无不|無不|莫不|不无|不會不|不会不")
+
+# Constructions where the negator scopes something else entirely, so the
+# claim after it is NOT negated: `not only fixed but tested`.
+_NON_SCOPING_AFTER = re.compile(r"^\s*(?:only|just|merely|simply)\b",
+                                re.IGNORECASE)
+
+
+def _is_negated(text: str, claim_start: int) -> bool:
+    """True when the done-claim at `claim_start` sits in a negated clause.
+
+    Deliberately biased: a MISSED negation blocks an honest "it is not
+    done" report, which is the damaging direction, so the negator list errs
+    wide. A spurious negation merely lets a turn through unchecked.
+    """
+    preceding = text[max(0, claim_start - 80):claim_start]
+    clause = _CLAUSE_BOUNDARY.split(preceding)[-1]
+    # A double negative is affirmative only when it is the LAST negation
+    # before the claim. `不得不说明任务还没完成了` ("I must explain the task
+    # is still NOT done") contains 不得不, but 还没 sits closer to the claim
+    # and is the one that scopes it. The old clause-wide `search` returned
+    # affirmative immediately and blocked an honest not-done report.
+    dn = None
+    for m in _DOUBLE_NEGATIVE.finditer(clause):
+        dn = m
+    last = None
+    for m in _NEGATION_WORD.finditer(clause):
+        # 不得不 itself contains 不; those matches are the double negative,
+        # not an independent negation.
+        if dn is not None and m.start() < dn.end():
+            continue
+        last = m
+    if last is None:
+        return False
+    tail = clause[last.end():]
+    if _NON_SCOPING_AFTER.match(tail):
+        return False
+    gap = _WORDISH.findall(tail)
+    return len(gap) <= _MAX_NEGATION_GAP_WORDS
 
 EVIDENCE_PATTERNS = [
     # Shell prompts and command-output markers
     re.compile(r"^\s*\$\s+\S", re.MULTILINE),
     re.compile(r"^\s*>\s+\S", re.MULTILINE),
+    # Windows shells (v0.25.1). This plugin's primary platform emits
+    # `PS C:\repo>` / `C:\repo>` transcripts, none of which matched the
+    # POSIX-only prompt patterns above — so a Windows user pasting a real
+    # command transcript could still be blocked by layer (a) for having
+    # "no evidence".
+    re.compile(r"^\s*PS\s+[A-Za-z]:[^\n>]*>\s*\S", re.MULTILINE),
+    re.compile(r"^\s*[A-Za-z]:\\[^\n>]*>\s*\S", re.MULTILINE),
     # Test-runner output snippets
     re.compile(r"\b\d+\s+(passed|failed|errors?)\b", re.IGNORECASE),
     re.compile(r"Ran\s+\d+\s+tests?", re.IGNORECASE),
@@ -357,10 +480,17 @@ FIDELITY_QUIZ_PATTERNS = [
 
 
 def _has_done_claim(text: str) -> str | None:
-    """Return the matched done-claim phrase, or None."""
+    """Return the matched done-claim phrase, or None.
+
+    v0.25.1 — a match immediately preceded by a negator is skipped and
+    the scan continues, so `Not done; tests failed.` no longer reads as
+    a completion claim while `Fixed, and the earlier attempt was not
+    done properly.` still does (the later, unnegated match wins).
+    """
     for p in DONE_PATTERNS:
-        m = p.search(text)
-        if m:
+        for m in p.finditer(text):
+            if _is_negated(text, m.start()):
+                continue
             return m.group(0)
     return None
 
@@ -541,8 +671,50 @@ def _has_tldr(text: str) -> bool:
     Satisfied by the canonical YAML `tldr:` field, or any of the natural
     markers (大白话 / 一句话总结 / TL;DR). Permissive on phrasing: the goal
     is a readable one-line takeaway, not a specific keyword.
+
+    v0.25.1 — the marker must actually introduce CONTENT, and must be the
+    agent's own. A bare `tldr:`, a `tldr: ""`, or a blockquoted
+    `> tldr: …` (quoting someone else) used to satisfy layer (h) outright:
+    the presence test looked for the keyword anywhere in the reply, while
+    the LENGTH test then measured nothing, so the emptiest possible
+    "summary" sailed through both halves of the gate.
+
+    v0.26.0 — the presence half and the LENGTH half of layer (h) now read
+    the same context model (`lib/mdctx`). They previously disagreed, which
+    is what let the emptiest summaries through:
+
+      * `_tldr_items` measured only the canonical ```yaml block, while
+        this check accepted a `tldr:` marker inside ANY fence — so
+        quoting the schema in a ```text example satisfied the gate and
+        the length half then had nothing to measure.
+      * A blockquote was recognised only as a leading `>`, so `- > tldr:`
+        (a quote nested in a list item) read as the agent's own line.
+      * `rest` merely had to be non-empty, so `tldr: !!!` passed.
     """
-    return any(p.search(text) for p in TLDR_MARKERS)
+    ctx = mdctx.lines(text)
+    for i, line in enumerate(ctx):
+        if not line.countable:
+            continue
+        for p in TLDR_MARKERS:
+            m = p.search(line.raw)
+            if not m:
+                continue
+            rest = line.raw[m.end():].lstrip(" \t:：|>-").strip().strip("'\"")
+            if mdctx.has_substance(rest):
+                return True
+            # Value-less marker: accept only when real content follows.
+            for nxt in ctx[i + 1:]:
+                if nxt.is_fence_delim:
+                    break
+                if not nxt.raw.strip():
+                    continue
+                if not nxt.countable:
+                    break
+                cand = nxt.raw.strip().strip("-*• \t").strip().strip("'\"")
+                if mdctx.has_substance(cand):
+                    return True
+                break
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -639,10 +811,12 @@ def _tldr_items(text: str) -> list[str]:
     """Collect every measurable tldr item from `text` (see note above)."""
     items: list[str] = []
     lines = text.splitlines()
+    # v0.26.0 — fence / blockquote state comes from the shared context
+    # model, the same one `_has_tldr` consumes. The two halves of layer
+    # (h) each used to carry their own partial copy of this judgement and
+    # disagreed about which fences count and what a blockquote looks like.
+    ctx = mdctx.lines(text)
     n = len(lines)
-    in_fence = False
-    fence_marker = ""
-    fence_measurable = False
     idx = 0
 
     def _collect_paragraph(start: int) -> int:
@@ -654,33 +828,23 @@ def _tldr_items(text: str) -> list[str]:
             s = lines[j].strip()
             if not s or _is_fence(s) or s.startswith("#"):
                 break
+            # Continuation lines are subject to the SAME attribution test
+            # as the marker line. Checking it only on the marker was the
+            # disagreement bug one level down: a blockquoted continuation
+            # (`  > …`) was measured as the agent's own tldr and blocked
+            # the reply for a length the agent did not write.
+            if not ctx[j].countable:
+                break
             items.append(_strip_item_decorations(s))
             j += 1
         return j
 
     while idx < n:
         line = lines[idx]
-        stripped_line = line.strip()
-        marker = _fence_marker(stripped_line)
-        if marker is not None:
-            # A fence closes only on the SAME character AND a run at least
-            # as long as the opener — a `~~~` line inside a ``` block, or
-            # a ``` line inside a ```` block, is content, not a fence
-            # toggle (same contract as i18n_check's fence tracking).
-            if not in_fence:
-                in_fence = True
-                fence_marker = marker
-                info = stripped_line.lstrip("`~").strip().lower()
-                # The canonical reply schema is a ```yaml block — keep it
-                # measurable; every other fence is a fixture/example.
-                fence_measurable = info.startswith(("yaml", "yml"))
-            elif marker[0] == fence_marker[0] and len(marker) >= len(fence_marker):
-                in_fence = False
-                fence_marker = ""
-                fence_measurable = False
-            idx += 1
-            continue
-        if in_fence and not fence_measurable:
+        # Fence delimiters, blockquoted lines and the bodies of
+        # non-canonical fences are all "not the agent's own assertion" —
+        # one predicate, evaluated once, in mdctx.
+        if not ctx[idx].countable:
             idx += 1
             continue
         m = _TLDR_ITEM_LINE.match(line)
@@ -719,6 +883,10 @@ def _tldr_items(text: str) -> list[str]:
                 # line that already carried its sentence is detail, not
                 # more tldr — `base` includes the marker line's list
                 # prefix, so such nested items compare <= base and stop.
+                if not ctx[j].countable:
+                    # Same attribution test as the marker line — see the
+                    # note in `_collect_paragraph`.
+                    break
                 if nxt_indent > base or (
                     is_list and nxt_indent >= base and rest_empty
                 ):
@@ -787,20 +955,32 @@ def _pending_sync_violations(
 
 
 def _ack_pending_sync_groups(session_id: str, cwd: str | None) -> None:
-    """Record every currently-pending violated group as acknowledged.
+    """Acknowledge the groups the prior layer-(i) block actually presented.
 
-    Called when a reply carries a sync marker. v0.24 fix: the one-shot
-    grace path used to return BEFORE the message was even read, so a
-    recovery reply that answered a layer-(i) block with a `同步核对:`
+    Called when a recovery reply carries a sync marker. v0.24 fix: the
+    one-shot grace path used to return BEFORE the message was even read,
+    so a recovery reply that answered a layer-(i) block with a `同步核对:`
     marker never had its acknowledgement persisted — and the same group
     re-blocked the next post-grace edit turn, breaking the "one explicit
     answer per group per session" contract the ack exists to provide.
+
+    v0.25.1 — scoped to the BLOCKED group set rather than "everything
+    pending now". A recovery turn is still an editing turn: if it touched
+    files that violate a DIFFERENT group, that group became pending after
+    the block, was never shown to the agent, and was never answered — yet
+    the old code acknowledged it anyway, silencing it for the rest of the
+    session. Falls back to the pending set when no group list was
+    recorded (a block from before this field existed).
     """
     pending = _pending_sync_violations(session_id, cwd)
-    if pending:
-        state_lib.ack_sync_groups(
-            session_id, [v.group.name for v in pending],
-        )
+    if not pending:
+        return
+    presented = set(state_lib.get_last_blocked_groups(session_id))
+    names = [v.group.name for v in pending]
+    if presented:
+        names = [n for n in names if n in presented]
+    if names:
+        state_lib.ack_sync_groups(session_id, names)
 
 
 # --------------------------------------------------------------------------- #
@@ -881,8 +1061,17 @@ _FILE_CLAIMS_EN = re.compile(
 # — because layer (g) BLOCKS, and a false block costs a turn while a
 # missed lie costs nothing but a missed catch (the layer is documented
 # false-negative-preferring).
+# v0.26.0 audit — the "12 characters between the anchor and the verb" gap
+# is wide enough to admit a DIFFERENT grammatical subject:
+# `我确认 v0.23 修改了 lib/state.py` ("I confirm that v0.23 modified …")
+# parsed as the agent's own edit claim. That is the same false-block this
+# pattern was created to stop, one layer in. The gap must therefore not
+# contain a version / release / PR token, which is what such an
+# intervening subject looks like in this repo's prose.
 _FILE_CLAIMS_ZH = re.compile(
-    r"(?:我|本次|这次|此次)[^。；;\n]{0,12}?"
+    r"(?:我|本次|这次|此次)(?![^。；;\n]{0,12}?"
+    r"(?:v\d|V\d|#\d|上一版|上个版本|上個版本|旧版|舊版|前一版))"
+    r"[^。；;\n]{0,12}?"
     r"(修改|更新|创建|新增|新建|编辑|写入|添加|生成)了\s*"
     r"[`「\[]?(" + _PATH_TOKEN + r")[`」\]]?"
 )
@@ -1716,7 +1905,10 @@ def main() -> int:
                     )
                     pending = []
                 if pending:
-                    state_lib.record_stop_block(session_id, turn_count, "(i)")
+                    state_lib.record_stop_block(
+                        session_id, turn_count, "(i)",
+                        blocked_groups=[v.group.name for v in pending],
+                    )
                     detail_lines = []
                     for v in pending:
                         hits = ", ".join(v.when_hits[:5])

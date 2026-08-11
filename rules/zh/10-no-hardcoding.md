@@ -64,6 +64,7 @@ severity: must
 | 密钥命名的**带引号键** = 引号字面量（v0.25） | `"api_key": "…10+ 字符…"` |
 | 私钥 PEM 头 | `-----BEGIN … PRIVATE KEY-----` |
 | AWS access-key 字面量 | `AKIA` + 16 位大写字母数字 |
+| 服务商签发的 token 字面量（v0.25.1） | `ghp_…` / `xox…` / `AIza…` |
 | URL 里的凭证 | `postgres://user:pw@host/db` |
 
 带引号键那一行补的是个要命的缺口：此前分隔符必须紧跟在关键字之后（中间只
@@ -71,18 +72,47 @@ severity: must
 匹配 —— 那恰恰是被提交的凭证最常见的形态，而 `.json` 是完全会被扫描的。
 结果是罕见的裸键形态被拦下，最常见的那种反而放行。
 
+服务商 token 那一行是刻意选来替代"把裸 `token` 加进关键字表"的：那些值的形状
+本身就是自证的，而 `token = "…"` 会在普通词法/语法分析代码上误报
+（`token = "NUMBER_LITERAL"`）—— 这类误报正是本规则包"宁可漏报不误报"哲学
+所拒绝的。
+
 一个值被当作无害占位（不标记）的条件是：它含有 `example` / `changeme` /
 `your-` / `<…>` / `${…}` / `dummy` / `redacted`，或是一次环境读取
-（`os.environ[…]`、`getenv`、`process.env`）。纯字母 CamelCase 形状的值
-（`^[A-Z][A-Za-z]*$`）也被跳过（v0.24）：`password: "SecretStr"` 是
-Python 前向引用类型注解，不是凭证 —— 真实密钥总带数字或符号。
+（`os.environ[…]`、`getenv`、`process.env`）。v0.25.1 起该过滤同样作用于
+独立字面量模式，而不只是关键字赋值：明显造假的
+`postgres://user:redacted@host/db` 此前会被拦，而同一个值放在
+`password = …` 后面反而放行。
+
+纯字母 CamelCase 形状的值（`^[A-Z][A-Za-z]*$`）也被跳过（v0.24）：
+`password: "SecretStr"` 是 Python 前向引用类型注解，不是凭证 —— 真实密钥
+总带数字或符号。**该豁免自 v0.25.1 起只作用于 `:` 拼法**：它此前对 `=` 同样
+生效，于是 `password = "SuperSecret"` —— 一次纯字母凭证的普通赋值 ——
+被静默放行。
 
 ### 逃生舱 —— 把"非必须"操作化
 
 用户的范围是*非必须*硬编码。"必须 / 示例 / fixture"字面量在其所在行、
-或紧邻行（±1）携带辩护 token 时被放行：`because` / `原因` / `essential` /
-`必须` / `example` / `fixture` / `placeholder` / `占位` / `sample` /
-`test data`。一个没有任何辩护的裸密钥 = 非必须情形 = **拒绝**。
+或紧邻行（±1）的**注释里**携带辩护 token 时被放行：`because` / `原因` /
+`因为` / `之所以` / `理由` / `故意` / `刻意` / `essential` / `必须` /
+`必需` / `example` / `fixture` / `placeholder` / `占位` / `sample` /
+`test data`，外加共用的引导词（`see issue` / `tracking` / `intentional` /
+`third-party` / `per spec` …）。一个没有任何辩护的裸密钥 = 非必须情形 =
+**拒绝**。
+
+这条逃生舱的判定方式有两处更正，早先的版本两条都没写：
+
+- **必须写在注释里（v0.25.1）**。此前 token 是在窗口的原始文本里搜的，
+  于是 `reason = compute()` 这种普通代码就能让相邻的探测器沉默。现在
+  只认注释文本。
+- **"注释"由词法决定（v0.26.0）**。`#` 或 `//` 只有在词法器认它时才是
+  注释，这是双向的。相邻一行 `API = "https://api.example.com"` 不再算
+  辩护 —— 那个 URL 里的 `#`-free 片段过去会被当成含 `example` 的注释，
+  于是探测器恰好在凭证最密集的地方被关掉。反方向：`/* … */` 块注释与
+  独立成行的 docstring 现在算数，而落在普通数据字符串里的 token 不算。
+  上面的中文 token 也是同一版补的：此前表里只有名词 `原因`，于是最自然
+  的中文写法 `因为` 被拒、英文 `because` 放行 —— 在一个以中文为主语言的
+  仓库里。
 
 ## 必须做（MUST）
 

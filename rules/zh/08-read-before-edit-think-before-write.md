@@ -55,7 +55,7 @@ rule 04 已经规定了"完整阅读"；rule 02 已经规定了"七问"。rule 0
 - ❌ **凭记忆改**："上次会话里我读过" / "我记得这里是这样写的" ≠ "本会话已经 Read 过当前内容"。
 - ❌ **不读连带文件就改**：改 `rules/0X-*.md` 但没读 `prompts/` 与 `docs/RULES.md`，会立即破坏同步契约。
 - ❌ **写完不答"为什么"**：交出 `Edit` / `Write` 时，思维链或最终回复里没有根因 / 影响 / 方案的显式记录，违反"写前必想"。
-- ❌ **绕过 read_guard 的 DENY 然后用 register_read 注册一个并未真读的文件**：这违背 hash 闸门设计本意，参见 [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §2 read-cache escape hatch。
+- ❌ **绕过 read_guard 的 DENY 然后用 register_read 注册一个并未真读的文件**：这违背 hash 闸门设计本意，参见 [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §2 read-cache escape hatch。
 
 ## 与其他规则的关系
 

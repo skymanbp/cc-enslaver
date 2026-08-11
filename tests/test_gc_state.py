@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before this import
 from _helpers import SCRIPTS_DIR  # noqa: E402
 
 GC = str(SCRIPTS_DIR / "gc_state.py")

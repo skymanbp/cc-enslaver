@@ -29,11 +29,11 @@
 | 你试图 | 谁拦 | 出口 |
 |---|---|---|
 | Edit 一个本会话**没 Read 过**的已存在文件 | `PreToolUse(Edit\|Write)` DENY | 先 Read 完整文件再 Edit |
-| Edit/Write 含未带 why 的 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` / `time.sleep` 工作绕过 | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释，或改成真修根因 |
-| Edit/Write 往**代码**里塞未辩护的硬编码密钥（密钥命名字面量 ≥ 8 字符 / PEM 私钥头 / `AKIA…` / URL 内凭证）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 10）| 外部化到环境 / 密钥库，用标注过的占位，或紧邻补 why 注释 |
-| Edit/Write 往**代码**里塞未辩护的用户特定绝对路径（`C:\Users\…` / `/home`、`/Users/…` / `$HOME` / `%USERPROFILE%` / 引号 `~/…`）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 11）| 运行时派生路径（插件根 / cwd / 环境 / 参数），或紧邻补 why 注释。散文文档 + 锁文件目标豁免 |
+| Edit/Write 含未带 why 的屏蔽标记 —— `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` / `time.sleep` 工作绕过 | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释（要写在注释里，中英皆可 —— `because` / `因为` / `essential` 都算），或改成真修根因 |
+| Edit/Write 往**代码**里塞未辩护的硬编码密钥（密钥命名字面量 ≥ 8 字符 / PEM 私钥头 / `AKIA…` / 服务商 token `ghp_…` `xox…` `AIza…` / URL 内凭证）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 10）| 外部化到环境 / 密钥库，用标注过的占位，或紧邻补 why 注释 |
+| Edit/Write 往**代码**里塞未辩护的用户特定绝对路径（`C:\Users\…` / `/home/<user>/…` / `/Users/<user>/…` / `$HOME` / `%USERPROFILE%` / 引号 `~/…`）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 11）| 运行时派生路径（插件根 / cwd / 环境 / 参数），或紧邻补 why 注释。散文文档 + 锁文件目标豁免 |
 | 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
-| Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限的根因 |
+| Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 打到根 / $HOME / ~ | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限 / 冲突的根因 |
 | Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 9 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
 | Stop 时声称 `I edited X.py` / `我修改了 Y.md` 但 X/Y 的 mtime 与本会话首次见到时**完全一致**（claim 被磁盘证伪）| `Stop` **layer (g) v0.16** BLOCK | 真做改动；或者撤回声明；或 `CC_ENSLAVER_DISABLE_LAYER_G=1` 跳过 |
 | Stop 时含 done-claim 但**末尾缺 `tldr` / 大白话总结**（违反 v0.20 回复 schema）| `Stop` **layer (h) v0.20** BLOCK | 末尾加一行 `tldr: "<一句大白话>"` |
@@ -104,8 +104,8 @@ cc-enslaver:
 - 引用本会话尚未 Read 过的文件 → rule 04 + 08（**会被 PreToolUse DENY**）
 - 引用本会话尚未 Grep 过的符号 → rule 04
 - 即将做 ≤ 5 行的 "快速修复" → rule 02 + 09
-- 即将 `# noqa` / `@ts-ignore` / `eslint-disable` 而无 why → rule 09（**会被 PreToolUse DENY**）
-- 即将 `--no-verify` / `git push --force` / `chmod 777` → rule 03 + 09（**会被 Bash hook DENY**）
+- 即将 `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` 而无 why → rule 09（**会被 PreToolUse DENY**）
+- 即将 `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 打到根 / $HOME / ~ → rule 03 + 09（**会被 Bash hook DENY**）
 - 即将把密钥 / API key / token / 私钥 / URL 内凭证内联成代码字面量 → rule 10（**会被 PreToolUse DENY**）
 - 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进代码 → rule 11（**会被 PreToolUse DENY**）
 - 测试通过就宣告完成（没问"为什么之前不通过"）→ rule 06

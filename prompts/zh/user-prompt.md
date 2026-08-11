@@ -11,11 +11,11 @@
 | 引用本会话未 Read 过的文件（违反 **改前必读**）| rule 04 + 08 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 ≤ 5 行 "快速修复"，未走七问、缺**写前必想** | rule 02 + 08 | — |
 | 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|
-| 即将写 `try/except: pass` / `# noqa` / `@ts-ignore` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
+| 即将写 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 `time.sleep()` 掩竞态 / 注释失败测试 / 放宽断言 | rule 03 + 09 | rule 09 DENY（若是新代码）|
-| 即将把密钥 / API key / token / 私钥 / URL 内凭证内联成**代码**字面量（本应是配置/环境）| rule 10 | **PreToolUse(Edit\|Write) DENY**（除非占位 / 紧邻 why）|
+| 即将把密钥 / API key / 服务商 token（`ghp_…` `xox…` `AIza…`）/ 私钥 / URL 内凭证内联成**代码**字面量（本应是配置/环境）| rule 10 | **PreToolUse(Edit\|Write) DENY**（除非占位 / 紧邻 why）|
 | 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进**代码** | rule 11 | **PreToolUse(Edit\|Write) DENY**（除非紧邻 why；散文文档/锁文件豁免）|
-| 即将跑 `--no-verify` / `git push --force` / `chmod 777` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
+| 即将跑 `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf /` | rule 03 + 09 | **PreToolUse(Bash) DENY** |
 | 即将说 "完成 / 修好了 / done" 但无 `$ 命令 + 输出` 证据（缺**收敛**）| rule 06 (a) | Stop layer (a) BLOCK |
 | 即将凭一个**总数相同**（问题数 / 通过数 / 体积）而非逐项**集合比对**声称"没变 / 中性 / 无回归" | rule 06 验证 2b | Stop layer (c) BLOCK |
 | 某道门变绿，你却把结论推广到它**并不检查**的部分（证据覆盖面 ≠ 结论覆盖面）| rule 06 验证 2b | Stop layer (c) BLOCK |
@@ -23,7 +23,7 @@
 | 有证据但没显式答 4 题（真解决 / 更好方案 / 哪些没验 / 验证合理；rule 06 **收敛**）| rule 06 (c) | Stop layer (c) BLOCK |
 | 走完 rule 06 但没回看用户原始请求逐项核对 | rule 07 (d) | Stop layer (d) BLOCK |
 | 程度词"强制 / 完整 / 严格 / 所有"实现成"软建议 / 文档提醒" | rule 07 标准性降级 | Stop layer (d) BLOCK |
-| 本轮做了 Edit 但思维链无"根因 / 架构 / 方案 / 连带 / 风险" ≥ 3 项 | rule 08 | Stop layer (e) BLOCK |
+| 本轮做了 Edit 但**最终回复**里无"根因 / 架构 / 方案 / 连带 / 风险" ≥ 3 项（钩子读的是回复，不是隐藏推理——所以要写在用户看得见的地方）| rule 08 | Stop layer (e) BLOCK |
 | 本轮做了 Edit 但回复无"根因 + 影响 + 方案"三件套 | rule 09 | Stop layer (f) BLOCK |
 | 声明"I edited X.py / 我修改了 Y.md"但磁盘 mtime 未变 / 声明"created Z"但 Z 不存在 | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | 含 done-claim 的回复末尾缺 `tldr` / 大白话总结 | v0.20 回复 schema | **Stop layer (h) v0.20 BLOCK** |

@@ -53,10 +53,15 @@ severity: must
 
 | 模式 | 示例（仅示意） |
 |---|---|
-| Windows user-home 路径 | `C:\Users\skyma\data.csv` |
+| Windows user-home 路径（裸分隔符**或**转义分隔符） | `C:\Users\skyma\data.csv` |
 | POSIX user-home 路径 | `/home/alice/proj/` |
 | shell home 变量字面量 | `$HOME`、`%USERPROFILE%` |
 | 引号里的波浪号路径 | `"~/proj/data"` |
+
+**转义分隔符也算（v0.25.1）**：Windows 模式此前用的是单字符分隔符类，于是
+只匹配裸拼法。而在真实的 Python / JSON / JavaScript 源码里分隔符是**成对**的
+—— 那才是 user-home 路径在被提交的代码里的实际样子 —— 于是检测器拦住了罕见
+形态，放过了正常形态，而且恰恰是在本规则包最常运行的平台上。
 
 探测器想让你转而使用的可移植替代：
 `Path(__file__).resolve().parent…`、`os.environ["CC_PLUGIN_DATA"]`、
@@ -72,10 +77,18 @@ severity: must
 
 用户的范围是*非必须*路径依赖。一条必须的、真正固定的路径（一个有据的
 示例、一个钉在已知布局上的测试 fixture、一个真的挪不动的平台路径）在
-其所在行、或紧邻行（±1）携带辩护 token 时被放行：`because` / `原因` /
-`essential` / `必须` / `example` / `fixture` / `placeholder` / `占位` /
-`sample` / `test data`。一条没有任何辩护的裸 user-home 路径 = 非必须
-情形 = **拒绝**。
+其所在行、或紧邻行（±1）的**注释里**携带辩护 token 时被放行：`because` /
+`原因` / `因为` / `之所以` / `理由` / `故意` / `刻意` / `essential` /
+`必须` / `必需` / `example` / `fixture` / `placeholder` / `占位` /
+`sample` / `test data`，外加共用的引导词（`see issue` / `tracking` /
+`intentional` / `third-party` / `per spec` …）。一条没有任何辩护的裸
+user-home 路径 = 非必须情形 = **拒绝**。
+
+这条逃生舱与规则 09、10 共用，同样的两处更正也适用 —— 细节见
+[规则 10 的逃生舱](10-no-hardcoding.md)：token 必须是**注释文本**
+（v0.25.1，于是 `reason = compute()` 不再让探测器沉默），且**"注释"由
+词法决定**（v0.26.0，于是 URL 里的 `#` 不算注释，而 `/* … */` 块注释与
+独立成行的 docstring 算）。中文 token 同样是 v0.26.0 补的。
 
 ## 必须做（MUST）
 

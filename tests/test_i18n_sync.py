@@ -118,6 +118,63 @@ class TestDriftDetection(unittest.TestCase):
                     + "\n".join(str(d) for d in drifts),
             )
 
+    def test_detects_enforcement_token_drift(self) -> None:
+        """v0.26.0: a translation may not silently shrink the deny set.
+
+        This is the check that would have caught the real defect —
+        prompts/zh/ listed four of the seven Bash patterns bash_guard
+        denies, so a zh session was told a smaller deny set than an en
+        session, every turn. File-set and header-structure parity are
+        both perfectly green in that situation.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self._skeleton(base)
+            skel = (
+                "# Title\n\n## One\n\n"
+                "| Bash containing `--no-verify` / `git rebase --skip` "
+                "| DENY |\n\n"
+                "## Two\n\ntext\n"
+            )
+            (base / "rules" / "a.md").write_text(skel, encoding="utf-8")
+            # Same structure, same header levels — but one token dropped.
+            (base / "rules" / "zh" / "a.md").write_text(
+                "# 标题\n\n## 一\n\n"
+                "| Bash 含 `--no-verify` | DENY |\n\n"
+                "## 二\n\n文字\n",
+                encoding="utf-8",
+            )
+            drifts = check_sync(base)
+            self.assertTrue(
+                any(d.kind == "enforcement_tokens" and "git rebase --skip" in d.detail
+                    for d in drifts),
+                msg=f"enforcement drift not reported: {[str(d) for d in drifts]}",
+            )
+
+    def test_enforcement_parity_ignores_non_deny_lines(self) -> None:
+        """Twin of the above: prose code spans are translated freely.
+
+        Without this bound the check would flag every ordinary wording
+        difference, which is why it is scoped to DENY lines — measured at
+        24 false positives across rules/ when applied to all code spans.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self._skeleton(base)
+            (base / "rules" / "a.md").write_text(
+                "# Title\n\n## One\n\nUse `Path.home()` here.\n\n"
+                "## Two\n\ntext\n",
+                encoding="utf-8",
+            )
+            (base / "rules" / "zh" / "a.md").write_text(
+                "# 标题\n\n## 一\n\n这里用运行时派生。\n\n## 二\n\n文字\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                check_sync(base), [],
+                msg="a non-DENY code span must not count as enforcement drift",
+            )
+
     def test_discovers_any_language_subdir(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

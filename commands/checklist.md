@@ -113,13 +113,15 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (
 - [ ] **F2 · 根因证据** — 我对根因的判断有当场验证过吗？引用：Read / Grep / 命令输出。
 - [ ] **F3 · 完整覆盖影响范围** — 根因牵涉的所有连带点是否**一次性**全修了？没有"先修一个其他下次再说"？
 - [ ] **F4 · 方案对比** — 至少对比了 2 个修复方案？引用：方案 A vs B 在简洁性 / 性能 / 架构契合度 / 维护性 上的权衡。
-- [ ] **F5 · 无补丁标记** — new_string 中**没有**下列裸标记（未带紧邻 why 注释）：
-  - [ ] 无 `try / except: pass` 静默吞错
+- [ ] **F5 · 无补丁标记** — new_string 中**没有**下列裸标记（未带紧邻 why 注释）。这是一份**封闭集**：它逐条对应 [`read_guard.py`](hooks/scripts/read_guard.py) 的 `PATCH_MARKERS` 加上独立的 `try/except: pass` 结构扫描；少列一条，就会出现"每一项都打了勾却仍被 DENY"。
+  - [ ] 无 `try / except: pass` 静默吞错（结构扫描，不在 `PATCH_MARKERS` 里）
   - [ ] 无 `# noqa` 无解释（屏蔽 lint）
   - [ ] 无 `# type: ignore` 无解释（屏蔽 mypy）
   - [ ] 无 `// @ts-ignore` 无解释（屏蔽 TS）
-  - [ ] 无 `// eslint-disable` 无解释
-  - [ ] 无 `time.sleep` 掩盖竞态
+  - [ ] 无 `// @ts-expect-error` 无解释（屏蔽 TS，与 `@ts-ignore` 同为独立一族）
+  - [ ] 无 `// eslint-disable`（含 `-next-line` / `-line`）无解释
+  - [ ] 无 `time.sleep(...)` 带 race / wait / workaround 注释掩盖竞态
+  - [ ] why 注释必须写在**注释里**且被词法器认定为注释（v0.26：URL 里的 `#` 不算；`/* … */` 块注释与独立成行的 docstring 算；中文 `因为` / `故意` 与英文 `because` 同等有效）
 - [ ] **F6 · 测试 / timeout / 断言未被偷工放宽** — 没把失败的测试改宽容、没把超时拉长、没把断言放宽、没注释/`@skip` 失败用例。
 - [ ] **F7 · 非滚动补丁** — 本会话对同一文件的 Edit ≤ 3 次（超过则可能是 rolling patches，需重新考虑系统性重写）。
 - [ ] **F8 · 新建不变量已记录** — 若修改建立了新不变量（"X 永远 ≠ None" / "必须先获取锁"），在代码注释或文档里说明？

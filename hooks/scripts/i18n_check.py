@@ -24,6 +24,24 @@ What it checks, for each translation subdir under each skeleton root:
      what nesting depth, in what order) must match. Fenced code blocks
      are skipped so ``#`` comments inside ```` ```bash ```` / ```` ```yaml ````
      blocks are not mistaken for headers.
+  3. **Enforcement-token parity** — on any line stating a physical
+     enforcement outcome (``DENY`` / ``BLOCK`` / ``拒绝`` / ``拦截``),
+     every backtick code span that *looks like a command an agent would
+     type* must also appear in the translation (``enforcement_tokens``).
+     Prose is translated and structure is compared above, but the
+     **tokens an agent is told will be denied are not prose — they are
+     the contract**. Until v0.26.0 the Chinese injections listed four of
+     the seven patterns bash_guard denies, so a zh session was handed a
+     strictly smaller deny set than an en session on every turn, and
+     checks 1 and 2 could not see it.
+
+     Two deliberate bounds, both measured rather than guessed: the check
+     looks only at enforcement lines (comparing *all* code spans flags 24
+     legitimate translation differences in ``rules/``), and only at
+     machine-shaped tokens (a first cut demanded translators reproduce
+     English prose examples such as ``I created Y.md``). What it does NOT
+     do is verify that the enforcement SENTENCE survived translation —
+     only that its tokens appear somewhere in the file.
 
 Usage::
 
@@ -37,6 +55,7 @@ returns a ``list[Drift]``; an empty list means fully in sync.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +137,60 @@ def _header_levels(text: str) -> list[int]:
     return out
 
 
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+
+# Words that mark a line as stating a physical enforcement consequence.
+#
+# v0.26.0 audit — the first cut matched only the literal ``DENY``, which
+# left NINE of the thirteen English rule files contributing zero tokens.
+# Rule 12's entire contract is a Stop-layer ``BLOCK``, so the check passed
+# it vacuously: "no enforcement statements found" was indistinguishable
+# from "all enforcement statements translated". The Chinese verbs are
+# included because a translation states its consequence in its own
+# language while keeping the code spans verbatim.
+_ENFORCEMENT_WORDS = ("DENY", "BLOCK", "拒绝", "拒絕", "拦截", "攔截")
+
+# Not every code span on an enforcement line is part of the deny set: the
+# line also carries the explicitly-ALLOWED exception, tool names, and
+# prose examples. A blacklist of those was tried first and immediately
+# leaked (`I created Y.md`, `$ command + output`, `tldr: "<one plain
+# sentence>"` all became mandatory vocabulary for translators), so the
+# test is positive instead: a required token must LOOK like something an
+# agent types at a shell — lowercase words and flags, at most three of
+# them. Prose, placeholders and capitalised tool names fall out by
+# construction.
+_MACHINE_WORD = re.compile(r"^[-+]{0,2}[a-z0-9][\w./\\-]*$")
+_MAX_MACHINE_WORDS = 3
+
+# The allowed exception and the rationale tokens are lowercase machine-ish
+# words that are nonetheless NOT denied; they stay excluded by name.
+_ENFORCEMENT_TOKEN_EXCLUDE = {
+    "--force-with-lease", "because", "essential", "new_string", "content",
+}
+
+
+def _is_machine_token(tok: str) -> bool:
+    words = tok.split()
+    if not words or len(words) > _MAX_MACHINE_WORDS:
+        return False
+    return all(_MACHINE_WORD.match(w) for w in words)
+
+
+def _enforcement_tokens(text: str) -> set[str]:
+    """Backtick code spans on lines stating a physical enforcement outcome.
+
+    Scoped to those lines deliberately: comparing *every* code span across
+    languages flags 24 legitimate translation differences in ``rules/``,
+    which would make the check unusable.
+    """
+    out: set[str] = set()
+    for line in text.splitlines():
+        if any(w in line for w in _ENFORCEMENT_WORDS):
+            out.update(t for t in _CODE_SPAN.findall(line)
+                       if _is_machine_token(t))
+    return out - _ENFORCEMENT_TOKEN_EXCLUDE
+
+
 def _md_files(d: Path) -> set[str]:
     """Names of ``*.md`` files directly in ``d`` (non-recursive)."""
     if not d.is_dir():
@@ -170,13 +243,27 @@ def check_sync(plugin_root: Path | None = None) -> list[Drift]:
                 ))
             # 2. Section-structure parity for shared files.
             for name in sorted(skeleton_files & trans_files):
-                sk = _header_levels((root / name).read_text(encoding="utf-8"))
-                tr = _header_levels((tdir / name).read_text(encoding="utf-8"))
+                sk_text = (root / name).read_text(encoding="utf-8")
+                tr_text = (tdir / name).read_text(encoding="utf-8")
+                sk = _header_levels(sk_text)
+                tr = _header_levels(tr_text)
                 if sk != tr:
                     drifts.append(Drift(
                         root_name, lang, name, "header_structure",
                         f"skeleton has {len(sk)} headers {sk}, "
                         f"{lang} has {len(tr)} {tr}",
+                    ))
+                # 3. Enforcement-token parity. Compared against the whole
+                # translation, not line-for-line: a translation may lay the
+                # table out differently, but it may not drop a token.
+                absent = sorted(t for t in _enforcement_tokens(sk_text)
+                                if t not in tr_text)
+                if absent:
+                    drifts.append(Drift(
+                        root_name, lang, name, "enforcement_tokens",
+                        f"{lang} never mentions {absent} — the skeleton "
+                        f"states these are DENIED, so this translation "
+                        f"promises a smaller deny set than the skeleton",
                     ))
     return drifts
 

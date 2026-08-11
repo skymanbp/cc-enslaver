@@ -68,6 +68,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 try:
+    # because the ignore is unused on 3.11+ where tomllib resolves
     import tomllib  # type: ignore[unused-ignore]
 except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and the gate must fail open
@@ -228,7 +229,12 @@ def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
         if not isinstance(note, str):
             note = str(note)
         mode = raw.get("mode", "any")
-        if mode not in _VALID_MODES:
+        # v0.25.1 — isinstance guard: `mode = []` is valid TOML and
+        # `list not in set` raises `TypeError: unhashable type: 'list'`,
+        # which escaped load() and took Stop's layer (i) down with it —
+        # including the turn-boundary `clear_edit_flag` that runs on the
+        # same path. Sibling fix in lib/edicts.py (`severity`).
+        if not isinstance(mode, str) or mode not in _VALID_MODES:
             _warn(f"{p}: group {name!r} mode {mode!r} not in {sorted(_VALID_MODES)}; using 'any'")
             mode = "any"
         seen_names.add(name)

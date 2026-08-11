@@ -34,6 +34,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import edicts as edicts_lib  # noqa: E402
 # noqa: E402 above because the lib import must follow the sys.path bootstrap
+try:
+    # because this import must also follow the sys.path bootstrap
+    from lib import tomlio  # noqa: E402
+except Exception:
+    # because non-parsing subcommands must still run without tomllib
+    tomlio = None  # type: ignore[assignment]
+
+try:
+    # because the write path must validate its own output before committing
+    import tomllib  # noqa: E402
+except Exception:
+    # because without tomllib the CLI still works; validation is skipped
+    tomllib = None  # type: ignore[assignment]
+
+
+class EdictWriteError(RuntimeError):
+    """Raised when a rewrite would produce an unparseable edicts file."""
 
 
 _HEADER = """# cc-enslaver — Imperial Edicts (圣旨) file
@@ -90,16 +107,28 @@ def _resolve_path(use_global: bool = False) -> Path:
 
 
 def _read_raw_edicts(path: Path) -> list[dict]:
-    """Load and return the raw edicts list (as dicts), preserving order."""
+    """Load and return the raw edicts list (as dicts), preserving order.
+
+    v0.25.1 — routes through the hardened shared reader instead of a
+    second, hand-rolled `tomllib.load`. v0.25 created lib/tomlio.py
+    precisely so a UTF-8 BOM or a non-UTF-8 save would not disable
+    enforcement, wired the two hook-side loaders to it, and then never
+    swept the tree — so the very same edicts.toml that the hooks read
+    fine still crashed `edict list` / `add` / `remove`. That split is the
+    repo-wide-sync omission rule 12 exists to catch, committed by the
+    release that introduced the shared module.
+    """
     if not path.is_file():
         return []
-    try:
-        import tomllib
-    except ModuleNotFoundError:
+    if tomlio is None:
         sys.stderr.write("Python 3.11+ required (tomllib).\n")
         sys.exit(2)
-    with path.open("rb") as f:
-        data = tomllib.load(f)
+    data = tomlio.parse_toml_file(
+        path, lambda m: sys.stderr.write(f"[cc-enslaver edicts] {m}\n"),
+    )
+    if data is None:
+        sys.stderr.write(f"Could not parse {path}; refusing to rewrite it.\n")
+        sys.exit(2)
     raw = data.get("edicts", [])
     if not isinstance(raw, list):
         return []
@@ -107,9 +136,24 @@ def _read_raw_edicts(path: Path) -> list[dict]:
 
 
 def _escape_triple_quoted(s: str) -> str:
-    """Make a string safe inside a TOML triple-quoted literal '''...'''."""
-    # The only sequence we must avoid is ''' itself; tomli accepts
-    # everything else literally inside single-quoted triple strings.
+    """Deprecated: triple-quoted literals cannot round-trip a regex.
+
+    Kept only so an external caller does not break. Two independent
+    defects made the literal form unusable for regex fields (v0.26.0
+    audit):
+
+    * The `'''` replacement below is NOT TOML string concatenation — TOML
+      has no `+` operator in that position — so a regex containing `'''`
+      came back as the literal text `foo'' + \\"'\\" + ''bar`. The file
+      stayed valid, the edict stayed listed, and its pattern silently
+      stopped matching what it was written to match.
+    * A literal string cannot represent a control character at all, so a
+      regex containing one produced invalid TOML and disabled every edict
+      in the file.
+
+    `_toml_basic_string` handles both, at the cost of escaping
+    backslashes — which is correct, not lossy.
+    """
     return s.replace("'''", r"'' + \"'\" + ''")
 
 
@@ -133,38 +177,82 @@ def _toml_basic_string(s: str) -> str:
         ("\b", "\\b"), ("\f", "\\f"),
     ):
         out = out.replace(raw, esc)
-    # Any remaining C0 control character must be \uXXXX-escaped.
+    # Any remaining control character must be \uXXXX-escaped. DEL (U+007F)
+    # is one of them: TOML forbids it raw in a basic string, but `>= " "`
+    # is true for it, so the pre-v0.26 guard emitted it literally and the
+    # rewritten file would not parse — taking every edict down with it.
     return "".join(
-        ch if ch >= " " or ch == "\x7f" else f"\\u{ord(ch):04X}"
+        ch if (ch >= " " and ch != "\x7f") else f"\\u{ord(ch):04X}"
         for ch in out
     )
 
 
 def _dump_edict(e: dict) -> str:
-    """Serialize one edict dict to a TOML [[edicts]] block."""
+    """Serialize one edict dict to a TOML [[edicts]] block.
+
+    v0.26.0 — every value is coerced with `str()` before it reaches a
+    string helper. Only `id` was, so a hand-written edict whose `text`,
+    `severity` or `note` parsed as a non-string (all legal TOML: an
+    integer, an array) raised `AttributeError: 'int' object has no
+    attribute 'replace'`. That matters more than it looks: `_write_edicts`
+    re-serialises EVERY edict on any add or remove, so one wrongly-typed
+    field anywhere in the file broke the whole CLI — the same blast radius
+    as the v0.25 multi-line-string corruption bug this function was last
+    fixed for. `deny_edit` / `deny_bash` entries get the same treatment.
+    """
     parts = ["[[edicts]]"]
     parts.append(f'id = "{_toml_basic_string(str(e["id"]))}"')
-    parts.append(f'text = "{_toml_basic_string(e.get("text", ""))}"')
+    parts.append(f'text = "{_toml_basic_string(str(e.get("text", "")))}"')
     sev = e.get("severity", "must")
-    parts.append(f'severity = "{_toml_basic_string(sev)}"')
+    parts.append(f'severity = "{_toml_basic_string(str(sev))}"')
     note = e.get("note", "")
     if note:
-        parts.append(f'note = "{_toml_basic_string(note)}"')
+        parts.append(f'note = "{_toml_basic_string(str(note))}"')
     for field in ("deny_edit", "deny_bash"):
         vals = e.get(field) or []
+        if isinstance(vals, (str, bytes)):
+            # A scalar where a list belongs: iterating it would emit one
+            # entry per character.
+            vals = [vals]
+        if not isinstance(vals, (list, tuple)):
+            vals = [vals]
         if vals:
+            # v0.26.0 — basic strings, not triple-quoted literals. The
+            # literal form silently mangled any regex containing `'''` and
+            # could not encode a control character at all. Escaping the
+            # backslashes a regex contains is lossless; losing the pattern
+            # is not.
             inner = ", ".join(
-                f"'''{_escape_triple_quoted(v)}'''" for v in vals
+                f'"{_toml_basic_string(str(v))}"' for v in vals
             )
             parts.append(f"{field} = [{inner}]")
     return "\n".join(parts) + "\n"
 
 
 def _write_edicts(path: Path, edicts: list[dict]) -> None:
+    """Rewrite the whole edicts file, refusing to leave it unparseable.
+
+    v0.26.0 — this function re-serialises EVERY edict on any add/remove,
+    so a single unencodable field used to take the entire file down:
+    tomllib then rejected it, `load()` returned no edicts, and every
+    `must` rule in the project silently stopped enforcing while the CLI
+    printed "Added edict …". Parsing the result before committing it
+    turns that silent, total failure into a loud, local one.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     body = _HEADER
     for e in edicts:
         body += _dump_edict(e) + "\n"
+    if tomllib is not None:
+        try:
+            tomllib.loads(body)
+        except tomllib.TOMLDecodeError as exc:
+            raise EdictWriteError(
+                f"refusing to write {path}: the result would not parse "
+                f"({exc}). The file on disk is unchanged. This is a "
+                f"serialisation bug — please report the edict content "
+                f"that triggered it."
+            ) from exc
     path.write_text(body, encoding="utf-8")
 
 

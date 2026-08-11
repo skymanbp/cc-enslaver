@@ -94,6 +94,32 @@ class TestConfigPath(_SyncGateBase):
             os.chdir(prev)
 
 
+class TestNonStringModeV0251(_SyncGateBase):
+    """v0.25.1 — a non-string `mode` must not take Stop down with it.
+
+    `mode = []` is valid TOML and `list not in set` raises
+    `TypeError: unhashable type: 'list'`, which escaped load(); Stop's
+    broad handler then allowed the turn AND skipped the turn-boundary
+    `clear_edit_flag` on the same path.
+    """
+
+    def test_non_string_mode_falls_back_to_any(self) -> None:
+        for label, value in [("list", "[]"),
+                             ("integer", "3"),
+                             ("table", "{ kind = \"all\" }")]:
+            with self.subTest(case=label):
+                self._write_config(
+                    '[[groups]]\nname = "g"\nwhen = ["a/*"]\n'
+                    f'require = ["b/*"]\nmode = {value}\n'
+                )
+                loaded = sync_gate.load(cwd=str(self.root))
+                self.assertIsNotNone(loaded, msg=label)
+                _, groups = loaded
+                self.assertEqual(len(groups), 1, msg=label)
+                self.assertEqual(groups[0].mode, "any",
+                                 msg="must fall back, not crash")
+
+
 class TestLoadCoercion(_SyncGateBase):
     def test_group_without_require_is_skipped(self) -> None:
         self._write_config(

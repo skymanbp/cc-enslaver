@@ -157,14 +157,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Drain stdin if Claude Code piped hook input to us; we do not currently
-    # use it, but reading prevents a SIGPIPE on the parent side.
+    # Drain stdin if Claude Code piped hook input to us; reading prevents
+    # a SIGPIPE on the parent side. v0.25.1: the payload is also where the
+    # live session id lives, and auto-GC needs it so it can never prune
+    # the state file of the session that is starting (see _maybe_auto_gc).
+    raw_payload = ""
     try:
-        sys.stdin.read()
+        raw_payload = sys.stdin.read()
     except Exception:
-        # Rationale: draining stdin is best-effort (the payload is unused
-        # here); a read failure must never block the injection.
+        # Draining stdin is best-effort; losing it only costs auto-GC its
+        # exclusion hint.
+        # Rationale: a read failure must never block the injection.
         pass
+    session_id = _session_id_from(raw_payload)
 
     prompt_filename = EVENT_TO_PROMPT[args.event]
     additional_context = load_prompt(prompt_filename)
@@ -194,10 +199,29 @@ def main() -> int:
     # injection already landed. Rate-limited by a marker file so we don't
     # re-scan on every rapid session restart.
     if args.event == "SessionStart":
-        _maybe_auto_gc()
+        _maybe_auto_gc(session_id)
 
     emit(args.event, additional_context)
     return 0
+
+
+def _session_id_from(raw: str) -> str | None:
+    """Best-effort session id from the drained hook payload.
+
+    Returns None on anything unexpected — a missing id costs auto-GC its
+    self-exclusion hint, which is strictly better than raising here and
+    losing the whole injection.
+    """
+    if not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    sid = payload.get("session_id")
+    return sid if isinstance(sid, str) and sid.strip() else None
 
 
 # --------------------------------------------------------------------------- #
@@ -214,11 +238,13 @@ _AUTO_GC_MARKER = "_auto_gc.json"
 _AUTO_GC_MIN_INTERVAL_SECONDS = 86400  # once per day
 
 
-def _maybe_auto_gc() -> None:
+def _maybe_auto_gc(session_id: str | None = None) -> None:
     """Run garbage collection if the user opted in and we're not rate-limited.
 
     All failure modes log to stderr and return silently — auto-GC must
     never affect the injection payload or block session startup.
+
+    `session_id` (v0.25.1) is the live session, excluded from pruning.
     """
     raw = os.environ.get("CC_ENSLAVER_AUTO_GC_DAYS", "").strip()
     if not raw:
@@ -250,11 +276,20 @@ def _maybe_auto_gc() -> None:
     now = _time.time()
     if marker_path.is_file():
         try:
-            last_ts = _json.loads(marker_path.read_text(encoding="utf-8")).get("ts", 0)
+            marker = _json.loads(marker_path.read_text(encoding="utf-8"))
+            last_ts = marker.get("ts", 0) if isinstance(marker, dict) else 0
         except Exception:
             # Rationale: a corrupt marker file shouldn't prevent GC;
             # treat as "never ran" and proceed (the GC itself will
             # rewrite the marker on success below).
+            last_ts = 0
+        if not isinstance(last_ts, (int, float)) or isinstance(last_ts, bool):
+            # v0.25.1 — a marker that PARSES but carries a non-numeric
+            # `ts` (e.g. {"ts": "yesterday"}) used to raise TypeError on
+            # the subtraction below, OUTSIDE the try. That escaped
+            # _maybe_auto_gc, which main() calls before emit() — so one
+            # mistyped marker file silently suppressed the ENTIRE
+            # SessionStart injection, edicts included.
             last_ts = 0
         if now - last_ts < _AUTO_GC_MIN_INTERVAL_SECONDS:
             return  # rate-limited
@@ -274,14 +309,13 @@ def _maybe_auto_gc() -> None:
                 return
         _gc_state_mod = _gc
 
-    # Exclude the current session's own state file (defensive: usually
-    # doesn't exist yet at SessionStart, but cheap safety).
-    session_id: str | None = None
-    # session_id is in the hook payload that we drained earlier. The
-    # injection hook does not currently parse it; auto-GC works fine
-    # without exclusion since the live session's file should be too
-    # new to cross threshold anyway. Leaving exclude_session=None.
-
+    # Exclude the live session's own state file. v0.25.1 — this used to
+    # pass None with the reasoning "the live session's file should be too
+    # new to cross the threshold anyway". That holds only for a session
+    # that started now: a RESUMED session carries an old state file, and
+    # auto-GC would delete its reads, baselines, rolling counters and
+    # sync acknowledgements out from under it. The id now comes from the
+    # hook payload main() drains (see _session_id_from).
     try:
         summary = _gc_state_mod.prune_old_sessions(
             threshold_days=threshold_days,

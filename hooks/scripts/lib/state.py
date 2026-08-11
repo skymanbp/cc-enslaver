@@ -91,6 +91,101 @@ def _state_file(session_id: str) -> Path:
     return state_dir() / _safe_session_filename(session_id)
 
 
+# Every collection field an accessor or mutator dereferences by shape:
+# `.append` on a list, `.setdefault(...)[k]` on a dict. A wrong-typed
+# value in ANY of them raises inside the lock and loses the mutation, so
+# they are normalised as a class rather than one at a time.
+_STATE_COLLECTION_FIELDS = {
+    "read_files": list,
+    "edited_files": list,
+    "sync_acked_groups": list,
+    "last_blocked_groups": list,
+    "edits_per_file": dict,
+    "baseline_mtimes": dict,
+}
+
+# Fields compared or arithmetically combined with numbers. A bool is
+# excluded deliberately: `True` is an int in Python but never a valid
+# turn number, and silently treating it as 1 would corrupt turn maths.
+_STATE_NUMERIC_FIELDS = (
+    "last_blocked_turn", "last_edit_turn", "stop_counter",
+)
+
+
+def _normalized(state: object, session_id: str) -> dict:
+    """Coerce a parsed state document into the shape accessors assume.
+
+    v0.25.1 — syntactically valid JSON with the wrong SHAPE used to break
+    two ways, both silent. A top-level `[]` made `has_read` raise
+    `AttributeError: 'list' object has no attribute 'get'`, which
+    read_guard's outer handler swallowed as failing-open — so an unread
+    file became editable. A top-level `{}` made `add_read` raise
+    `KeyError: 'read_files'`, so a successful Read was never recorded and
+    the NEXT edit was falsely denied. Both are now repaired in one place,
+    on the single path every accessor and mutator already funnels through.
+
+    v0.26.0 — driven by a SCHEMA instead of repairing one field. The
+    v0.25.1 version fixed exactly the key that had been observed to raise
+    (`read_files`) and left every sibling exposed — the audit's root cause
+    β, "hardening scoped to the instance, never the class". Its own
+    docstring claimed a top-level `{}` was repaired, yet `add_read` on
+    `{}` still raised `KeyError: 'session_id'` from `save()`, which
+    read_guard swallows as failing-open, so the Read was never recorded
+    and the NEXT edit was falsely denied as unread. `edited_files`,
+    `sync_acked_groups`, `edits_per_file`, `baseline_mtimes` and
+    `stop_counter` were all one wrong-typed value away from the same
+    failure via `.append` / `.setdefault` / `int()`.
+    """
+    if not isinstance(state, dict):
+        return {"session_id": session_id, "read_files": []}
+    # `session_id` is dereferenced unguarded by save(), which uses it to
+    # pick the destination FILE. The record was located by `session_id`,
+    # so that argument is authoritative and is written back
+    # unconditionally — not merely when the stored value is missing or
+    # non-string. A record whose stored id disagreed with its own filename
+    # (hand-edited, or copied between sessions) otherwise redirected every
+    # subsequent write to a different file: the mutation appeared to
+    # succeed while the next read of this session saw nothing.
+    state["session_id"] = session_id
+    for key, kind in _STATE_COLLECTION_FIELDS.items():
+        if key in state and not isinstance(state[key], kind):
+            state[key] = kind()
+    for key in _STATE_NUMERIC_FIELDS:
+        value = state.get(key)
+        if key in state and (isinstance(value, bool)
+                             or not isinstance(value, (int, float))):
+            del state[key]
+    if not isinstance(state.get("read_files"), list):
+        state["read_files"] = []
+    return state
+
+
+def _quarantine_unparseable(f: Path, session_id: str) -> None:
+    """Move an unparseable state file aside so the session can recover.
+
+    Overwriting it would destroy the only evidence of what went wrong,
+    and refusing to touch it would strand the session forever (every
+    later mutation skipped, every Read unrecorded). Renaming does
+    neither: the next call sees no file and starts clean.
+    """
+    dest = f.with_name(f.name + ".corrupt")
+    try:
+        if dest.exists():
+            dest.unlink()
+        f.replace(dest)
+        moved = str(dest.name)
+    except OSError as exc:
+        # essential: quarantine is best-effort recovery. Failing to move
+        # the file must not escalate into blocking the user's tool call,
+        # so the error is reported and the caller still fails open.
+        moved = f"<could not move aside: {exc}>"
+    sys.stderr.write(
+        f"[cc-enslaver] state for {session_id!r} is unparseable after a "
+        f"retry; moved to {moved}. This session starts from an empty "
+        f"record — earlier reads/baselines in it are gone.\n"
+    )
+
+
 def _load_for_mutation(session_id: str) -> dict | None:
     """Load for a locked read-modify-write cycle; None = do not mutate.
 
@@ -110,11 +205,25 @@ def _load_for_mutation(session_id: str) -> dict | None:
         return {"session_id": session_id, "read_files": []}
     for attempt in (0, 1):
         try:
-            return json.loads(f.read_text(encoding="utf-8"))
+            return _normalized(json.loads(f.read_text(encoding="utf-8")), session_id)
         except json.JSONDecodeError:
-            # Rationale: a truly corrupt state file must never block
-            # the agent (failing-open) — reset to a fresh record.
-            return {"session_id": session_id, "read_files": []}
+            # v0.26.0 audit — a decode error is NOT proof of permanent
+            # corruption. A concurrent writer's torn file reads exactly
+            # like this, and the pre-v0.26 branch returned a FRESH record
+            # immediately, which the calling mutator then saved back over
+            # the real file: total session amnesia (reads, baselines,
+            # counters, acks), and SILENTLY — unlike the OSError path,
+            # this branch printed nothing at all.
+            #
+            # Retry first; only a second failure is treated as real
+            # corruption, and then the file is moved aside rather than
+            # overwritten, so the session can start clean without
+            # destroying the evidence.
+            if attempt == 0:
+                time.sleep(0.01)
+                continue
+            _quarantine_unparseable(f, session_id)
+            return None
         except OSError:
             if attempt == 0:
                 time.sleep(0.01)
@@ -138,8 +247,15 @@ def load(session_id: str) -> dict:
     return state
 
 
-def save(state: dict) -> None:
-    """Persist the state atomically (write temp file + os.replace).
+def save(state: dict) -> bool:
+    """Persist the state atomically; True when it actually landed.
+
+    v0.26.0 — the return value exists because "the mutation was lost" and
+    "the mutation succeeded" were indistinguishable to callers. The
+    register_read escape hatch was the sharp case: it recorded the file,
+    the save was abandoned, and the user was told `register_read: ok`
+    while the read had NOT been registered — the plugin telling exactly
+    the kind of untruth it exists to prevent.
 
     Atomic replacement means a concurrent reader can never observe a
     half-written JSON file (which load() would silently "repair" into a
@@ -173,7 +289,7 @@ def save(state: dict) -> None:
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
             os.replace(tmp, f)
-            return
+            return True
         except PermissionError:
             # Windows sharing violation from a concurrent lock-free
             # reader; back off briefly and retry (see docstring).
@@ -181,15 +297,17 @@ def save(state: dict) -> None:
     try:
         tmp.unlink()
     except OSError:
-        # Rationale: cleanup-of-cleanup — the temp file is cosmetic
-        # debris; failing to remove it must not raise past the
-        # failing-open save contract.
+        # Cleanup-of-cleanup: the temp file is cosmetic debris and the
+        # mutation is already lost.
+        # Rationale: removing it must never raise past the failing-open
+        # save contract; swallowing here is deliberate.
         pass
     sys.stderr.write(
         f"[cc-enslaver] state save abandoned after {_REPLACE_ATTEMPTS} "
         f"os.replace attempts (concurrent reader held {f.name}); "
         f"this mutation is lost (failing open)\n"
     )
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -277,16 +395,22 @@ def _load_shared(session_id: str) -> dict:
         return load(session_id)
 
 
-def add_read(session_id: str, file_path: str) -> None:
-    """Mark a file as Read (or Written) in this session."""
+def add_read(session_id: str, file_path: str) -> bool:
+    """Mark a file as Read (or Written) in this session.
+
+    Returns True when the record is durable — either newly persisted or
+    already present. False means the caller must not claim the file was
+    registered (see `save`).
+    """
     with _session_lock(session_id):
         state = _load_for_mutation(session_id)
         if state is None:
-            return
+            return False
         norm = normalize_path(file_path)
-        if norm not in state["read_files"]:
-            state["read_files"].append(norm)
-            save(state)
+        if norm in state["read_files"]:
+            return True
+        state["read_files"].append(norm)
+        return save(state)
 
 
 def has_read(session_id: str, file_path: str) -> bool:
@@ -319,7 +443,10 @@ def has_read(session_id: str, file_path: str) -> bool:
 # loop, we record that we just blocked, and refuse to block twice in a row.
 # --------------------------------------------------------------------------- #
 def record_stop_block(
-    session_id: str, turn_count: int | None, layer_id: str | None = None,
+    session_id: str,
+    turn_count: int | None,
+    layer_id: str | None = None,
+    blocked_groups: list[str] | None = None,
 ) -> None:
     """Mark that this session's Stop was blocked at the given turn_count.
 
@@ -329,6 +456,13 @@ def record_stop_block(
     being recovered from was actually the sync gate — otherwise a reply
     that merely quotes "sync-check" while recovering from an unrelated
     layer would silently ack every pending group.
+
+    `blocked_groups` (v0.25.1) records WHICH sync groups that layer-(i)
+    block actually presented, so the recovery reply can only acknowledge
+    those. Without it the grace path re-derived "everything pending right
+    now" and swallowed groups that first became violated DURING the
+    recovery turn — permanently suppressing a violation the agent was
+    never shown and never answered.
     """
     with _session_lock(session_id):
         state = _load_for_mutation(session_id)
@@ -337,6 +471,8 @@ def record_stop_block(
         state["last_blocked_turn"] = turn_count
         if layer_id is not None:
             state["last_blocked_layer"] = layer_id
+        if blocked_groups is not None:
+            state["last_blocked_groups"] = list(blocked_groups)
         save(state)
 
 
@@ -345,6 +481,15 @@ def get_last_blocked_layer(session_id: str) -> str | None:
     state = _load_shared(session_id)
     layer = state.get("last_blocked_layer")
     return layer if isinstance(layer, str) else None
+
+
+def get_last_blocked_groups(session_id: str) -> list[str]:
+    """Sync-group names presented by the most recent layer-(i) block."""
+    state = _load_shared(session_id)
+    groups = state.get("last_blocked_groups")
+    if not isinstance(groups, list):
+        return []
+    return [g for g in groups if isinstance(g, str)]
 
 
 def was_just_blocked(session_id: str, turn_count: int | None) -> bool:

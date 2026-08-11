@@ -220,8 +220,41 @@ class TestShellcmd(unittest.TestCase):
             shellcmd.python_script_arg(["python3.13", "s.py"]), "s.py")
 
     def test_hash_in_a_path_is_not_a_comment(self) -> None:
-        toks = shellcmd.tokenize("python s.py --file C:" + BS + "w" + BS + "a#b.py")
-        self.assertIn("C:" + BS + "w" + BS + "a#b.py", toks)
+        """`#` must never truncate a command, on either platform.
+
+        This is the platform-INDEPENDENT half: `commenters=""`. The
+        original spelling folded it together with backslash survival and
+        so passed only on Windows — it went red the first time CI ran it
+        on ubuntu, because the host-OS branch below is real behaviour,
+        not an accident.
+        """
+        for windows in (True, False):
+            with self.subTest(windows=windows):
+                toks = shellcmd.tokenize("python s.py --file /tmp/a#b.py",
+                                         windows=windows)
+                self.assertIn("/tmp/a#b.py", toks)
+
+    def test_backslash_handling_is_platform_branched(self) -> None:
+        """Backslash survival differs by platform, deterministically.
+
+        `tokenize` takes an explicit `windows` flag, so both branches are
+        pinned here rather than left to whatever host CI happens to use.
+
+        Known limitation (v0.26.0 audit, not fixed): keying this on
+        `os.name` treats the HOST OS as a proxy for the SHELL grammar. On
+        Windows the actual shell is usually Git Bash, which applies POSIX
+        escape rules, so the Windows branch can disagree with what really
+        runs. Recorded for a future release; changing it now would alter
+        the register_read hatch's behaviour on this plugin's main
+        platform without a design pass.
+        """
+        cmd = "python s.py --file C:" + BS + "w" + BS + "a.py"
+        win = shellcmd.tokenize(cmd, windows=True)
+        self.assertIn("C:" + BS + "w" + BS + "a.py", win,
+                      "on Windows the backslashes are path separators")
+        posix = shellcmd.tokenize(cmd, windows=False)
+        self.assertIn("C:wa.py", posix,
+                      "under POSIX rules the backslash is an escape")
 
 
 # --------------------------------------------------------------------------- #

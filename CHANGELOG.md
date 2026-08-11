@@ -286,7 +286,7 @@ against the real code and fixed at the root:
   (v0.24's README already said "9-rule"). Corrected in place, with the
   uncovered areas enumerated.
 
-Tests **474 → 542**.
+Tests **474 → 543**.
 
 **Verification honesty:** unlike the first round, these assertions were NOT
 replayed against a pre-fix tree — both rounds are uncommitted, so no such

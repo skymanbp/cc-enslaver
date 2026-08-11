@@ -449,11 +449,24 @@ class TestRegisterPathSpellings(unittest.TestCase):
                 return True
         return False
 
-    def test_all_four_spellings_register(self) -> None:
+    def test_shell_safe_spellings_register(self) -> None:
+        """Every spelling the SHELL preserves must register.
+
+        v0.27.0 — "native unquoted" was dropped from this list, and that
+        is a correction rather than a relaxation. Claude Code's Bash tool
+        runs Git Bash / MSYS, where a backslash is an escape: measured on
+        Windows, an unquoted drive-letter path arrives at the program
+        with its separators already eaten, so the file does not exist
+        under the name as typed no matter what this hook does. v0.25.1
+        made the hook disagree with the shell instead of matching it, and
+        that same disagreement let a backslash-split force flag through.
+        The supported spellings are the ones the shell actually passes
+        intact; `test_native_unquoted_path_matches_the_shell` pins the
+        dropped case explicitly.
+        """
         native = str(self.fpath)
         forward = native.replace("\\", "/")
         spellings = [
-            ("native unquoted", f"--file {native}"),
             ("native quoted", f'--file "{native}"'),
             ("forward unquoted", f"--file {forward}"),
             ("forward quoted", f'--file "{forward}"'),
@@ -476,6 +489,29 @@ class TestRegisterPathSpellings(unittest.TestCase):
                     self._registered(),
                     msg=f"{label} path did not land in session state",
                 )
+
+    def test_native_unquoted_path_matches_the_shell(self) -> None:
+        """An unquoted drive path does not register — as in the real shell.
+
+        Pinned so the v0.25.1 behaviour cannot quietly return: making the
+        tokeniser keep those backslashes is what allowed
+        `git push --for\\ce` to reach git as `--force`.
+        """
+        native = str(self.fpath)
+        if "\\" not in native:
+            self.skipTest("no backslash in this platform's temp path")
+        self._shutil.rmtree(self.state_dir, ignore_errors=True)
+        cmd = (
+            'python "/path/to/register_read.py" '
+            f"--file {native} --hash {self.correct}"
+        )
+        rc, _out, err = self._call(cmd, "spell-native-unquoted")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertFalse(
+            self._registered(),
+            "an unquoted drive-letter path must not register: the shell "
+            "eats its separators before the script ever sees it",
+        )
 
 
 class TestForcePushSpellingsV0251(unittest.TestCase):

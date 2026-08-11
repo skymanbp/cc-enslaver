@@ -38,7 +38,7 @@
 | Stop 时声称 `I edited X.py` / `我修改了 Y.md` 但 X/Y 的 mtime 与本会话首次见到时**完全一致**（claim 被磁盘证伪）| `Stop` **layer (g) v0.16** BLOCK | 真做改动；或者撤回声明；或 `CC_ENSLAVER_DISABLE_LAYER_G=1` 跳过 |
 | Stop 时含 done-claim 但**末尾缺 `tldr` / 大白话总结**（违反 v0.20 回复 schema）| `Stop` **layer (h) v0.20** BLOCK | 末尾加一行 `tldr: "<一句大白话>"` |
 | Stop 时 tldr 有单条超过 **160 字符**（那是段落，不是 TL;DR）| `Stop` **layer (h) v0.23** BLOCK | 每条一句话——前因、动作、结果；多条内容 → 逐条一行、每条一句短话 |
-| Stop 时本轮做了 Edit、sync-gate 某组 `when` 命中而无 `require` 编辑、回复又无同步标记 | `Stop` **layer (i) v0.23** BLOCK（rule 12；仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目）| 连带改 require 侧文件，或加一行 `同步核对:` 说明为何无需改 |
+| Stop 时本轮做了 Edit、sync-gate 某组 `when` 命中而无 `require` 编辑、回复又无同步标记 | `Stop` **layer (i) v0.23** BLOCK（rule 12；仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目）| 连带改 require 侧文件，或加一行 `同步核对:` 说明为何无需改。**v0.27**：标记只结清**已经展示给你看过**的组，所以某组会先拦一次并点名，下一条回复再答 —— 一组一次知情回答 |
 
 **Stop 表格格式（v0.12）**：被 block 时，返回的 reason **总是这样**：
 

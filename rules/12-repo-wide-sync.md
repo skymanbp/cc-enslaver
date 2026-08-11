@@ -74,7 +74,11 @@ sync marker (`同步核对` / `sync-check` / `rule 12`). An optional
 is satisfied by one. The escape hatch is deliberate: "I checked the
 require side and it needs no change because X" is a legitimate outcome;
 the gate forces the check to be *said*, not the files to be touched
-blindly — and an acknowledged group is remembered for the session
+blindly. **v0.27**: a marker settles only the groups you have actually
+been shown, so the flow is "blocked once, group named, then answered".
+One *informed* answer per group is the contract; one blanket sentence
+covering groups you never considered is not.
+An acknowledged group is remembered for the session
 (`sync_acked_groups`), so one explicit answer suffices and later
 unrelated edits are not re-blocked by it. Globs match project-relative
 paths (fnmatch; `*` crosses separators). No config file → the gate is

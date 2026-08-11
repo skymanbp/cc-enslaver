@@ -56,10 +56,16 @@ catches the lazy behaviour, often via a different signal.
     neighbouring `https://api.example.com` line disabled the secret detector).
   - [`../hooks/scripts/lib/mdctx.py`](../hooks/scripts/lib/mdctx.py) —
     markdown line context (fence state + info string, blockquote including
-    nesting under list items) and the single `countable` predicate meaning
-    "would a reader attribute this line to the agent?". Consumed by **both**
-    halves of Stop layer (h); they previously carried partial private copies
-    of this judgement and disagreed about which fences count.
+    nesting under list items and CommonMark lazy continuation). Consumed by
+    **both** halves of Stop layer (h); they previously carried partial
+    private copies of this judgement and disagreed about which fences count.
+    **v0.27** splits the verdict in two, because one flag could not serve
+    both halves: `attributable` (generous — "could a reader read this as
+    the agent's own words?", used for PRESENCE, since a false negative
+    blocks a reply for a tldr that is visibly present) and `countable`
+    (conservative — "is this definitely the agent's own words?", used for
+    MEASUREMENT against the 160-char cap). They differ only on lazy
+    continuation, which is exactly why v0.26 could not implement it.
   - [`../hooks/scripts/lib/shellcmd.py`](../hooks/scripts/lib/shellcmd.py) —
     shell command model: tokenise → segments → argv, plus `git_subcommand`
     (skipping value-taking global options) and `python_script_arg` (knowing
@@ -227,7 +233,7 @@ the last assistant entry in `payload.transcript_path`).
 | 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
 | 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
 | 10 | A tldr item longer than `TLDR_MAX_ITEM_CHARS` (160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
-| 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enslaver/sync-gate.toml` — no config, never fires). A marker escape records the pending groups as acknowledged for the session, so one explicit answer per group suffices. | **Block** (layer (i)) |
+| 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enslaver/sync-gate.toml` — no config, never fires). A marker escape records the acknowledged groups for the session, so one explicit answer per group suffices. **v0.27**: the marker settles only groups the session has actually been SHOWN (`last_blocked_groups`) — the primary path used to ack every pending group while the grace path acked only the presented set, and that inconsistency was itself the bypass (outlast the grace window, reach the looser path). A group is therefore named by one block, then settled by the next reply's marker: one *informed* answer per group. | **Block** (layer (i)) |
 | 12 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
@@ -658,9 +664,15 @@ session state. Motivation:
   this plugin's primary platform. It went unnoticed for 21 releases because
   every test quoted the path, and quoting survives posix splitting.
   Parsing now lives in [`lib/shellcmd.py`](../hooks/scripts/lib/shellcmd.py)
-  and runs in **posix mode with escape handling disabled** (plus
-  `commenters=""`, so a `#` in a path no longer truncates the command) —
-  not the non-posix mode v0.25 introduced. Both `--file X` and `--file=X`
+  and runs in **plain posix mode** (plus `commenters=""`, so a `#` in a
+  path no longer truncates the command). **v0.27 removed the host-OS
+  branch entirely**: v0.25.1 had disabled backslash escaping on Windows,
+  but Claude Code's Bash tool there runs Git Bash / MSYS, which is POSIX
+  — measured, that shell eats an unquoted drive path's separators just as
+  posix `shlex` does, so the branch never rescued anything, while it did
+  hide a real force-push evasion (a backslash-split `--force` reaches git
+  intact). The supported spelling for a drive path is a **quoted** one.
+  Both `--file X` and `--file=X`
   are accepted, matching what `register_read.py`'s own argparse accepts;
   previously the `=` spelling made the hook classify the command as "not a
   registration", so nothing was registered while the stub script still

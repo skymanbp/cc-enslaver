@@ -1111,7 +1111,16 @@ class TestSyncGateLayerI(_StopBase):
         rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
         self.assertIsNone(out, msg=f"require-side edit must pass (i), got {out!r}")
 
-    def test_sync_marker_escape_passes(self) -> None:
+    def test_marker_escapes_only_after_the_group_is_shown(self) -> None:
+        """v0.27.0 contract: one INFORMED answer per group.
+
+        A marker no longer settles a group the agent has not been shown.
+        Before v0.27 the primary path acked every pending group while the
+        grace path acked only the presented set, and that gap was itself
+        the bypass — outlast the grace window and the looser path silenced
+        groups that were never named. Both paths are now scoped, so the
+        flow is: block once naming the group, then the marker settles it.
+        """
         self._write_gate(self.GATE_TOML)
         edited = [self._project_file("rules/06-verify.md")]
         self._seed_edit_turn_and_edited(5, edited)
@@ -1119,8 +1128,16 @@ class TestSyncGateLayerI(_StopBase):
             self._full_compliance_message()
             + "\n同步核对: prompts 侧核对过，本次改动不影响注入文案。"
         )
+        # First violating turn: the group has never been presented, so the
+        # marker does not pre-emptively settle it.
         rc, out, _ = self._stop(msg, turn_count=5)
-        self.assertIsNone(out, msg=f"sync marker must pass (i), got {out!r}")
+        self.assertIsNotNone(
+            out, "an unshown group must be named before it can be answered")
+        self.assertIn("rules-fanout", out["reason"])
+        # The recovery reply, now that the agent has seen the group name.
+        rc, out, _ = self._stop(msg, turn_count=6)
+        self.assertIsNone(
+            out, msg=f"marker must settle a SHOWN group, got {out!r}")
 
     def test_no_config_never_fires(self) -> None:
         # No sync-gate.toml in the project → layer (i) is off.
@@ -1199,7 +1216,11 @@ class TestSyncGateLayerI(_StopBase):
             self._full_compliance_message()
             + "\nsync-check: prompts need no change for this edit."
         )
+        # v0.27.0 — same two-step contract as the Chinese marker: the
+        # group is named first, then the marker settles it.
         rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, "unshown group must be named first")
+        rc, out, _ = self._stop(msg, turn_count=6)
         self.assertIsNone(out, msg=f"sync-check marker must pass (i), got {out!r}")
 
     def test_sync_gate_filename_mention_does_not_escape(self) -> None:
@@ -1228,7 +1249,11 @@ class TestSyncGateLayerI(_StopBase):
             self._full_compliance_message()
             + "\n同步核对: prompts 侧核对过，无需变更。"
         )
+        # v0.27.0 — the group is presented on the first violating turn;
+        # the marker on the recovery reply is what persists the ack.
         rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, "unshown group must be named first")
+        rc, out, _ = self._stop(msg, turn_count=6)
         self.assertIsNone(out, msg=f"marker escape must pass, got {out!r}")
         state_path = self.tmpdir / "sessions" / f"{self.sid}.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))

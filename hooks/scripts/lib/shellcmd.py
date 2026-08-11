@@ -57,22 +57,35 @@ _MAX_NESTED_SHELL_DEPTH = 3
 
 
 def tokenize(command: str, windows: bool | None = None) -> list[str] | None:
-    """Tokenise a shell command; None when it cannot be parsed.
+    """Tokenise a shell command the way the SHELL does; None if unparseable.
 
-    Windows paths are why this is not plain `shlex.split`. In posix mode a
-    backslash is an escape, so an unquoted drive-letter path came back
-    with every separator eaten, and the register escape hatch denied it as
-    "file does not exist" -- i.e. the documented recovery path from a
-    false rule-04 DENY was itself broken, on this plugin's main platform.
-    `shlex.shlex(escape="")` keeps posix QUOTING (so a quoted path with
-    spaces still groups) while making backslash literal.
+    v0.27.0 — the host-OS branch is gone. v0.25.1 disabled backslash
+    escaping when `os.name == "nt"`, reasoning that an unquoted
+    drive-letter path otherwise came back with its separators eaten. That
+    used the HOST OS as a proxy for the SHELL GRAMMAR, and on this
+    plugin's primary platform the two disagree: Claude Code's Bash tool
+    runs Git Bash / MSYS, which is POSIX. Measured on Windows with
+    `bash 5.2.37(1)-release`, `OSTYPE=msys` (see the v0.27.0 CHANGELOG
+    entry for the transcript): an unquoted drive-letter path loses its
+    separators in the REAL shell too, and `--for` + backslash + `ce`
+    arrives at git as `--force`.
+
+    So the branch was wrong in both directions. It never fixed the path
+    case — the shell mangles an unquoted drive path identically, so the
+    file genuinely does not exist under the name as typed, and the
+    documented recovery is to QUOTE it (which every test already did).
+    And it created a live bypass: a backslash-split force flag reached
+    git intact while the guard saw a token it did not recognise.
+
+    POSIX escaping is therefore applied unconditionally, matching what
+    actually executes. The `windows` parameter is retained so tests can
+    pin the legacy behaviour deliberately; it defaults to POSIX and
+    nothing in the hooks passes it.
 
     `commenters` is cleared unconditionally: shlex treats `#` as a comment
     introducer by default, which silently truncated a perfectly legal
     filename containing `#` and produced a wrong, shorter path.
     """
-    if windows is None:
-        windows = os.name == "nt"
     try:
         # The backtick is added to shlex's default punctuation set so a
         # legacy `` `git push -f` `` substitution tokenises as its own
@@ -81,6 +94,8 @@ def tokenize(command: str, windows: bool | None = None) -> list[str] | None:
         lex.whitespace_split = True
         lex.commenters = ""
         if windows:
+            # Legacy pre-v0.27 behaviour, kept only so the regression test
+            # can pin WHY it was abandoned.
             lex.escape = ""
         return list(lex)
     except ValueError:

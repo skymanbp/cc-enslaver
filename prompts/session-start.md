@@ -40,7 +40,7 @@
 | Stop claiming `I edited X.py` / `I created Y.md` but the file's mtime exactly matches what it was when first encountered this session (claim contradicted by disk) | `Stop` **layer (g) v0.16** BLOCK | Actually do the edit; or retract the claim; or set `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip |
 | Stop with a done-claim but **no `tldr` / plain-language summary** at the end (violates the v0.20 reply schema) | `Stop` **layer (h) v0.20** BLOCK | Add a final line `tldr: "<one plain sentence>"` |
 | Stop with a tldr whose item runs past **160 chars** (a paragraph, not a TL;DR) | `Stop` **layer (h) v0.23** BLOCK | One sentence per item — cause, action, outcome; several items → one short line each |
-| Stop on an edit turn where a sync-gate `when` group matched but no `require` file was edited and the reply has no sync marker | `Stop` **layer (i) v0.23** BLOCK (rule 12; only in projects with `.claude/cc-enslaver/sync-gate.toml`) | Co-update the require-side files, or add a `同步核对:` / `sync-check:` line saying why they need no change |
+| Stop on an edit turn where a sync-gate `when` group matched but no `require` file was edited and the reply has no sync marker | `Stop` **layer (i) v0.23** BLOCK (rule 12; only in projects with `.claude/cc-enslaver/sync-gate.toml`) | Co-update the require-side files, or add a `同步核对:` / `sync-check:` line saying why they need no change. **v0.27**: the marker settles only groups you have already been SHOWN, so a group is named by one block and answered by the next reply — one informed answer per group |
 
 **Stop block-reason format (v0.12)**: when blocked, the reason **always** looks like this:
 

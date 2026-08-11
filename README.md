@@ -3,9 +3,12 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.26.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.27.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
+
+<!-- The v0.27.0 headline lives with the other "New in" blocks further
+     down, next to v0.26.0, so this badge area stays scannable. -->
 
 中文用户请直接看 → [中文说明](#中文说明)
 
@@ -25,9 +28,19 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.26.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.27.0):
 
-> **New in v0.26.0** — 🧩 **Fourth-round audit: the previous release's own fix diff was reviewed, and the mechanism was replaced instead of the symptoms.** Three parallel read-only reviews plus a first-party pass produced **37 findings**; **33 reproduced** under first-party runtime probes, 3 were recorded as by-design, and **1 was refuted** (a reviewer called a test vacuous that in fact fails on the pre-fix tree). They collapse into **three root causes**, and the fix is **four shared models**, not ~30 patches. Tests **378 → 543**, across two audit rounds: the first replays **43 failures + 3 errors** on the pre-fix tree; the second (16 parallel read-only reviews, 15 of which reported) fixed a further 20+ confirmed defects at the root — including five stale test counts and two wrong claims in this release's own notes.
+> **New in v0.27.0** — 🧵 **Three deferred contract questions, closed with evidence instead of preference.** v0.26 shipped them as "known, not fixed"; leaving them is how a "documented limitation" becomes permanent.
+>
+> **The tokeniser now follows the shell, not the host OS.** v0.25.1 disabled backslash escaping when `os.name == "nt"`. Measuring the shell Claude Code actually runs on Windows — Git Bash / MSYS, `bash 5.2.37(1)-release` — showed the branch was wrong in *both* directions: an unquoted drive path loses its separators in the real shell too (so it never rescued anything), and `git push --for\ce` reaches git as **`--force`** while the guard saw an unrecognised token. That was a live force-push bypass, now closed. Quoting is what preserves a drive path — in this tokeniser and in the shell alike.
+>
+> **Layer (h) presence and measurement are now separate verdicts.** One `countable` flag forced a bad trade, which is why v0.26 skipped CommonMark lazy continuation entirely: implementing it made a *visible* `tldr:` under a blockquote uncountable, so the presence half then blocked the reply for a "missing" summary the author could see. Presence is now generous (`attributable`), measurement conservative (`countable`), and lazy continuation is implemented.
+>
+> **Layer (i): one INFORMED answer per group.** A sync marker used to settle every pending group on the primary path while the grace path settled only the groups actually shown — and that inconsistency *was* the bypass, since outlasting the grace window reached the looser path. Both paths are scoped now: a group is named once, then your marker settles it. Strictly stricter, deliberately.
+>
+> Tests **556 → 556**.
+
+> **From v0.26.0** — 🧩 **Fourth-round audit: the previous release's own fix diff was reviewed, and the mechanism was replaced instead of the symptoms.** Three parallel read-only reviews plus a first-party pass produced **37 findings**; **33 reproduced** under first-party runtime probes, 3 were recorded as by-design, and **1 was refuted** (a reviewer called a test vacuous that in fact fails on the pre-fix tree). They collapse into **three root causes**, and the fix is **four shared models**, not ~30 patches. Tests **378 → 556**, across two audit rounds: the first replays **43 failures + 3 errors** on the pre-fix tree; the second (16 parallel read-only reviews, 15 of which reported) fixed a further 20+ confirmed defects at the root — including five stale test counts and two wrong claims in this release's own notes.
 >
 > **The fix was then re-audited before shipping** — because the defect this release corrects was *introduced by the previous release's fix*. That pass found **8 more real defects in the new code**, all fixed: `$( … )` / backtick / subshell invocations were not segmented (the text heuristic caught those **by accident**, so the model would have been a regression — `$(git push --force)` executes); an escaped `\"""` ended a triple-quoted block early, exposing string content as comments; three CommonMark bugs in the fence model; `cannot` / `unable` / `绝非` were missing from negation while `not only fixed but tested` was wrongly suppressed; and punctuation padding reached the rationale length bar. One change of mine was **reverted** when it broke a deliberate v0.23 contract.
 >
@@ -151,7 +164,7 @@ cc-enslaver/
 ├── agents/verifier.md           # Independent citation verifier subagent
 ├── skills/systematic-debug/     # Auto-invoked debug discipline skill
 ├── skills/repo-refresh/         # Auto-invoked whole-repo refresh skill (rule 12 active half; v0.23)
-└── tests/                       # 543 black-box + unit tests (run with python -m unittest discover tests)
+└── tests/                       # 556 black-box + unit tests (run with python -m unittest discover tests)
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a layer-by-layer walkthrough and [`docs/EDICTS.md`](docs/EDICTS.md) for the Imperial Edicts user guide.
@@ -223,7 +236,7 @@ Hook scripts (8 total under [`hooks/scripts/`](hooks/scripts/)):
 - **`manage_edicts.py`** — Imperial Edicts CRUD CLI (v0.12; `--global` flag v0.14; UTF-8 stdout v0.17). Used by the `/cc-enslaver:edict` slash command and directly from the shell.
 - **`lib/`** — the shared library the hooks are built on (7 modules): **`state.py`** (per-session state), **`edicts.py`** (Imperial Edicts loader / matcher / **multilingual renderer** — English default; `zh` or any code via `CC_ENSLAVER_LANG`, with English fallback for unknown codes; v0.17 + v0.21), **`sync_gate.py`** (rule-12 sync-gate config loader / evaluator, v0.23), **`tomlio.py`** (hardened TOML reader — BOM and non-UTF-8 tolerant, v0.25), and the three models added in v0.26 that the detectors now decide with rather than pattern-matching raw text: **`srclex.py`** (tolerant source lexer — comment vs docstring vs data literal, literal masking, bracket-joined logical lines), **`mdctx.py`** (markdown fence / blockquote context, shared by both halves of Stop layer (h)), **`shellcmd.py`** (tokenise → segments → argv → git sub-command / python script operand).
 
-All scripts are covered by **543 tests** in [`tests/`](tests/) (black-box subprocess tests for the hooks + unit tests for `lib/sync_gate.py` and for the three v0.26 models in `tests/test_v026_models.py`, plus the version-drift and doc-drift gates) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13. Session state is safe under parallel hook processes (v0.23, completed v0.24): every mutation holds a cross-process file lock and saves atomically, read accessors share the same lock (the v0.24 fix for Windows `os.replace`-vs-open-reader save loss), pinned by a 12-way concurrency regression test plus a reader-writer collision test. Production payload shapes (no `turn_count`, transcript-only Stop messages) are pinned by a dedicated E2E test class.
+All scripts are covered by **556 tests** in [`tests/`](tests/) (black-box subprocess tests for the hooks + unit tests for `lib/sync_gate.py` and for the three v0.26 models in `tests/test_v026_models.py`, plus the version-drift and doc-drift gates) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13. Session state is safe under parallel hook processes (v0.23, completed v0.24): every mutation holds a cross-process file lock and saves atomically, read accessors share the same lock (the v0.24 fix for Windows `os.replace`-vs-open-reader save loss), pinned by a 12-way concurrency regression test plus a reader-writer collision test. Production payload shapes (no `turn_count`, transcript-only Stop messages) are pinned by a dedicated E2E test class.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output contracts.
 
@@ -287,7 +300,7 @@ MIT — see [`LICENSE`](LICENSE).
 
 ### 防御分层（**v0.26.0**：12 内置规则 + 用户自定义圣旨 + Stop 钩子 9 层闸门）
 
-> **v0.26.0 新增** — 🧩 **第四轮审计：这次审的是上一版自己的修复 diff，而且换掉的是机制，不是症状**。三路并行只读审阅 + 我自己一路，共 **37 条 finding**；**33 条**用我自己的运行时探针复现，3 条记录为"属设计"，**1 条被驳回**（审阅说某测试空转，实际它在未修树上是红的）。它们归结为**三个根因**，修法是**四个统一件**，不是 ~30 个补丁。此后又跑了**第二轮 16 路并行只读复审**（15 路有效；sync-gate 那一路返回空、**未跑**，如实记录），按根因再修 20+ 处确认缺陷——其中包括本版发布说明自己写错的 **5 处测试数**与 **2 处错误声称**。测试 **378 → 543**；第一轮新断言在未修树上 replay 出 **43 failures + 3 errors**（第二轮无 pre-fix 树可回放，两轮均未提交）。
+> **v0.26.0 新增** — 🧩 **第四轮审计：这次审的是上一版自己的修复 diff，而且换掉的是机制，不是症状**。三路并行只读审阅 + 我自己一路，共 **37 条 finding**；**33 条**用我自己的运行时探针复现，3 条记录为"属设计"，**1 条被驳回**（审阅说某测试空转，实际它在未修树上是红的）。它们归结为**三个根因**，修法是**四个统一件**，不是 ~30 个补丁。此后又跑了**第二轮 16 路并行只读复审**（15 路有效；sync-gate 那一路返回空、**未跑**，如实记录），按根因再修 20+ 处确认缺陷——其中包括本版发布说明自己写错的 **5 处测试数**与 **2 处错误声称**。测试 **378 → 556**；第一轮新断言在未修树上 replay 出 **43 failures + 3 errors**（第二轮无 pre-fix 树可回放，两轮均未提交）。
 >
 > **本轮的修复代码自己也过了一遍只读复审**（因为这一版要修的缺陷，正是上一版的修复引入的）。复审在**新代码里**又抓出 **8 个真缺陷**，已全部修掉：`$( … )` / 反引号 / 子 shell 的调用没被分段——而被替换掉的文本启发式**是靠巧合**抓住它们的，所以这个模型本来会是**倒退**（`$(git push --force)` 是真会执行的）；转义的 `\"""` 会提前结束三引号块，把字符串内容暴露成注释；围栏模型三处 CommonMark 缺陷；否定判断漏了 `cannot` / `unable` / `绝非`（**危险方向**：会把如实的"没做完"当成完成声明拦下），同时 `not only fixed but tested` 被误判为否定；标点填充能凑够理由长度门槛。另有**我自己的一处改动被回退**——它打破了 v0.23 刻意钉下的契约。
 >

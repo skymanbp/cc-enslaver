@@ -35,6 +35,27 @@ from typing import NamedTuple
 
 
 class LineCtx(NamedTuple):
+    """One physical line's attribution context.
+
+    Two verdicts, deliberately asymmetric (v0.27.0):
+
+    ``attributable`` — could a reader plausibly read this as the agent's
+    own words? Used by the PRESENCE half of layer (h). Generous, because
+    a false negative there blocks a reply for a "missing" tldr that is
+    visibly present, which the agent cannot diagnose.
+
+    ``countable`` — is this definitely the agent's own words, safe to
+    MEASURE against the 160-char cap? Conservative, because a false
+    positive there blocks a reply for the length of text it merely
+    quoted.
+
+    They differ only on CommonMark *lazy continuation*: an unprefixed
+    line following `> quoted text` is inside the blockquote by the spec,
+    so it is not countable — but it is still attributable, so writing a
+    tldr immediately under a quote satisfies presence instead of
+    mystifying the author. Collapsing the two into one predicate is what
+    forced v0.26 to skip lazy continuation entirely.
+    """
     index: int
     raw: str
     in_fence: bool
@@ -42,6 +63,7 @@ class LineCtx(NamedTuple):
     is_fence_delim: bool
     quoted: bool
     countable: bool
+    attributable: bool = True
 
 
 def fence_marker(stripped_line: str) -> str | None:
@@ -65,25 +87,7 @@ _LIST_MARKER = re.compile(r"^(?:[-*+]|\d{1,9}[.)])\s+")
 
 
 def _is_quoted(line: str) -> bool:
-    """True when the line is blockquoted, including nested under lists.
-
-    Judged per physical line. CommonMark *lazy continuation* — where an
-    unprefixed line after `> quoted text` is still inside the blockquote —
-    is deliberately NOT implemented, and that is a decision rather than an
-    oversight:
-
-    Implementing it removes a false positive in one direction and creates
-    one in the other. Today `> quoted` followed immediately by an overlong
-    `tldr:` is measured (a false "overlong" block). With lazy continuation
-    that same layout makes a perfectly good `tldr: short` non-countable —
-    so the presence half then blocks the reply for a MISSING tldr that is
-    plainly there. Both are blocks on truthful work; the second is worse,
-    because the agent cannot see why its visible tldr does not count.
-
-    This repo's stated detector philosophy is to prefer a false negative
-    to a false positive, so the narrower rule stays until layer (h) can
-    afford a generous-presence / conservative-measurement split.
-    """
+    """True when THIS physical line carries a blockquote marker."""
     s = line.strip()
     # Peel list markers, then look for the quote arrow. Bounded so a
     # pathological line cannot spin.
@@ -171,6 +175,7 @@ def lines(text: str) -> list[LineCtx]:
     in_fence = False
     fence_mark = ""
     fence_info = ""
+    in_quote = False
     for idx, raw in enumerate(text.splitlines()):
         indent, content = _fence_context(raw)
         stripped = content.strip()
@@ -200,12 +205,31 @@ def lines(text: str) -> list[LineCtx]:
                 in_fence = False
                 fence_mark = ""
                 fence_info = ""
-        quoted = _is_quoted(raw)
+        marked_quote = _is_quoted(raw)
+        # CommonMark lazy continuation: a non-blank paragraph line
+        # directly under a blockquote is still inside it. A blank line, a
+        # fence, a heading or a new list item ends the quote.
+        blank = not raw.strip()
+        starts_new_block = (
+            is_delim or in_fence
+            or raw.lstrip().startswith("#")
+            or bool(_LIST_MARKER.match(raw.lstrip()))
+        )
+        lazy = (in_quote and not blank and not marked_quote
+                and not starts_new_block)
+        quoted = marked_quote or lazy
+        in_quote = quoted and not blank
+
         measurable_fence = not in_fence or _fence_is_measurable(fence_info)
         countable = (not is_delim) and (not quoted) and measurable_fence
+        # Presence is generous: a lazily-continued line is not measured,
+        # but a tldr written there is still the agent's own sentence.
+        attributable = (not is_delim) and (not marked_quote) \
+            and measurable_fence
         out.append(LineCtx(
             index=idx, raw=raw, in_fence=in_fence, fence_info=fence_info,
             is_fence_delim=is_delim, quoted=quoted, countable=countable,
+            attributable=attributable,
         ))
     return out
 

@@ -693,7 +693,12 @@ def _has_tldr(text: str) -> bool:
     """
     ctx = mdctx.lines(text)
     for i, line in enumerate(ctx):
-        if not line.countable:
+        # PRESENCE uses the generous verdict (v0.27.0). The measurement
+        # half below still uses `countable`. A tldr written directly under
+        # a blockquote is inside that quote per CommonMark — not safe to
+        # MEASURE, but plainly the agent's own sentence, and blocking it
+        # for a "missing" summary the author can see is the worse error.
+        if not line.attributable:
             continue
         for p in TLDR_MARKERS:
             m = p.search(line.raw)
@@ -708,7 +713,7 @@ def _has_tldr(text: str) -> bool:
                     break
                 if not nxt.raw.strip():
                     continue
-                if not nxt.countable:
+                if not nxt.attributable:
                     break
                 cand = nxt.raw.strip().strip("-*• \t").strip().strip("'\"")
                 if mdctx.has_substance(cand):
@@ -1900,10 +1905,28 @@ def main() -> int:
             )
             if pending:
                 if _has_sync_marker(message):
-                    state_lib.ack_sync_groups(
-                        session_id, [v.group.name for v in pending],
-                    )
-                    pending = []
+                    # v0.27.0 — a marker acknowledges only groups the agent
+                    # has actually been SHOWN. Until now the primary path
+                    # acked everything pending while the grace path (fixed
+                    # in v0.25.1) acked only the presented set, and that
+                    # inconsistency was itself the bypass: outlast the
+                    # grace window and the looser path silenced groups the
+                    # agent had never seen named.
+                    #
+                    # Cost is bounded and intentional: a group blocks once,
+                    # the block names it, and the next reply's marker
+                    # settles it for the session. One informed answer per
+                    # group is the contract rule 12 actually asks for —
+                    # one blanket sentence covering groups you never
+                    # considered is the laziness it exists to stop.
+                    presented = set(
+                        state_lib.get_last_blocked_groups(session_id))
+                    covered = [v.group.name for v in pending
+                               if v.group.name in presented]
+                    if covered:
+                        state_lib.ack_sync_groups(session_id, covered)
+                    pending = [v for v in pending
+                               if v.group.name not in presented]
                 if pending:
                     state_lib.record_stop_block(
                         session_id, turn_count, "(i)",

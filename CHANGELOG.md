@@ -17,6 +17,79 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.27.0] — 2026-08-10
+
+**The three items v0.26 recorded as "known, not fixed" — closed.**
+
+Each was deferred with a stated reason. Deferring twice is how a
+documented limitation becomes permanent, so each is settled here, and in
+every case the direction was decided by evidence rather than preference.
+
+### The tokeniser follows the SHELL, not the host OS
+
+v0.25.1 disabled backslash escaping when `os.name == "nt"`, reasoning
+that an unquoted drive-letter path would otherwise lose its separators.
+That treated the host OS as a proxy for the shell grammar. Claude Code's
+Bash tool on Windows runs Git Bash / MSYS, and measuring it settled the
+question:
+
+```
+$ echo "$BASH_VERSION / $OSTYPE"
+  5.2.37(1)-release / msys
+$ set -- C:\Users\me\note.txt ; printf '<%s>' "$1"
+  <C:Usersmenote.txt>          # the shell eats them too
+$ set -- --for\ce ; printf '<%s>' "$1"
+  <--force>                    # a REAL force-push evasion
+```
+
+The branch was wrong in both directions. It never rescued the path case —
+the shell mangles an unquoted drive path identically, so the file does not
+exist under the name as typed, and the recovery is to **quote it** (which
+every test already did). And it hid a live bypass: a backslash-split force
+flag reached git intact while `_detect_force_push` saw a token it did not
+recognise.
+
+POSIX escaping now applies unconditionally. The `windows` parameter
+survives only so a regression test can pin *why* the old behaviour was
+abandoned. `test_all_four_spellings_register` became
+`test_shell_safe_spellings_register`: "native unquoted" was removed from
+the supported set and given its own test asserting it does **not**
+register — a correction to match the shell, not a relaxation.
+
+### Layer (h): presence and measurement are separate verdicts
+
+`mdctx.LineCtx` now carries `attributable` alongside `countable`:
+
+- **`attributable`** (generous) — could a reader plausibly read this as
+  the agent's own words? Used by the presence half. A false negative here
+  blocks a reply for a "missing" tldr that is visibly present, which the
+  agent cannot diagnose from the block reason.
+- **`countable`** (conservative) — is this definitely the agent's own
+  words, safe to measure against the 160-char cap?
+
+They differ only on CommonMark **lazy continuation**, which v0.26
+deliberately skipped precisely because one flag could not express both:
+implementing it made a visible `tldr:` under a blockquote uncountable, so
+presence then blocked the reply. With the split, lazy continuation is
+implemented — such a line is not measured, but still counts as present.
+
+### Layer (i): one INFORMED answer per group
+
+The primary path acked **every** pending group when a marker appeared,
+while the grace path (narrowed in v0.25.1) acked only the groups actually
+presented. That inconsistency was itself the bypass: outlast the grace
+window and the looser path silenced groups the agent had never seen named.
+
+Both paths are now scoped to the presented set. The cost is bounded and
+intentional: a group blocks once, the block names it, and the next reply's
+marker settles it for the session. One informed answer per group is what
+rule 12 asks for; one blanket sentence covering groups you never
+considered is the laziness it exists to stop.
+
+This is a **strictness increase**, not a bug fix — recorded as such.
+
+Tests **543 → 556**.
+
 ## [0.26.0] — 2026-08-10
 
 **Fourth-round audit — the previous release's own fix diff was reviewed, and

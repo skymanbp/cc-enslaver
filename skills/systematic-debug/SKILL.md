@@ -103,6 +103,7 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 ### Step 5 · 确认根源 + 评估方案（七问之 4-5-6）
 
 - 哪个假设被证据 confirmed？描述完整因果链：**根源 → 中间机理 → 观察到的症状**。
+- **因果链必须爬到最上游**（[`rules/03-root-cause.md`](rules/03-root-cause.md) 上游阶梯，v0.28）：症状位 → 传播路径 → 起源；修在前两级都算补丁。若停在中途（起源在 vendor / 平台 / 别的仓库），显式点名真正起源 + 停下的理由。
 - 拟提出的修复方案：是否触达根源（不是 try/except、不是 sleep、不是 --no-verify）？
 - 连带影响：哪些下游/测试/文档需要同步改？
 - 风险：可能破坏哪些既有不变量？
@@ -110,6 +111,7 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 ### Step 6 · 实施修改
 
 - 应用最小有效修改（[`rules/07-task-fidelity.md`](rules/07-task-fidelity.md) 检查 4 —— "最小有效更改"的硬执行入口在规则 07，不在规则 02）。
+- **统一修复**（[`rules/09-systematic-modification.md`](rules/09-systematic-modification.md) "One root cause, one unified fix"，v0.28）：确诊的根因定义一个"类"——全库 Grep 同类实例、Read 确认，一趟修完；**严禁**对共享同一根因的多处症状逐个点对点修补。类实质性超出用户请求范围时，先上呈枚举结果再动手。
 - 对每个连带项也同步修改。
 - 修改时禁止规则 03 列出的反模式。
 
@@ -120,7 +122,7 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 
 **7.1 · 重触发原症状**：用 **Step 0 建立的同一个 feedback loop** 重跑（不是凭记忆复述命令）。粘贴新输出，明确"原报错消失"。Step 0 投入做的尖锐 / 确定性的 loop，在这一步直接付息——如果 loop 跑完仍命中原 signal，root cause 没修对，回 Step 3。
 
-**7.2 · 边界 + 反向用例**：至少跑 1 个边界（空输入 / 错误路径 / 并发 / 跨平台 / Unicode）+ 1 个反向用例（应该 fail 的仍 fail）。
+**7.2 · 边界 + 反向用例**：至少跑 1 个边界（空输入 / 错误路径 / 并发 / 跨平台 / Unicode）+ 1 个反向用例（应该 fail 的仍 fail）。类不止一个实例时，还要重触发类里**另一个**实例证明类已闭合；只有一个实例则显式说明，以 Step 6 的清扫报告为闭合证据（v0.28）。
 
 **7.3 · 连带不破坏**：跑相关测试套件 + lint + 类型检查；附输出。
 
@@ -139,6 +141,7 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 直接跳到 Step 6 是本 skill 最常见的违规模式。具体禁止：
 
 - ❌ 看到 stack trace 第一行就在那一行上加 try/except → 这是规则 03 反模式
+- ❌ 对共享同一根因的多处症状逐个点对点修补 → 先诊断共同起源，再一次统一修复（规则 09，v0.28）
 - ❌ 测试失败就让测试通过（不问为什么之前失败）
 - ❌ "我猜可能是 X" → 改 X → "应该好了" → 通通是反应式
 - ❌ 跳过 Step 4（验证假设）直接进 Step 5
@@ -158,4 +161,4 @@ description: 在 debug / 修 bug / 异常排查 / "为什么不工作" 等语境
 
 如果中途发现问题超出预期复杂度（例如根源在另一个模块），**先回到用户**说明情况，不要单方面扩大修改范围。
 
-> 关联规则：[`rules/02-systematic-not-reactive.md`](rules/02-systematic-not-reactive.md)、[`rules/03-root-cause.md`](rules/03-root-cause.md)、[`rules/04-full-context.md`](rules/04-full-context.md)、[`rules/06-verify-convergence.md`](rules/06-verify-convergence.md)。
+> 关联规则：[`rules/02-systematic-not-reactive.md`](rules/02-systematic-not-reactive.md)、[`rules/03-root-cause.md`](rules/03-root-cause.md)、[`rules/04-full-context.md`](rules/04-full-context.md)、[`rules/06-verify-convergence.md`](rules/06-verify-convergence.md)、[`rules/09-systematic-modification.md`](rules/09-systematic-modification.md)（v0.28 统一修复）。

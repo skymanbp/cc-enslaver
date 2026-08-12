@@ -11,6 +11,8 @@
 | 引用本会话未 Read 过的文件（违反 **改前必读**）| rule 04 + 08 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 ≤ 5 行 "快速修复"，未走七问、缺**写前必想** | rule 02 + 08 | — |
 | 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|
+| 即将在症状位动手修补，而没有沿因果链爬到最上游起源、没说明为什么停在那里、也没先用第一方证据确诊 | rule 03 上游阶梯（v0.28）| edit 轮缺根因三件套时 Stop layer (f) BLOCK（因果链位置本身是文本层纪律）|
+| 与已修过者**同形状**的第二次失败，逐个点对点修，而不是诊断共同根因、统一修复清扫同类 | rule 03 + 09 统一修复（v0.28）| 同文件堆叠 → **PreToolUse(Edit\|Write) DENY**（v0.13）；跨文件形态是文本层纪律 |
 | 即将写 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 `time.sleep()` 掩竞态 / 注释失败测试 / 放宽断言 | rule 03 + 09 | rule 09 DENY（若是新代码）|
 | 即将把密钥 / API key / 服务商 token（`ghp_…` `xox…` `AIza…`）/ 私钥 / URL 内凭证内联成**代码**字面量（本应是配置/环境）| rule 10 | **PreToolUse(Edit\|Write) DENY**（除非占位 / 紧邻 why）|

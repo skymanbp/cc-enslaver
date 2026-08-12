@@ -3,12 +3,12 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.27.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.28.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
-<!-- The v0.27.0 headline lives with the other "New in" blocks further
-     down, next to v0.26.0, so this badge area stays scannable. -->
+<!-- The v0.28.0 headline lives with the other "New in" blocks further
+     down, next to v0.27.0, so this badge area stays scannable. -->
 
 中文用户请直接看 → [中文说明](#中文说明)
 
@@ -28,9 +28,17 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.27.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.28.0):
 
-> **New in v0.27.0** — 🧵 **Three deferred contract questions, closed with evidence instead of preference.** v0.26 shipped them as "known, not fixed"; leaving them is how a "documented limitation" becomes permanent.
+> **New in v0.28.0** — 🪜 **Rules 03 + 09 upgraded: trace upstream → diagnose → one unified fix. Point-to-point patching is banned outright.**
+>
+> **Rule 03 gains an upstream tracing ladder.** Every failure has three kinds of location: the **symptom site** (where it surfaces), the **propagation path** (what the bad state flowed through), and the **origin** (the mechanism / design decision / missing invariant that *generates* it). Fixing at the first two levels is a patch, even when the observed failure disappears. Climb the chain until the answer is a mechanism; stopping short is legitimate only with the true origin named and the reason stated — an unstated stop is a patch with better paperwork. And the diagnosis must be **demonstrated first-party** (probe / reproduction / failing test) *before* the first line of the fix is written.
+>
+> **Rule 09 gains "one root cause, one unified fix".** A diagnosed root cause defines a *class* of defects — the instance you observed is merely the one that surfaced first. Sweep the repo for every sibling of the class, fix the generating mechanism once covering all instances in the same pass, and prove the class is closed by re-triggering at least one *other* instance. N symptoms sharing one root = **one** fix, never N patches. Grounded in this repo's own measured history: v0.25.1 *named* a root cause and fixed only the instances it had seen; the mechanism survived and regenerated a fresh crop by v0.26 — including one regression. v0.28 codifies v0.26's replace-the-mechanism response as the required shape of every fix.
+>
+> **Zero new detectors, deliberately** (the v0.22.1 precedent): this is a reasoning shape, not a syntax shape a hook can match. The existing hard layers — patch-marker content scan, rolling-patch frequency layer, Stop layer (f)'s root-cause triplet — remain the physical floor. New checklist items F9–F11; tests hold at 556.
+
+> **From v0.27.0** — 🧵 **Three deferred contract questions, closed with evidence instead of preference.** v0.26 shipped them as "known, not fixed"; leaving them is how a "documented limitation" becomes permanent.
 >
 > **The tokeniser now follows the shell, not the host OS.** v0.25.1 disabled backslash escaping when `os.name == "nt"`. Measuring the shell Claude Code actually runs on Windows — Git Bash / MSYS, `bash 5.2.37(1)-release` — showed the branch was wrong in *both* directions: an unquoted drive path loses its separators in the real shell too (so it never rescued anything), and `git push --for\ce` reaches git as **`--force`** while the guard saw an unrecognised token. That was a live force-push bypass, now closed. Quoting is what preserves a drive path — in this tokeniser and in the shell alike.
 >
@@ -38,7 +46,7 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 >
 > **Layer (i): one INFORMED answer per group.** A sync marker used to settle every pending group on the primary path while the grace path settled only the groups actually shown — and that inconsistency *was* the bypass, since outlasting the grace window reached the looser path. Both paths are scoped now: a group is named once, then your marker settles it. Strictly stricter, deliberately.
 >
-> Tests **556 → 556**.
+> Tests **543 → 556**.
 
 > **From v0.26.0** — 🧩 **Fourth-round audit: the previous release's own fix diff was reviewed, and the mechanism was replaced instead of the symptoms.** Three parallel read-only reviews plus a first-party pass produced **37 findings**; **33 reproduced** under first-party runtime probes, 3 were recorded as by-design, and **1 was refuted** (a reviewer called a test vacuous that in fact fails on the pre-fix tree). They collapse into **three root causes**, and the fix is **four shared models**, not ~30 patches. Tests **378 → 556**, across two audit rounds: the first replays **43 failures + 3 errors** on the pre-fix tree; the second (16 parallel read-only reviews, 15 of which reported) fixed a further 20+ confirmed defects at the root — including five stale test counts and two wrong claims in this release's own notes.
 >
@@ -298,8 +306,12 @@ MIT — see [`LICENSE`](LICENSE).
 | 根因绕过 | 用 `sleep` 掩盖竞态、用 `--no-verify` 跳过钩子 |
 | 半成品 | 写到"应该能工作"就停手，留 TODO，不验证整条链路 |
 
-### 防御分层（**v0.26.0**：12 内置规则 + 用户自定义圣旨 + Stop 钩子 9 层闸门）
+### 防御分层（**v0.28.0**：12 内置规则 + 用户自定义圣旨 + Stop 钩子 9 层闸门）
 
+> **v0.28.0 新增** — 🪜 **rule 03 + 09 语义升级：溯源 → 确诊 → 统一修复，点对点补丁明令禁止**。rule 03 新增**上游溯源阶梯**：每个失败有三种位置——**症状位**（浮出水面处）、**传播路径**（坏状态流经的代码）、**起源**（*产生*坏状态的机制 / 设计决策 / 缺失不变量）；修在前两级都算补丁，哪怕现象消失。沿链上爬直到答案是机制为止；停在中途必须点名真正起源 + 理由，且根因假设必须先经第一方探针 / 复现 / 红测试**确诊**再动手。rule 09 新增**"一个根因，一次统一修复"**：确诊的根因定义一个"类"——你看到的实例只是先冒头的那个；全库清扫同类、机制只修一次、同趟覆盖全部实例，并重触发类里**另一个**实例证明类已闭合。N 个症状共一个根因 = 一次修复，绝非 N 个补丁。动机是本仓库自己的实测史：v0.25.1 点名根因却只修实例，机制存活、v0.26 再生同类新缺陷（含一个倒退）——v0.28 把"换机制而非修症状"固化为每次修复的强制形态。**零新检测器**（v0.22.1 同一先例：推理形态而非钩子可匹配的语法形态）；既有硬层（补丁标记内容层 / rolling-patch 频率层 / Stop layer (f) 三件套）仍是物理地板。checklist 新增 F9–F11；测试保持 556。
+>
+> **v0.27.0 新增** — 🧵 **把 v0.26 记为"已知但不修"的三条契约悬案全部收口，方向由证据定、不由偏好定**。shell tokenizer 跟 **shell** 走、不跟宿主机走：实测 Claude Code 在 Windows 上真正用的 shell（Git Bash / MSYS）后发现 v0.25.1 那条 `os.name == "nt"` 分支两个方向都错——真实 shell 同样吃掉不加引号盘符路径的分隔符（所以它从没救回任何东西），而 `git push --for\ce` 到 git 手里就是 `--force`——一个活的 force-push 绕过，已闭合；盘符路径的受支持写法是**加引号**。layer (h) 把"存在"（宽，`attributable`）与"度量"（严，`countable`）拆成两个判定，CommonMark 懒延续随之实现。layer (i) 一组一次**知情**回答：标记只结清已被点名展示过的组（刻意的严格度上调，如实记录）。测试 **543 → 556**。
+>
 > **v0.26.0 新增** — 🧩 **第四轮审计：这次审的是上一版自己的修复 diff，而且换掉的是机制，不是症状**。三路并行只读审阅 + 我自己一路，共 **37 条 finding**；**33 条**用我自己的运行时探针复现，3 条记录为"属设计"，**1 条被驳回**（审阅说某测试空转，实际它在未修树上是红的）。它们归结为**三个根因**，修法是**四个统一件**，不是 ~30 个补丁。此后又跑了**第二轮 16 路并行只读复审**（15 路有效；sync-gate 那一路返回空、**未跑**，如实记录），按根因再修 20+ 处确认缺陷——其中包括本版发布说明自己写错的 **5 处测试数**与 **2 处错误声称**。测试 **378 → 556**；第一轮新断言在未修树上 replay 出 **43 failures + 3 errors**（第二轮无 pre-fix 树可回放，两轮均未提交）。
 >
 > **本轮的修复代码自己也过了一遍只读复审**（因为这一版要修的缺陷，正是上一版的修复引入的）。复审在**新代码里**又抓出 **8 个真缺陷**，已全部修掉：`$( … )` / 反引号 / 子 shell 的调用没被分段——而被替换掉的文本启发式**是靠巧合**抓住它们的，所以这个模型本来会是**倒退**（`$(git push --force)` 是真会执行的）；转义的 `\"""` 会提前结束三引号块，把字符串内容暴露成注释；围栏模型三处 CommonMark 缺陷；否定判断漏了 `cannot` / `unable` / `绝非`（**危险方向**：会把如实的"没做完"当成完成声明拦下），同时 `not only fixed but tested` 被误判为否定；标点填充能凑够理由长度门槛。另有**我自己的一处改动被回退**——它打破了 v0.23 刻意钉下的契约。

@@ -14,6 +14,8 @@
 | About to do a ≤ 5 line "quick fix" without 7 questions, missing **think-before-write** | rule 02 + 08 | — |
 | About to write `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` without why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | Patching locally instead of **systematic** modification (rolling patches / wrap-and-swallow) | rule 09 | rule 09 DENY (if suppression marker has no why) |
+| About to patch at the symptom site without climbing the causal chain to the most-upstream origin, stating why you stop there, and demonstrating the diagnosis first-party | rule 03 upstream ladder (v0.28) | Stop layer (f) BLOCK when the edit turn lacks the root-cause triplet (ladder position itself is text-level) |
+| Fixing the *second* failure of the same shape one-by-one instead of diagnosing the shared root cause and sweeping its class in one unified fix | rule 03 + 09 unified fix (v0.28) | same-file pile-up → **PreToolUse(Edit\|Write) DENY** (v0.13); the cross-file form is text-level |
 | About to `time.sleep()` to mask a race / comment out failing tests / loosen asserts | rule 03 + 09 | rule 09 DENY (for new code) |
 | About to inline a secret / API key / provider token (`ghp_…` `xox…` `AIza…`) / private key / credentials-in-a-URL as a **code** literal (should be config/env) | rule 10 | **PreToolUse(Edit\|Write) DENY** (unless placeholder / adjacent why) |
 | About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into **code** | rule 11 | **PreToolUse(Edit\|Write) DENY** (unless adjacent why; prose-doc/lockfile exempt) |

@@ -18,7 +18,8 @@ Typical patch-style modifications:
 - Wrapping a try at the call site to "fix" the symptom while the real bug is in the callee;
 - Increasing the timeout / loosening assertions / making tests more permissive;
 - Commenting out failing tests instead of fixing the code;
-- Stuffing TODO / "for now" / "later" into new code.
+- Stuffing TODO / "for now" / "later" into new code;
+- Fixing N symptoms of one root cause one at a time (point-to-point), instead of one unified fix at the diagnosed origin (v0.28 — enforced at the text/injection level; its same-file form is what the v0.13 frequency layer catches).
 
 These are not "fixes" — they **defer** problems. Rule 09 elevates them to a hard prohibition and installs **physical interception** at the hook layer.
 
@@ -31,12 +32,54 @@ These are not "fixes" — they **defer** problems. Rule 09 elevates them to a ha
 3. **Map the impact** (rule 02 Q5) — list every upstream / downstream tied to the root cause.
 4. **Compare ≥ 2 fix strategies** (rule 08 item 6) — across simplicity / performance / fit with existing architecture / future maintainability.
 
+### One root cause, one unified fix (v0.28)
+
+Point-to-point patching — treating each observed failure as its own
+little fix — is forbidden. When a problem appears, the only accepted
+shape is **trace upstream → diagnose → one unified fix**:
+
+5. **Trace to the most-upstream cause** (rule 03 upstream ladder):
+   climb the causal chain until the answer is a mechanism / design
+   decision / missing invariant, and state explicitly why you stopped
+   where you stopped.
+6. **Diagnose before treating**: the root-cause hypothesis must be
+   demonstrated by a first-party probe / reproduction / failing test
+   (rule 01) *before* the first line of the fix is written.
+7. **Enumerate the class, not the instance.** A diagnosed root cause
+   defines a *class* of defects; the instance you observed is merely
+   the one that happened to surface. Sweep the repo for every sibling
+   of the class (Grep to locate, Read to confirm — rule 04; report the
+   sweep — rule 12). Scope note: the sweep is part of fixing the
+   reported problem, not scope creep — rule 07 bans *unrequested*
+   changes. When the enumerated class materially expands the visible
+   scope of the user's request, surface the enumeration and get the
+   user's call before the one-pass fix.
+8. **Fix the mechanism once.** One systematic change that removes the
+   generating mechanism and covers every enumerated instance in the
+   same pass. N symptoms sharing one root cause = **one** fix — never
+   N patches, and never "fix the reported ones, leave the rest of the
+   class". The unit of "one" is the mechanism, not the diff size:
+   minimum effective change still applies.
+9. **Prove the class is closed** (rule 06): re-trigger not only the
+   observed instance but at least one *other* enumerated instance of
+   the class. When the sweep shows the class has exactly one member,
+   say so explicitly — the sweep report is then the closure evidence.
+
+The instance-fix trap, measured on this repo: v0.25.1 named a root
+cause and fixed only the instances it had seen; the mechanism survived
+and regenerated a fresh crop of the same class by v0.26 — including
+one regression. v0.26 then replaced the mechanism (33 findings → three
+root causes → four shared models), which is exactly the shape this
+section prescribes. A second failure with the same shape is the class
+announcing itself — an obligation to test whether the origins are
+truly shared, never a coincidence to ignore.
+
 ### During modification
 
-5. **Fix the cause, not the symptom** (rule 03) — the edit point must sit at the source of the causal chain, not at the manifestation.
-6. **Cover the full impact** — fix every connected point of the same root cause; never "fix one now and patch the rest later".
-7. **Do not introduce patch markers** — see "Physical interception" below.
-8. **Record new invariants** — if the change establishes a new invariant ("X is never None" / "must acquire the lock first"), declare it explicitly in code or docs.
+10. **Fix the cause, not the symptom** (rule 03) — the edit point must sit at the source of the causal chain, not at the manifestation.
+11. **Cover the full impact** — fix every connected point of the same root cause; never "fix one now and patch the rest later".
+12. **Do not introduce patch markers** — see "Physical interception" below.
+13. **Record new invariants** — if the change establishes a new invariant ("X is never None" / "must acquire the lock first"), declare it explicitly in code or docs.
 
 ### Bulk mechanical edits (rename / codemod / sed)
 
@@ -70,9 +113,9 @@ of files at once. Before running one:
 
 ### After modification
 
-9. Run rule 06 convergence — including Check 2b, since a bulk edit is
-   exactly the case where totals stay equal while composition shifts;
-   run rule 07 task fidelity.
+14. Run rule 06 convergence — including Check 2b, since a bulk edit is
+    exactly the case where totals stay equal while composition shifts;
+    run rule 07 task fidelity.
 
 ## Physical interception (hooks)
 
@@ -207,12 +250,14 @@ A bare marker without justification = laziness, intercepted.
 - ❌ **Blind bulk replace**: running a rename / codemod / sed without first surveying the token's real neighbourhoods, without an allowlist, or without a refusal report of what it declined.
 - ❌ **Rewriting history-addressing paths** during a move: a path handed to a fixed git rev must keep the layout that rev actually has.
 - ❌ **Pattern blacklists where the invariant is a closed set**: if only a known list of names is legal, enumerate that list and reject everything else. Blacklisting the stray shapes you happen to have seen lets the next shape walk straight through — including on the gate's own first live run.
+- ❌ **Point-to-point patching** (v0.28): fixing symptom sites one at a time — each observed failure gets its own little fix — when they share a root cause. Includes "fix what was reported, leave the unreported siblings".
+- ❌ **Instance hardening** (v0.28): repairing the observed instance of a mechanism defect while leaving the mechanism in place to regenerate the class — hardening scoped to the sighting, never sweeping the class.
 
 ## Relationships
 
 | Relationship | Note |
 |---|---|
-| 09 vs 03 | 03 lists specific lazy anti-patterns; 09 **structures them into a general modification discipline** with physical interception. |
+| 09 vs 03 | 03 lists specific lazy anti-patterns and owns the **upstream-tracing ladder** (v0.28); 09 **structures them into a general modification discipline** — including the unified-fix requirement — with physical interception. |
 | 09 vs 02 | 02 is the thinking discipline before modification; 09 is the execution discipline during. They chain. |
 | 09 vs 08 | 08 verifies "did you complete pre-action prep?"; 09 verifies "is the content systematic, not patch-style?". Pre vs content. |
 | 09 vs 06 | 06 verifies "did the fix converge?"; 09 verifies "was the fix done systematically?". Process vs result. |
@@ -229,16 +274,19 @@ A bare marker without justification = laziness, intercepted.
 - Already made ≥ 3 small Edits on the same file this session and still patching, not rewriting.
 - About to run a rename / codemod / sed across many files without a survey, an allowlist and a refusal report.
 - About to write a guard that enumerates *bad* shapes for an invariant whose specification is a *closed set of good ones*.
+- About to fix the *second* failure with the same shape as one already fixed — the class is announcing itself; diagnose the shared origin instead of patching the sighting.
+- About to write a fix without having stated where the causal chain stops and why.
 - Chain-of-thought lacks the "root cause + impact + alternatives" triplet.
 
 ## Termination condition
 
 "Modification complete" is allowed only when **all** of the following hold:
 
-1. Root cause has been found and verified (rule 03 + rule 01).
+1. The **most-upstream** root cause has been diagnosed — causal chain stated, diagnosis demonstrated first-party (rule 03 upstream ladder + rule 01).
 2. All connected points of the root cause have been covered (rule 02 Q5).
-3. `new_string` contains no unjustified patch markers (read_guard patch-style check passes).
-4. Chain-of-thought or final reply explicitly records the "root cause / impact / alternatives" triplet (Stop layer (f) passes).
-5. Rule 06 convergence + rule 07 fidelity self-quizzes done.
+3. Every sibling instance of the diagnosed class has been enumerated and covered in the same pass — no point-to-point residue (v0.28 unified fix).
+4. `new_string` contains no unjustified patch markers (read_guard patch-style check passes).
+5. Chain-of-thought or final reply explicitly records the "root cause / impact / alternatives" triplet (Stop layer (f) passes).
+6. Rule 06 convergence + rule 07 fidelity self-quizzes done.
 
 Otherwise → **not systematic**, return to rule 02 + rule 03 + rule 08.

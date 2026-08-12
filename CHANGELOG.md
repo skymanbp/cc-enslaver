@@ -17,6 +17,84 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.28.0] — 2026-08-12
+
+**Rules 03 + 09 upgraded: trace upstream → diagnose → one unified fix.
+Point-to-point patching is banned outright.** (User directive, 2026-08-12.)
+
+When a problem appears, the only accepted shape of a fix is now:
+
+1. **Trace to the most-upstream root cause.** Rule 03 gains an *upstream
+   tracing ladder*: every failure has three kinds of location — the
+   **symptom site** (where it surfaces), the **propagation path** (what
+   the bad state flowed through), and the **origin** (the mechanism /
+   design decision / missing invariant that generates it). Fixing at the
+   first two levels is a patch, even when the observed failure
+   disappears. Climb the chain until the answer is a mechanism; stopping
+   short is legitimate only with the true origin named and the reason
+   stated.
+2. **Diagnose before treating (确诊).** The root-cause hypothesis must be
+   demonstrated by a first-party probe / reproduction / failing test
+   *before* the first line of the fix is written.
+3. **One root cause, one unified fix.** Rule 09 gains the unified-fix
+   discipline: a diagnosed root cause defines a *class* of defects — the
+   observed instance is merely the one that surfaced first. Sweep the
+   repo for every sibling of the class, fix the generating mechanism
+   once, cover all instances in the same pass, and prove the class is
+   closed by re-triggering at least one *other* instance. N symptoms
+   sharing one root = **one** fix, never N patches.
+
+The motivation is this repo's own measured history: v0.25.1 *named* a
+root cause — detectors that described a *string* instead of the
+*concept* — and then fixed only the instances it had seen; the
+mechanism survived and regenerated a fresh crop of the same class by
+v0.26 — including one regression. v0.26 closed it by replacing the
+mechanism (33 findings → 3 root causes → 4 shared models). v0.28
+codifies that shape as the mandatory form of every fix.
+
+Surfaces updated in lock-step: `rules/03` + `rules/09` (English skeleton
++ zh mirrors), `prompts/session-start.md` + `prompts/user-prompt.md`
+(+ zh — new one-liners and decision-trigger rows), `docs/RULES.md`,
+`commands/checklist.md` (new items F9 most-upstream / F10
+diagnosis-first / F11 class-sweep unified fix),
+`skills/systematic-debug/SKILL.md` (Steps 5/6/7 + forbidden list now
+carry the ladder and the unified fix — the auto-invoked runtime surface
+for exactly the "a problem appears" scenario, caught missing by the
+pre-release review), `CLAUDE.md` §2.4 / §2.11.
+
+**The upgrade diff was itself adversarially reviewed before shipping**
+— four parallel read-only lenses (en↔zh semantic parity / internal
+consistency / factual claims / task fidelity) with per-finding
+adversarial verification, plus one independent external review: 27
+findings, **14 confirmed and fixed in one unified pass**. The confirmed
+set included: the new injection rows' "physical consequence" cells
+overstating what the hooks can verify (now stated honestly as
+text-level — an agent acts on what it is told); the `systematic-debug`
+skill never receiving the upgrade; a single-instance class making the
+termination condition unsatisfiable (explicit single-member branch
+added); the rule 07 scope-precedence conflict left unadjudicated
+(precedence note added: the class sweep is part of the fix, but a
+materially scope-expanding class goes to the user first); a quote
+attributed to v0.25.1 in v0.26's wording; and README's v0.27 block
+saying `556 → 556` where four other surfaces say 543 → 556. Rejected
+with reasons: "四个统一件" is this repo's own established zh term for
+the v0.26 delivery, and `rules/00-index.md` updates only on rule-set
+changes by six-version precedent.
+
+**Zero new detectors — deliberately**, on the v0.22.1 precedent: this is
+a reasoning shape, not a syntax shape a hook can match (no hook can tell
+whether an edit sits at the top of a causal chain). The existing hard
+layers — the patch-marker content scan, the rolling-patch frequency
+layer, and Stop layer (f)'s root-cause triplet — remain the physical
+floor under the upgraded text. One candidate hard extension (requiring
+an explicit "most-upstream / class-sweep" marker on edit turns at Stop
+layer (f)) is a strictness contract change and is **recorded for the
+user's decision rather than shipped unilaterally**, per the v0.25.1
+precedent for contract changes.
+
+Tests hold at **556** (no code changed; the doc gates re-verify the
+updated surfaces).
+
 ## [0.27.0] — 2026-08-10
 
 **The three items v0.26 recorded as "known, not fixed" — closed.**

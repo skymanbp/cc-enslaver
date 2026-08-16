@@ -17,6 +17,96 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.29.0] — 2026-08-15
+
+**The contract could not reach the agent it governs.** Two instances of
+one root cause — enforcement-critical text placed where it cannot be
+seen or reached — swept together as a single unified fix (rule 09).
+
+### Fixed — the injection outgrew the hook-output cap
+
+Claude Code caps hook output, `additionalContext` included, at **10,000
+characters** (not bytes; UTF-8 multi-byte content counts one per
+character). Anything longer is written to a file and replaced inline by
+a path plus a short preview
+([docs](https://code.claude.com/docs/en/hooks#json-output)). The limit
+is **not configurable** — no env var, no settings key.
+
+Measured on a live session: **SessionStart 18,761 characters,
+UserPromptSubmit 11,350**. Both were being persisted, so the agent only
+ever saw the head of each. §3 — the mandatory YAML reply schema, whose
+field names are the Stop-hook detection markers — sat past the preview
+boundary and went unread for an entire session while every hook reported
+green. The plugin had no way to notice: nothing measured its own
+injection.
+
+Four coordinated changes rather than four patches:
+
+1. **`prompts/session-start.md` §4 deleted.** Its decision-trigger list
+   was a strict subset of the per-turn `user-prompt.md` table, which is
+   re-injected on *every* turn. The contract was paying ~2,700
+   characters to duplicate something the agent already receives.
+2. **`prompts/user-prompt.md` inlines the YAML schema.** It used to say
+   "see SessionStart injection §3" — a cross-reference into precisely
+   the region that was invisible. The skeleton now lives in the per-turn
+   injection itself, so the schema survives whatever happens to
+   SessionStart.
+3. **Self-locating header on every injection.** The first thing in every
+   payload is the absolute plugin root plus the prompt filename, so even
+   a truncated preview carries an actionable pointer to the full text.
+   Static markdown cannot know its own absolute path; the hook can.
+4. **`build_context` enforces the cap structurally.** A fixed budget
+   goes stale the moment either side changes length, so the assembly
+   measures the actual strings. The contract is protected; the edict
+   block is the unbounded part (it grows with every edict, and 16
+   project edicts ≈ 5.6k characters is what pushed this over), so when
+   the budget is tight the edicts are elided to a pointer — at **whole-
+   edict boundaries**, because half an edict still reads as a complete
+   instruction — and the contract is never cut. If the contract alone
+   exceeds the cap it is emitted whole, with the header fail-safe
+   covering the degradation.
+
+Result: **SessionStart 18,761 → 9,826, UserPromptSubmit 11,350 →
+7,225**, both inline. With 200 synthetic edicts the payload still lands
+at 9,817 with the contract tail intact.
+
+### Changed — Stop grace is now per LAYER, not per sequence
+
+`state.was_just_blocked()` returning True made `stop_guard` `return 0`
+**before evaluating a single layer**. The grace window forgave the whole
+check rather than the row that failed, so a recovery reply that fixed
+the layer it had been shown while still violating another was never
+tested against the other.
+
+Observed live: layer (a) blocked for missing evidence; the recovery
+reply supplied the evidence but carried no `tldr`; layer (h) — never
+named, never spent — was skipped entirely. Every un-named layer was
+unenforceable in exactly the situation it exists for.
+
+Grace is now scoped to the layers already spent in the recovery sequence
+(`state.blocked_layers`, `get_forgiven_layers`, `clear_blocked_layers`).
+A spent layer stays forgiven, which is the anti-deadlock property the
+one-shot guard was built for — no layer blocks twice for one recovery.
+An unspent layer may still block once, and doing so spends it, so
+escalation is bounded by the layer count and terminates. Any allowed
+Stop clears the set; the next sequence starts with all layers live.
+
+**This is a strictness increase**, recorded as such: replies that
+previously slipped through the grace window are now blocked for the
+layers they still violate.
+
+### Tests
+
+**556 → 564.** The two tests asserting the old whole-check grace were
+rewritten to assert the per-layer contract — not deleted, since the
+behaviour they pinned is the defect. New coverage: per-layer
+escalation, bounded termination, clean-Stop reset, cap arithmetic under
+0/1/2/5/20/200 edicts, whole-edict clipping, the header fail-safe, and
+the body-alone-over-cap degradation path. `prompts/zh/` co-updated;
+`i18n_check` exit 0.
+
+---
+
 ## [0.28.0] — 2026-08-12
 
 **Rules 03 + 09 upgraded: trace upstream → diagnose → one unified fix.

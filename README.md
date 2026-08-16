@@ -3,12 +3,18 @@
 > A Claude Code plugin and LLM-agnostic rule pack that **eliminates lazy AI behavior** — reactive patches, guessed citations, surface-level "fixes", half-finished work — by enforcing systematic thinking, verification, and root-cause analysis at every layer of the agent loop.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.28.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.29.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
-<!-- The v0.28.0 headline lives with the other "New in" blocks further
-     down, next to v0.27.0, so this badge area stays scannable. -->
+<!-- The v0.29.0 headline lives with the other "New in" blocks further
+     down, next to v0.28.0, so this badge area stays scannable. -->
+<!-- Release-note convention: the newest version gets a "New in vX.Y.Z"
+     blockquote immediately under the rule-count line; every older one is
+     demoted to "From vX.Y.Z" in place. Only the badge above and the
+     newest CHANGELOG heading are pinned to plugin.json by
+     tests/test_version_sync.py — the narratives below are history and
+     are deliberately allowed to name old versions. -->
 
 中文用户请直接看 → [中文说明](#中文说明)
 
@@ -28,9 +34,21 @@ LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider, etc.) frequently 
 | **Half-finished work** | Stops at "should work", leaves TODOs, doesn't verify the whole flow. |
 | **Premature done-claim** | Claims "fixed" without re-running the original failing case, no edge cases, no comparison evidence. |
 
-`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.28.0):
+`cc-enslaver` ships a **layered defense** against all seven, currently **12 built-in rules + user-defined Imperial Edicts (圣旨) + 9 Stop-hook gates** (v0.29.0):
 
-> **New in v0.28.0** — 🪜 **Rules 03 + 09 upgraded: trace upstream → diagnose → one unified fix. Point-to-point patching is banned outright.**
+> **New in v0.29.0** — 📮 **The contract could not reach the agent it governs.** Two instances of one root cause — enforcement-critical text placed where it cannot be seen or reached — swept together as a single unified fix.
+>
+> **The injection had outgrown the hook-output cap.** Claude Code caps hook output, `additionalContext` included, at **10,000 characters** — not bytes, and [not configurable](https://code.claude.com/docs/en/hooks#json-output). Anything longer is written to a file and replaced inline by a path plus a short preview. Measured live: **SessionStart 18,761 characters, UserPromptSubmit 11,350**. Both were being persisted, so the agent saw only the head of each — §3, the mandatory YAML reply schema whose field names *are* the Stop-hook detection markers, sat past the preview boundary and went unread for an entire session while every hook reported green. Nothing measured the plugin's own injection, so nothing could notice.
+>
+> **Four coordinated changes, not four patches.** `prompts/session-start.md` §4 is deleted — its trigger list was a strict subset of the per-turn table that is re-injected every turn, so the contract was paying ~2,700 characters to duplicate what the agent already receives. `prompts/user-prompt.md` now **inlines** the YAML schema instead of saying "see SessionStart §3", a cross-reference into precisely the invisible region. Every injection leads with a **self-locating header** carrying the absolute plugin root, so even a truncated preview says where to Read the full contract — static markdown cannot know its own path, but the hook can. And `build_context` enforces the cap **structurally**: the contract is protected while the edict block (the only unbounded part — 16 project edicts ≈ 5.6k characters is what pushed this over) is elided to a pointer at **whole-edict boundaries**, because half an edict still reads as a complete instruction.
+>
+> Result: **SessionStart 18,761 → 9,826, UserPromptSubmit 11,350 → 7,225**, both inline. With 200 synthetic edicts the payload still lands at **9,817** with the contract tail intact.
+>
+> **Stop grace is now per LAYER, not per sequence.** `was_just_blocked()` returning True made `stop_guard` return 0 *before evaluating a single layer*, so a recovery reply that fixed the row it had been shown while still violating another was never tested against the other. Observed live: layer (a) blocked for missing evidence, the recovery supplied the evidence but carried no `tldr`, and layer (h) — never named, never spent — was skipped. Every un-named layer was unenforceable in exactly the situation it exists for. Forgiveness is now scoped to the layers already spent in the sequence: a spent layer stays forgiven (the anti-deadlock property the guard was built for), an unspent one may still block once, escalation is bounded by the layer count, and any allowed Stop resets the set. **Strictly stricter, deliberately.**
+>
+> Tests **556 → 564**.
+
+> **From v0.28.0** — 🪜 **Rules 03 + 09 upgraded: trace upstream → diagnose → one unified fix. Point-to-point patching is banned outright.**
 >
 > **Rule 03 gains an upstream tracing ladder.** Every failure has three kinds of location: the **symptom site** (where it surfaces), the **propagation path** (what the bad state flowed through), and the **origin** (the mechanism / design decision / missing invariant that *generates* it). Fixing at the first two levels is a patch, even when the observed failure disappears. Climb the chain until the answer is a mechanism; stopping short is legitimate only with the true origin named and the reason stated — an unstated stop is a patch with better paperwork. And the diagnosis must be **demonstrated first-party** (probe / reproduction / failing test) *before* the first line of the fix is written.
 >

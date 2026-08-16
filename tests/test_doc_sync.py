@@ -232,10 +232,16 @@ CLAIMS: tuple[Claim, ...] = (
         "a reader is told fewer commands exist than are installed",
     ),
     Claim(
-        "readme-zh-slash-command-count", "README.md",
+        # The Chinese half moved out of README.md into its own
+        # README.zh.md (GitHub renders README.md; a full translation buried
+        # at the bottom of the English file was neither scannable nor at
+        # parity). The claim follows the text — leaving it pointed at
+        # README.md would have failed as a stale registration, which is
+        # exactly what that check is for.
+        "readme-zh-slash-command-count", "README.zh.md",
         r"\*\*(\d+) 个 slash 命令\*\*",
         _command_count,
-        "the Chinese half undercounts the installed commands",
+        "the Chinese README undercounts the installed commands",
     ),
     Claim(
         "readme-injected-rule-count", "README.md",

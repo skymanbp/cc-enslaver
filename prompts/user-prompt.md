@@ -37,9 +37,24 @@
 
 ## Closing schema (YAML · mandatory)
 
-Reply must end with a ```yaml `cc-enslaver:` block — fixed schema, see SessionStart injection §3.
-Modification tasks use the full form (before / edits / convergence / fidelity / closing);
-non-modification tasks use the minimal form (convergence / fidelity / tldr).
+Reply must end with a ```yaml `cc-enslaver:` block. Field names ARE the Stop-hook
+detection markers — don't rename them. Modification tasks use the full form,
+non-modification tasks (Q&A, lookup) the minimal form (convergence / fidelity / tldr):
+
+```yaml
+cc-enslaver:
+  before: {architecture: ..., root cause: ..., solution: ...}   # rule 02
+  edits: [{file: "path:line", what: "..."}]                     # rule 09
+  convergence:                                                  # rule 06
+    re-trigger: "$ <cmd> → <output with counts>"
+    boundary case: ...
+    existing tests: ...
+    self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
+  fidelity: {request coverage: [...], standard: ..., no degradation: ...}   # rule 07
+  closing: {root cause: ..., impact: ..., solution: ...}        # rule 08+09
+  tldr: "<one plain sentence>"
+```
+
 **Any reply with a done-claim must include the `tldr` field, else Stop layer (h) BLOCK.**
 **`tldr` length (v0.23): one sentence per item — cause, action, outcome — ≤ 160 chars;
 several things → one item per line, each within the cap, else Stop layer (h) BLOCK.**

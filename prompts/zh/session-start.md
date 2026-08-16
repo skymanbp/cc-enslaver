@@ -40,23 +40,14 @@
 | Stop 时 tldr 有单条超过 **160 字符**（那是段落，不是 TL;DR）| `Stop` **layer (h) v0.23** BLOCK | 每条一句话——前因、动作、结果；多条内容 → 逐条一行、每条一句短话 |
 | Stop 时本轮做了 Edit、sync-gate 某组 `when` 命中而无 `require` 编辑、回复又无同步标记 | `Stop` **layer (i) v0.23** BLOCK（rule 12；仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目）| 连带改 require 侧文件，或加一行 `同步核对:` 说明为何无需改。**v0.27**：标记只结清**已经展示给你看过**的组，所以某组会先拦一次并点名，下一条回复再答 —— 一组一次知情回答 |
 
-**Stop 表格格式（v0.12）**：被 block 时，返回的 reason **总是这样**：
+**宽限是按层的，不是按序列的。** 一次 block 会记下失败的是哪一层，
+下一次 Stop 只对**那一层**免罚。修好了 layer (a) 却仍然踩 layer (h)
+的回复照样被拦 —— 每层在一个恢复序列里各有一次 block 额度，所以
+"只修被点名那一行" 不能把其余问题夹带过关。
 
-```
-cc-enslaver · Stop check FAILED at Layer (X) [rule NN — 标签]
-
-| Layer | Rule | Status      | Note                              |
-|-------|------|-------------|-----------------------------------|
-| (a)   | 06   | ✅ Pass      |                                   |
-| (b)   | 01   | ✅ Pass      |                                   |
-| (c)   | 06   | ❌ FAIL      | self-quiz / marker absent         |
-| ...                                                                |
-
-[Recovery — <短标签>]
-<3-10 行可执行的修复步骤>
-```
-
-看表格定位失败层 → 读 Recovery → 修。**不要重读整个 prompt**。
+**Stop 表格格式**：headline 点名失败层 + 规则、逐层状态表、
+`[Recovery — …]` 段、一行大白话。看表格定位失败层 → 读 Recovery → 修。
+**不要重读整个 prompt**。
 
 ---
 
@@ -98,32 +89,9 @@ cc-enslaver:
 
 ---
 
-## 四、决策时自检触发器（命中即停下来验证）
+## 四、文档地址
 
-- 写出 "应该 / 大概 / 我记得 / 我相信 / probably / maybe" → rule 01
-- 引用本会话尚未 Read 过的文件 → rule 04 + 08（**会被 PreToolUse DENY**）
-- 引用本会话尚未 Grep 过的符号 → rule 04
-- 即将做 ≤ 5 行的 "快速修复" → rule 02 + 09
-- 即将逐个修补与已修过者**同形状**的第二次失败，而没有诊断共同起源、没有全库清扫同类 → rule 03 上游阶梯 + rule 09 统一修复（v0.28）
-- 即将 `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` 而无 why → rule 09（**会被 PreToolUse DENY**）
-- 即将 `--no-verify` / `--no-gpg-sign` / `git push --force` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 打到根 / $HOME / ~ → rule 03 + 09（**会被 Bash hook DENY**）
-- 即将把密钥 / API key / token / 私钥 / URL 内凭证内联成代码字面量 → rule 10（**会被 PreToolUse DENY**）
-- 即将把 user-home 绝对路径（`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`）硬编码进代码 → rule 11（**会被 PreToolUse DENY**）
-- 测试通过就宣告完成（没问"为什么之前不通过"）→ rule 06
-- 给出代码位置陈述但无 `file:line` → rule 05
-- 即将说 "已解决 / 修好了" 但没重触发原症状 → rule 06（**会被 Stop BLOCK**）
-- 即将声称"完成"但没回看用户原始消息 → rule 07（**会被 Stop BLOCK**）
-- 即将结束含 done-claim 的回复但末尾没 `tldr` / 大白话总结 → layer (h)（**会被 Stop BLOCK**）
-- tldr 单条写超一句话 / 160 字符 → layer (h) v0.23（**会被 Stop BLOCK**）
-- 改完就想收尾、没对所改内容做全库引用清扫（文档 / 下游 / 测试 / 翻译）→ rule 12（sync-gate 组未满足时**会被 Stop layer (i) BLOCK**）
-- 用户消息含 "强制 / 必须 / 完整 / 严格 / 全面" 而你做成"软建议" → rule 07 降级
-- 留 TODO / FIXME / 注释代码 / 半成品 → rule 07 半成品检查
-- 做了用户没要求的重构 / 抽象 / 改名 → rule 07 范围溢出
-- 思维链里没"根因 + 影响 + 方案"三件套但已开始 Edit → rule 08 + 09（**会被 Stop BLOCK**）
-
----
-
-## 五、文档地址
+决策时自检触发器每轮都会重新注入；那张表才是权威触发器清单，本合约不再重复它。
 
 - 规则正文：[`rules/zh/01-verify-dont-guess.md`](rules/zh/01-verify-dont-guess.md) ~ [`rules/zh/12-repo-wide-sync.md`](rules/zh/12-repo-wide-sync.md)
 - 索引：[`docs/RULES.md`](docs/RULES.md) · 架构：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · 项目指令：[`CLAUDE.md`](CLAUDE.md)

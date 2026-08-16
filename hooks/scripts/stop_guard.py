@@ -1725,6 +1725,7 @@ def main() -> int:
         # boundary → clear the edit flag so the next turn starts clean;
         # blocked Stops keep it (the recovery reply is the same logical
         # turn).
+        forgiven: set[str] = set()
         if state_lib.was_just_blocked(session_id, turn_count):
             if (
                 message
@@ -1732,17 +1733,41 @@ def main() -> int:
                 and state_lib.get_last_blocked_layer(session_id) == "(i)"
             ):
                 _ack_pending_sync_groups(session_id, payload.get("cwd"))
-            state_lib.clear_edit_flag(session_id)
-            return 0
+            # v0.29 — grace is per LAYER, not per sequence. This used to
+            # `return 0` here, which forgave the entire check: a recovery
+            # reply that fixed the layer it was told about while still
+            # violating another was never evaluated against the others.
+            # Observed live: layer (a) blocked for missing evidence, the
+            # recovery reply supplied the evidence but carried no `tldr`,
+            # and layer (h) was skipped — so the reply-schema layer was
+            # unenforceable in precisely the case it exists for.
+            #
+            # Now the layers already spent in this sequence are forgiven
+            # (no layer can block twice for one recovery — the original
+            # anti-deadlock property) and the rest are still live. Bounded
+            # by the layer count and reset on the first allowed Stop.
+            forgiven = state_lib.get_forgiven_layers(session_id)
 
         if not message:
             state_lib.clear_edit_flag(session_id)
+            state_lib.clear_blocked_layers(session_id)
             return 0  # nothing to inspect
 
         matched = _has_done_claim(message)
         if matched is None:
             state_lib.clear_edit_flag(session_id)
+            state_lib.clear_blocked_layers(session_id)
             return 0  # no done-claim → don't block
+
+        def _live(layer_id: str) -> bool:
+            """True when `layer_id` may still block in this sequence.
+
+            One predicate consulted by every layer below, rather than a
+            per-layer condition: the forgiveness policy is a property of
+            the check as a whole, and duplicating it nine times is how it
+            would drift.
+            """
+            return layer_id not in forgiven
 
         # Compute edit-turn status up front: layer (e)/(f) applicability
         # AND the status-table rendering both need it. Cheap (one disk
@@ -1755,7 +1780,7 @@ def main() -> int:
         # v0.7.0 layered check (b): hedged completion (rule 01).
         # Even if evidence is present, hedging undermines the claim — block.
         hedge_pair = _has_hedge_near_done(message)
-        if hedge_pair is not None:
+        if hedge_pair is not None and _live("(b)"):
             state_lib.record_stop_block(session_id, turn_count, "(b)")
             hedge_phrase = (
                 hedge_pair[0]
@@ -1771,7 +1796,7 @@ def main() -> int:
             return 0
 
         # v0.6.0 base layer (a): no evidence at all.
-        if not _has_evidence(message):
+        if not _has_evidence(message) and _live("(a)"):
             state_lib.record_stop_block(session_id, turn_count, "(a)")
             _emit_block(_build_block_reason(
                 "(a)", edited_this_turn,
@@ -1782,7 +1807,7 @@ def main() -> int:
 
         # v0.7.0 deep layer (c): evidence present but rule-06 self-quiz
         # neither named nor answered (>=2 of 4 questions).
-        if not _has_self_quiz_or_marker(message):
+        if not _has_self_quiz_or_marker(message) and _live("(c)"):
             state_lib.record_stop_block(session_id, turn_count, "(c)")
             _emit_block(_build_block_reason(
                 "(c)", edited_this_turn,
@@ -1795,7 +1820,7 @@ def main() -> int:
         # message does not surface a rule-07 fidelity marker or quiz.
         # Different axis from (c): coverage / standard / no-degrade
         # versus root-cause / re-trigger / boundary.
-        if not _has_fidelity_marker_or_quiz(message):
+        if not _has_fidelity_marker_or_quiz(message) and _live("(d)"):
             state_lib.record_stop_block(session_id, turn_count, "(d)")
             _emit_block(_build_block_reason(
                 "(d)", edited_this_turn,
@@ -1813,7 +1838,7 @@ def main() -> int:
             # Layer (e): rule 08 — read-before-edit / think-before-write
             # closing marker. Pass if either an explicit rule-08 marker
             # OR ≥ 3 of six rule-02 keywords are present.
-            if not _has_rule08_marker_or_keywords(message):
+            if not _has_rule08_marker_or_keywords(message) and _live("(e)"):
                 state_lib.record_stop_block(session_id, turn_count, "(e)")
                 _emit_block(_build_block_reason(
                     "(e)", edited_this_turn,
@@ -1825,7 +1850,7 @@ def main() -> int:
             # Layer (f): rule 09 — systematic-modification triplet.
             # Pass if either an explicit rule-09 marker OR all three of
             # (root-cause + impact + solution) keywords are present.
-            if not _has_rule09_marker_or_triplet(message):
+            if not _has_rule09_marker_or_triplet(message) and _live("(f)"):
                 state_lib.record_stop_block(session_id, turn_count, "(f)")
                 _emit_block(_build_block_reason(
                     "(f)", edited_this_turn,
@@ -1839,7 +1864,10 @@ def main() -> int:
             # against baselines captured by read_guard. Only block when
             # the on-disk evidence definitively contradicts a claim.
             # Honors CC_ENSLAVER_DISABLE_LAYER_G escape hatch.
-            if not os.environ.get("CC_ENSLAVER_DISABLE_LAYER_G"):
+            if (
+                not os.environ.get("CC_ENSLAVER_DISABLE_LAYER_G")
+                and _live("(g)")
+            ):
                 claims = _extract_file_claims(message)
                 if claims:
                     contradictions = _verify_claims(
@@ -1859,7 +1887,7 @@ def main() -> int:
         # v0.20 Layer (h): plain-language TL;DR (大白话总结) closing
         # requirement. Fires on EVERY done-claim turn (edit or not) — the
         # reader deserves a one-line takeaway regardless.
-        if not _has_tldr(message):
+        if not _has_tldr(message) and _live("(h)"):
             state_lib.record_stop_block(session_id, turn_count, "(h)")
             _emit_block(_build_block_reason(
                 "(h)", edited_this_turn,
@@ -1871,7 +1899,7 @@ def main() -> int:
         # v0.23 Layer (h) part 2: the tldr must actually BE a TL;DR —
         # each item within TLDR_MAX_ITEM_CHARS. A paragraph-length
         # "summary" defeats the field's purpose.
-        overlong = _find_overlong_tldr(message)
+        overlong = _find_overlong_tldr(message) if _live("(h)") else None
         if overlong is not None:
             state_lib.record_stop_block(session_id, turn_count, "(h)")
             snippet, length = overlong
@@ -1927,7 +1955,7 @@ def main() -> int:
                         state_lib.ack_sync_groups(session_id, covered)
                     pending = [v for v in pending
                                if v.group.name not in presented]
-                if pending:
+                if pending and _live("(i)"):
                     state_lib.record_stop_block(
                         session_id, turn_count, "(i)",
                         blocked_groups=[v.group.name for v in pending],
@@ -1953,8 +1981,11 @@ def main() -> int:
                     ))
                     return 0
 
-        # All nine gates passed — allow. Turn boundary → clear the flag.
+        # All nine gates passed — allow. Turn boundary → clear the flag,
+        # and end the recovery sequence: the next block starts from a
+        # clean slate where every layer is live again (v0.29).
         state_lib.clear_edit_flag(session_id)
+        state_lib.clear_blocked_layers(session_id)
     except Exception:
         # Failing open: log to stderr but never block by accident.
         sys.stderr.write("[cc-enslaver] stop_guard exception:\n")

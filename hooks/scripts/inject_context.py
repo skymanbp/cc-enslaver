@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -125,6 +126,104 @@ def load_prompt(filename: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+# --------------------------------------------------------------------------- #
+# v0.29 — self-locating header.
+#
+# Claude Code caps hook output (additionalContext included) at 10,000
+# CHARACTERS; anything longer is written to a file and replaced inline
+# by a short preview plus that path
+# (https://code.claude.com/docs/en/hooks#json-output). A contract the
+# agent can only see the first ~2 KB of is not a contract: the field
+# failure was a session where §3 (the mandatory reply schema) sat past
+# the preview boundary and went unread for the whole session.
+#
+# The prompts are now budgeted to stay under the cap, but a budget is
+# not a guarantee — edicts grow, translations differ in length. This
+# header is the fail-safe: it is the FIRST thing in every injection, so
+# it survives any truncation, and it carries the absolute plugin root
+# (which the static markdown cannot know) so the agent can Read the
+# full contract instead of working from a fragment.
+# --------------------------------------------------------------------------- #
+_HEADER = (
+    "<!-- cc-enslaver root: {root} -->\n"
+    "Truncated (a `<persisted-output>` preview)? Read "
+    "`{root}/prompts/{fname}` in full before replying.\n\n"
+)
+
+# Claude Code's documented cap on hook output, in CHARACTERS (not bytes;
+# UTF-8 multi-byte content counts one per character):
+# https://code.claude.com/docs/en/hooks#json-output
+# Public because the test suite asserts the live injections fit under it,
+# and a private copy of the number in the tests is a second source of
+# truth that drifts the moment Claude Code changes the limit.
+OUTPUT_CAP = 10000
+
+_EDICTS_ELIDED = (
+    "\n\n<!-- {n} edict(s) elided to stay under the {cap}-char hook cap; "
+    "run `/cc-enslaver:edict list` or read the project's "
+    "`.claude/cc-enslaver/edicts.toml` for the full text. -->\n"
+)
+
+
+def build_context(prompt_filename: str, body: str, edict_block: str = "") -> str:
+    """Assemble the injection, guaranteeing it stays under the output cap.
+
+    The contract body is fixed-size and budgeted; the edict block is not —
+    it grows with every edict the user adds, and it was what pushed this
+    injection past the cap in the first place (16 project edicts ≈ 5.6k
+    characters on top of a 13.2k contract, so the whole thing was written
+    to a file and replaced inline by a ~2 KB preview).
+
+    Trimming the two parts is therefore not symmetric. The contract is
+    what the cap exists to protect: losing its tail silently disables the
+    reply-schema and enforcement tables. The edict block is recoverable —
+    it lives in a file the agent can read on demand — so when the budget
+    is tight the edicts are elided down to a pointer and the contract
+    survives whole. A fixed budget would go stale the moment either side
+    changes length, so the split is computed from the actual strings.
+    """
+    header = _HEADER.format(root=PLUGIN_ROOT, fname=prompt_filename)
+    if len(header) + len(body) + len(edict_block) <= OUTPUT_CAP:
+        return header + body + edict_block
+    room = OUTPUT_CAP - len(header) - len(body) - len(_EDICTS_ELIDED)
+    if room <= 0:
+        # The contract alone fills the budget: emit it without edicts
+        # rather than emit a truncated contract. Over-cap here is the
+        # lesser failure — the harness persists it and the header (first
+        # thing in the payload) still says where to read the full text.
+        return header + body
+    kept, dropped = _clip_edicts(edict_block, room)
+    return header + body + kept + _EDICTS_ELIDED.format(
+        n=dropped, cap=OUTPUT_CAP,
+    )
+
+
+def _clip_edicts(block: str, room: int) -> tuple[str, int]:
+    """Keep as many whole edicts as `room` allows; report how many were cut.
+
+    Edits are cut at entry boundaries (a line starting with the `[Exx]`
+    marker manage_edicts renders) rather than mid-character: half an edict
+    reads as a complete instruction and would be obeyed as one.
+    """
+    lines = block.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if _EDICT_ENTRY.match(line)]
+    total = len(starts)
+    if not total:
+        return ("", 0)
+    kept_upto = 0
+    for idx, start in enumerate(starts):
+        end = starts[idx + 1] if idx + 1 < total else len(lines)
+        if len("".join(lines[:end])) > room:
+            break
+        kept_upto = end
+    return ("".join(lines[:kept_upto]), total - sum(
+        1 for start in starts if start < kept_upto
+    ))
+
+
+_EDICT_ENTRY = re.compile(r"^\s*[-*]?\s*\[?E\d+\]?")
+
+
 def emit(event_name: str, additional_context: str) -> None:
     """Write the hook response JSON to stdout as UTF-8 bytes.
 
@@ -185,11 +284,18 @@ def main() -> int:
     # is the single switch the user toggles — the base prompt (English
     # skeleton at prompts/*.md, or a translation at prompts/<lang>/*.md)
     # and the edict block flip together).
+    #
+    # v0.29: the block is kept SEPARATE from the contract body rather
+    # than concatenated here, because build_context must be able to trim
+    # the two asymmetrically — the contract is protected, the edicts are
+    # elided to a pointer when the 10,000-char output cap is tight.
+    edict_block = ""
     try:
         loaded = edicts_lib.load()
         block = edicts_lib.render_injection(loaded, lang=_resolved_lang())
         if block:
-            additional_context = additional_context.rstrip() + "\n" + block
+            edict_block = "\n" + block
+            additional_context = additional_context.rstrip()
     except Exception as e:
         # Never let an edicts bug brick the injection.
         sys.stderr.write(f"[cc-enslaver] edicts injection failed: {e}\n")
@@ -201,7 +307,9 @@ def main() -> int:
     if args.event == "SessionStart":
         _maybe_auto_gc(session_id)
 
-    emit(args.event, additional_context)
+    emit(args.event, build_context(
+        prompt_filename, additional_context, edict_block,
+    ))
     return 0
 
 

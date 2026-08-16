@@ -1436,13 +1436,25 @@ class TestProductionShapePayloads(_StopBase):
         self.assertIn("FAILED at Layer (e)", out["reason"])
 
     def test_synthetic_grace_window_after_block(self) -> None:
+        """Synthetic turn numbers must drive per-layer grace (v0.29).
+
+        Production payloads carry no `turn_count`, so the counter in
+        state.next_stop_turn stands in for one. What the grace forgives
+        is the layer already spent — repeating the identical reply must
+        therefore not re-block at the SAME layer (the anti-deadlock
+        property), though a later, unspent layer may still fire.
+        """
         self._seed_flag(True)
-        self._stop_prod(self.MISSING_RULE08)  # blocks, synthetic turn 1
+        _, first, _ = self._stop_prod(self.MISSING_RULE08)
+        self.assertIsNotNone(first)
+        first_layer = first["reason"].split("Layer ", 1)[1].split(" ", 1)[0]
         rc, out, _ = self._stop_prod(self.MISSING_RULE08)
-        self.assertIsNone(
-            out,
-            msg=f"synthetic-turn grace must allow the recovery turn, got {out!r}",
-        )
+        if out is not None:
+            second_layer = out["reason"].split("Layer ", 1)[1].split(" ", 1)[0]
+            self.assertNotEqual(
+                first_layer, second_layer,
+                msg=f"layer {first_layer} blocked twice under synthetic turns",
+            )
 
     def test_allowed_stop_clears_edit_flag(self) -> None:
         self._seed_flag(True)
@@ -1594,10 +1606,19 @@ class TestOneShotGuard(_StopBase):
         self.assertIsNone(out, msg="one-shot guard must allow turn-after-block")
 
     def test_grace_window_extends_three_turns(self) -> None:
-        self._stop("已解决", turn_count=5)
-        # Turn 8 = last_blocked + 3. Still within grace.
+        # v0.29 — the window still spans [last+1, last+3], but what it
+        # forgives is the LAYER that blocked, not the whole check. Turn 5
+        # blocks at (a) (no evidence); turn 8 is inside the window, so
+        # (a) may not fire again — while a layer that has not yet been
+        # spent still can.
+        rc, out, _ = self._stop("已解决", turn_count=5)
+        self.assertIn("Layer (a)", out["reason"])
         rc, out, _ = self._stop("done", turn_count=8)
-        self.assertIsNone(out, msg="turn 8 (within +3 grace) must allow")
+        if out is not None:
+            self.assertNotIn(
+                "Layer (a)", out["reason"],
+                msg="inside the grace window layer (a) must not block twice",
+            )
 
     def test_after_grace_blocks_again(self) -> None:
         self._stop("已解决", turn_count=5)
@@ -1606,6 +1627,69 @@ class TestOneShotGuard(_StopBase):
         self.assertEqual(
             out["decision"], "block",
             msg="after grace expires, fresh blocks should fire",
+        )
+
+    # ------------------------------------------------------------------ #
+    # v0.29 — grace is per layer, not per sequence.
+    #
+    # The pre-v0.29 guard returned 0 for the whole check after any block,
+    # so a recovery reply that fixed the named layer while still violating
+    # another was never evaluated against the other. Live failure: layer
+    # (a) blocked for missing evidence, the recovery supplied evidence but
+    # no `tldr`, and layer (h) — never named, never spent — was skipped.
+    # ------------------------------------------------------------------ #
+    def test_recovery_fixing_one_layer_still_blocks_a_different_layer(self) -> None:
+        rc, out, _ = self._stop("已解决", turn_count=5)
+        self.assertIn(
+            "Layer (a)", out["reason"], msg="turn 5 must block at (a)",
+        )
+        # Recovery supplies rule-06 evidence + self-quiz + fidelity, so
+        # (a)/(c)/(d) pass — but carries no tldr, which is layer (h).
+        recovery = (
+            "已修复。重触发: $ pytest tests/ -q → 552 passed。\n"
+            "收敛自答: 真解决 yes; 更好方案 no; 哪些没验 windows; 验证合理 yes。\n"
+            "任务忠实: 覆盖全部子项; 标准落地; 无降级。"
+        )
+        rc, out, _ = self._stop(recovery, turn_count=6)
+        self.assertIsNotNone(
+            out, msg="a still-unspent layer must remain enforceable",
+        )
+        self.assertIn(
+            "Layer (h)", out["reason"],
+            msg="layer (h) (missing tldr) must block even during grace",
+        )
+
+    def test_same_layer_never_blocks_twice_in_one_sequence(self) -> None:
+        """Anti-deadlock: the spent layer stays forgiven (bounded escalation)."""
+        seen: list[str] = []
+        for turn in range(5, 20):
+            rc, out, _ = self._stop("已解决", turn_count=turn)
+            if out is None:
+                break
+            layer = out["reason"].split("Layer ", 1)[1].split(" ", 1)[0]
+            self.assertNotIn(
+                layer, seen,
+                msg=f"layer {layer} blocked twice in one recovery sequence",
+            )
+            seen.append(layer)
+        else:
+            self.fail(f"escalation did not terminate; layers spent: {seen}")
+
+    def test_clean_stop_resets_the_forgiven_set(self) -> None:
+        clean = (
+            "已修复。重触发: $ pytest -q → 559 passed。\n"
+            "收敛自答: 真解决 是; 更好方案 已比较; 哪些没验 无; 验证合理 是。\n"
+            "任务忠实: 请求覆盖全部; 标准性落地; 无降级。\n"
+            'tldr: "修好了锁竞争，测试全绿。"'
+        )
+        self._stop("已解决", turn_count=5)   # spends (a)
+        _, allowed, _ = self._stop(clean, turn_count=6)   # clean → resets
+        self.assertIsNone(allowed, msg=f"compliant reply must pass, got {allowed!r}")
+        rc, out, _ = self._stop("已解决", turn_count=7)
+        self.assertIsNotNone(out, msg="a new sequence must block again")
+        self.assertIn(
+            "Layer (a)", out["reason"],
+            msg="after a clean Stop, layer (a) is live again",
         )
 
 

@@ -27,11 +27,19 @@ from pathlib import Path
 # cannot sit at module top — E402 is silenced because the path bootstrap
 # is a precondition of the import, not misplaced code.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import re  # noqa: E402 -- kept after the path bootstrap for import grouping
 import unittest  # noqa: E402 -- kept after the path bootstrap for import grouping
 
 from _helpers import SCRIPTS_DIR, run_hook  # noqa: E402 -- see path-bootstrap note
 
 INJECT = str(SCRIPTS_DIR / "inject_context.py")
+PLUGIN_ROOT = SCRIPTS_DIR.parent.parent
+
+# TestOutputCap calls build_context directly (the cap arithmetic is a pure
+# function; driving it through the subprocess would only let us observe
+# the final size, not which half yielded).
+sys.path.insert(0, str(SCRIPTS_DIR))
+import inject_context as ic  # noqa: E402 -- see path-bootstrap note
 
 
 class TestInjectContextDefault(unittest.TestCase):
@@ -347,6 +355,83 @@ class TestInjectContextUserPromptSubmit(unittest.TestCase):
             50,
             msg="user-prompt reminder is suspiciously short",
         )
+
+
+class TestOutputCap(unittest.TestCase):
+    """v0.29 — the injection must never exceed the hook output cap.
+
+    Claude Code caps hook output (additionalContext included) at 10,000
+    CHARACTERS and replaces anything longer with a file path plus a short
+    preview (https://code.claude.com/docs/en/hooks#json-output). The
+    field failure this guards: 16 project edicts (~5.6k chars) on top of
+    a 13.2k-char contract produced an 18.8k-char SessionStart injection,
+    so §3 — the mandatory reply schema — sat past the preview boundary
+    and went unread for a whole session. Both live injections must fit,
+    and the edict block (the only unbounded part) must be what yields
+    when the budget gets tight.
+    """
+
+    def _ctx(self, event: str) -> str:
+        _, out, _ = run_hook(
+            [INJECT, "--event", event],
+            stdin_payload={"session_id": "t", "hook_event_name": event},
+        )
+        return out["hookSpecificOutput"]["additionalContext"]
+
+    def test_live_injections_fit_under_the_cap(self) -> None:
+        for event in ("SessionStart", "UserPromptSubmit"):
+            with self.subTest(event=event):
+                size = len(self._ctx(event))
+                self.assertLessEqual(
+                    size, ic.OUTPUT_CAP,
+                    msg=f"{event} injection is {size} chars — it will be "
+                        f"persisted to a file and only previewed inline",
+                )
+
+    def test_self_locating_header_leads_the_injection(self) -> None:
+        # Defense in depth: if the cap is ever breached anyway, the
+        # surviving preview must still say where the full text lives.
+        head = self._ctx("SessionStart")[:200]
+        self.assertIn("cc-enslaver root:", head)
+        self.assertIn("prompts/session-start.md", head)
+
+    def test_edicts_yield_before_the_contract(self) -> None:
+        body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
+            encoding="utf-8")
+        edicts = "".join(
+            f"\n  [E{i:02d}] must\n    " + "x" * 600 + "\n"
+            for i in range(1, 201)
+        )
+        out = ic.build_context("session-start.md", body, edicts)
+        self.assertLessEqual(len(out), ic.OUTPUT_CAP)
+        self.assertIn(
+            body.rstrip()[-80:], out,
+            msg="the contract tail must survive; only edicts may be elided",
+        )
+        self.assertIn("elided to stay under", out)
+
+    def test_whole_edicts_only_never_half_of_one(self) -> None:
+        body = "B" * 8000
+        edicts = "".join(
+            f"\n  [E{i:02d}] must\n    " + "x" * 300 + "\n" for i in range(1, 20)
+        )
+        out = ic.build_context("session-start.md", body, edicts)
+        self.assertLessEqual(len(out), ic.OUTPUT_CAP)
+        # Every retained entry must carry its full 300-char payload: a
+        # half-rendered edict still reads as a complete instruction.
+        for marker in re.findall(r"\[E\d+\] must", out):
+            idx = out.index(marker)
+            self.assertIn("x" * 300, out[idx:idx + 700], msg=f"{marker} truncated")
+
+    def test_body_alone_over_cap_keeps_body_drops_edicts(self) -> None:
+        # Negative case: nothing can be salvaged by eliding edicts, so
+        # the contract is emitted whole (degraded, harness-persisted)
+        # rather than silently cut mid-sentence.
+        out = ic.build_context(
+            "session-start.md", "H" * (ic.OUTPUT_CAP + 5000), "\n  [E01] must\n    x\n",
+        )
+        self.assertNotIn("[E01]", out)
+        self.assertIn("H" * 100, out)
 
 
 if __name__ == "__main__":

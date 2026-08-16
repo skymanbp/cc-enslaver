@@ -100,6 +100,7 @@ _STATE_COLLECTION_FIELDS = {
     "edited_files": list,
     "sync_acked_groups": list,
     "last_blocked_groups": list,
+    "blocked_layers": list,
     "edits_per_file": dict,
     "baseline_mtimes": dict,
 }
@@ -471,6 +472,9 @@ def record_stop_block(
         state["last_blocked_turn"] = turn_count
         if layer_id is not None:
             state["last_blocked_layer"] = layer_id
+            spent = state.setdefault("blocked_layers", [])
+            if layer_id not in spent:
+                spent.append(layer_id)
         if blocked_groups is not None:
             state["last_blocked_groups"] = list(blocked_groups)
         save(state)
@@ -481,6 +485,45 @@ def get_last_blocked_layer(session_id: str) -> str | None:
     state = _load_shared(session_id)
     layer = state.get("last_blocked_layer")
     return layer if isinstance(layer, str) else None
+
+
+def get_forgiven_layers(session_id: str) -> set[str]:
+    """Layers already spent (blocked once) in the current recovery sequence.
+
+    v0.29 — grace used to be per SEQUENCE, not per layer: after any block
+    `was_just_blocked` returned True and stop_guard returned 0 before
+    evaluating a single layer, so a reply that fixed the layer it had been
+    told about while still violating a different one sailed through. Field
+    case: layer (a) blocked for missing evidence, the recovery reply
+    supplied the evidence but still carried no `tldr`, and layer (h) —
+    which had never blocked and never been named — was skipped entirely.
+    Every un-named layer was therefore unenforceable in exactly the
+    situation it exists for.
+
+    Forgiveness is now scoped to the layers in this set. A layer already
+    in it stays forgiven, which is the anti-deadlock property that
+    motivated the original guard (no layer can block twice for the same
+    recovery). A layer NOT in it may still block once, and doing so adds
+    it — so escalation is bounded by the number of layers and terminates.
+    `clear_blocked_layers` empties the set on any allowed Stop, starting
+    the next sequence clean.
+    """
+    state = _load_shared(session_id)
+    spent = state.get("blocked_layers")
+    if not isinstance(spent, list):
+        return set()
+    return {layer for layer in spent if isinstance(layer, str)}
+
+
+def clear_blocked_layers(session_id: str) -> None:
+    """Empty the per-sequence forgiven-layer set (called on an allowed Stop)."""
+    with _session_lock(session_id):
+        state = _load_for_mutation(session_id)
+        if state is None:
+            return
+        if state.get("blocked_layers"):
+            state["blocked_layers"] = []
+            save(state)
 
 
 def get_last_blocked_groups(session_id: str) -> list[str]:

@@ -172,7 +172,7 @@ cc-enslaver/
 ├── agents/verifier.md           # Independent citation verifier subagent
 ├── skills/systematic-debug/     # Auto-invoked debug discipline skill
 ├── skills/repo-refresh/         # Auto-invoked whole-repo refresh skill (rule 12 active half; v0.23)
-└── tests/                       # 556 black-box + unit tests (run with python -m unittest discover tests)
+└── tests/                       # 564 black-box + unit tests (run with python -m unittest discover tests)
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a layer-by-layer walkthrough and [`docs/EDICTS.md`](docs/EDICTS.md) for the Imperial Edicts user guide.
@@ -244,7 +244,7 @@ Hook scripts (8 total under [`hooks/scripts/`](hooks/scripts/)):
 - **`manage_edicts.py`** — Imperial Edicts CRUD CLI (v0.12; `--global` flag v0.14; UTF-8 stdout v0.17). Used by the `/cc-enslaver:edict` slash command and directly from the shell.
 - **`lib/`** — the shared library the hooks are built on (7 modules): **`state.py`** (per-session state), **`edicts.py`** (Imperial Edicts loader / matcher / **multilingual renderer** — English default; `zh` or any code via `CC_ENSLAVER_LANG`, with English fallback for unknown codes; v0.17 + v0.21), **`sync_gate.py`** (rule-12 sync-gate config loader / evaluator, v0.23), **`tomlio.py`** (hardened TOML reader — BOM and non-UTF-8 tolerant, v0.25), and the three models added in v0.26 that the detectors now decide with rather than pattern-matching raw text: **`srclex.py`** (tolerant source lexer — comment vs docstring vs data literal, literal masking, bracket-joined logical lines), **`mdctx.py`** (markdown fence / blockquote context, shared by both halves of Stop layer (h)), **`shellcmd.py`** (tokenise → segments → argv → git sub-command / python script operand).
 
-All scripts are covered by **556 tests** in [`tests/`](tests/) (black-box subprocess tests for the hooks + unit tests for `lib/sync_gate.py` and for the three v0.26 models in `tests/test_v026_models.py`, plus the version-drift and doc-drift gates) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13. Session state is safe under parallel hook processes (v0.23, completed v0.24): every mutation holds a cross-process file lock and saves atomically, read accessors share the same lock (the v0.24 fix for Windows `os.replace`-vs-open-reader save loss), pinned by a 12-way concurrency regression test plus a reader-writer collision test. Production payload shapes (no `turn_count`, transcript-only Stop messages) are pinned by a dedicated E2E test class.
+All scripts are covered by **564 tests** in [`tests/`](tests/) (black-box subprocess tests for the hooks + unit tests for `lib/sync_gate.py` and for the three v0.26 models in `tests/test_v026_models.py`, plus the version-drift and doc-drift gates) — run with `python -m unittest discover tests`. CI matrix: ubuntu-latest × windows-latest × Python 3.13. Session state is safe under parallel hook processes (v0.23, completed v0.24): every mutation holds a cross-process file lock and saves atomically, read accessors share the same lock (the v0.24 fix for Windows `os.replace`-vs-open-reader save loss), pinned by a 12-way concurrency regression test plus a reader-writer collision test. Production payload shapes (no `turn_count`, transcript-only Stop messages) are pinned by a dedicated E2E test class.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2 for the full hook output contracts.
 

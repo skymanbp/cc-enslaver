@@ -199,7 +199,7 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 
 ### 五 · 你自己调用的部分
 
-**5 个 slash 命令**、一个子代理、两个自动触发的 skill：
+**6 个 slash 命令**、一个子代理、两个自动触发的 skill：
 
 | 入口 | 作用 |
 |---|---|
@@ -208,6 +208,7 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 | `/cc-enslaver:edict` | 圣旨的 `list / add / remove / reload / path`（`--global` 走个人作用域）。 |
 | `/cc-enslaver:gc` | 列出——加 `--apply` 才删除——超过 N 天未动的会话状态文件。默认 dry-run，且命令文件禁止 agent 替你决定 `--apply`。 |
 | `/cc-enslaver:i18n` | 检查每份翻译是否仍与英文骨架逐文件、逐标题层级对齐。 |
+| `/cc-enslaver:sync-gate` | 本项目 rule-12 连带更新组的 `init / list / check / add / remove / path`。**重点是 `check`**：门的加载器是 failing-open 的，一个被丢弃的组、一个打不中任何文件的 glob，都会让它**静默**停止守护——一道你还信着、其实早已失效的门，比没有门更坏。`check` 把两者都点名并以退出码 1 结束，可直接进 CI。 |
 | **`verifier` 子代理** | 一个被刻意限权的只读检查者（工具只有 Read/Grep/Glob——这是权限事实，不是嘱咐）。每条断言返回 *intact / drift / missing / mismatch / unverifiable*。它当不了修复者，因此没有"偷偷改掉不一致"的动机。 |
 | **`systematic-debug` skill** | 遇到 debug 语境自动接管流程：**先**造一个快速、确定性的复现回路，**再**提假设。"30 秒的间歇性 flaky 回路只比没有回路好一点点；2 秒的确定性回路是 debug 超能力。" |
 | **`repo-refresh` skill** | 遇到全库审查语境自动触发：把代码与散文当作同一个面来扫陈旧 / 过时 / 冗余 / 错误 / 漂移，最后要求你把这次发现的耦合登记成 sync-gate 组。 |
@@ -259,10 +260,11 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 让位的是无界增长的圣旨列表，且按**整条圣旨**边界截断并留指针——因为半条圣旨
 读起来仍是一条完整指令。
 
-[`hooks/scripts/`](hooks/scripts/) 下 8 个脚本建立在 8 个共享
-[`lib/`](hooks/scripts/lib/) 模块上。注册为钩子的只有上表那四个；另外四个
-（`register_read.py`、`manage_edicts.py`、`gc_state.py`、`i18n_check.py`）分别
-服务于 escape hatch、slash 命令与 CI。它们**刻意不搬进单独的 `tools/` 目录**：
+[`hooks/scripts/`](hooks/scripts/) 下 9 个脚本建立在 8 个共享
+[`lib/`](hooks/scripts/lib/) 模块上。注册为钩子的只有上表那四个；另外五个
+（`register_read.py`、`manage_edicts.py`、`manage_sync_gate.py`、`gc_state.py`、
+`i18n_check.py`）分别服务于 escape hatch、slash 命令与 CI。它们**刻意不搬进单独
+的 `tools/` 目录**：
 `gc_state.py` 被 `inject_context.py` 直接 import（auto-GC），`register_read.py`
 的真正逻辑住在 `bash_guard.py` 里——两者都不是独立 CLI，搬走只会用一个更好看的
 目录名换来真实的跨目录 `sys.path` 拼接。完整契约见
@@ -318,6 +320,7 @@ cc-enslaver/
 │       │                        # —— 辅助入口（不是钩子）——
 │       ├── register_read.py     # SHA-256 校验的 read 缓存逃生口
 │       ├── manage_edicts.py     # 圣旨 CRUD 命令行
+│       ├── manage_sync_gate.py  # rule-12 连带更新组：CRUD + check 诊断
 │       ├── gc_state.py          # 会话状态回收：CLI + auto-GC 被调方
 │       ├── i18n_check.py        # 骨架 ↔ 翻译的结构对等检查
 │       └── lib/                 # —— 八个共享模块 ——
@@ -325,15 +328,15 @@ cc-enslaver/
 │           ├── mdctx.py         # 判定：markdown 围栏 / 引用块上下文
 │           ├── shellcmd.py      # 判定：tokenize → 分段 → argv → 子命令
 │           ├── state.py         # 状态：会话状态、跨进程锁、原子落盘
-│           ├── tomlio.py        # 配置：容忍 BOM 与编码异常的 TOML 读取
+│           ├── tomlio.py        # 配置：容错 TOML 读取 + 共享的写入编码器
 │           ├── projroot.py      # 配置：项目根判定，两个加载器共用
 │           ├── edicts.py        # 功能：圣旨加载 / 匹配 / 渲染
-│           └── sync_gate.py     # 功能：rule-12 连带更新组求值
-├── commands/                    # 5 个 slash 命令
+│           └── sync_gate.py     # 功能：rule-12 组的读、写与匹配
+├── commands/                    # 6 个 slash 命令
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 565 个测试（python -m unittest discover tests）
+└── tests/                       # 590 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
     ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
@@ -344,7 +347,7 @@ cc-enslaver/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **565 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **590 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。
@@ -353,33 +356,57 @@ Windows 那条腿不是走形式——本仓库好几个回归天生只在 Windo
 
 ---
 
-## v0.30.0 新增
+## v0.31.0 新增
 
-**对插件自身做一次结构体检** —— 没有新规则，也没有新检测器。三条发现，
-一个主题：**写下来的约束不等于被执行的约束。**
+**同步门禁变得可检查了。** rule 12 的连带更新组自 v0.23 起就能强制执行，却
+只能靠手写 TOML 来**编写**——而且没有任何办法看到 loader 究竟认下了什么。
+这个缺口要命，因为 [`lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py)
+**是故意 failing-open 的**：某个组被丢弃、某个 glob 打不中任何文件，它都不报错，
+只是静默地不再守护，外加一行没人看的 stderr。
 
-- **删死代码，而不是给死代码写说明。** 七处生产符号已不可达：`_split_command`
-  与两个正则是 v0.26 换成解析模型后留下的残骸；`_has_rationale` 及其两个辅助
-  函数已被 `_has_rationale_at` 取代；`_escape_triple_quoted` 标着"仅为外部调用者
-  保留"，而根本不存在能够到它的调用者。一个退役的理由检查器摆在在用的那个旁边
-  不是"保留历史"：下一个读代码的人无法判断守卫实际调用的是哪一个。
-- **三处重复判定各收敛为一处。** markdown 围栏解析存在三份（`stop_guard`、
-  `lib/mdctx`、`i18n_check`），每份都各自抄了一遍同一个 v0.25 CommonMark 修复。
-  项目根判定存在两份，第二份还注着"与 lib/edicts.py 同一套启发式"——一句**点名了
-  不变量却并不持有它**的话。现在各有唯一定义（新增
-  [`lib/projroot.py`](hooks/scripts/lib/projroot.py)）。
-- **Stop 状态表不再说假话。** 层的显示顺序是 (a)…(i)，求值顺序却把 (b) 放在最前，
-  而表格的 Pass/pending 两种判定都取自**显示**序——于是每一次 hedge 拦截都会打印
-  "(a) ✅ Pass"，在 `_has_evidence` 根本没被调用的那一轮断言"已找到收敛证据"。
-  已修复，并配了双向孪生测试。
+**一道你还信着、其实早已失效的门，比没有门更坏**，因为你不会再去看它。所以：
 
-文件树是**重新分类**而不是重新摆放：测试文件把类别写进文件名前缀，
-`hooks/scripts/` 在树里就地标注三种角色，`docs/` 补了索引。四个非钩子脚本
-**刻意没有**搬进 `tools/`——其中两个是被钩子内部调用的，搬走等于拿一个更好看的
-目录名去换一段真实的跨目录 import。
+```
+$ /cc-enslaver:sync-gate check
+  ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
+  !! code-docs.require    'nowhere/*.rst'      → 0 file(s)
 
-`CLAUDE.md` 从 87 KB 缩到 39 KB：它的"当前版本"一节早已长成 changelog 的逐字
-副本，而这份副本每次会话都会被整份读进上下文。测试 564 → 565 个。
+1 problem(s):
+  • group code-docs: require glob 'nowhere/*.rst' matches NO file in the repo.
+```
+
+`check` 会报出 loader 保留的每个组、**被丢弃的组及原因**、以及每个死 glob，
+并以退出码 1 结束，因此可直接进 CI。`init / add / remove / list / path` 补齐
+其余部分，与圣旨 CLI 自 v0.12 起就有的那套完全对齐。
+
+**刻意不自动创建。** 没有任何 hook 往你的项目目录里写文件——这条不变量至今
+每一版都成立；而自动生成的空模板在功能上等同于没有（零个组 = layer (i) 照样
+不触发），代价却是每个人的 `git status` 里多一个没要过的文件。`init` 只在**你**
+开口时才建。
+
+**写入要过两道，不是一道。** 不只是"能不能解析回来"，还要"loader 是不是每个组
+都还认"——一个 `require = []` 的条目是**合法 TOML**，却会被 `sync_gate.load()`
+静默丢弃，所以只做解析校验的话，CLI 会报告成功，而那一组什么也不守。任一组回读
+不到 → 拒写并把原文件按字节还原。
+
+**这个功能自己的首次冒烟测试就抓出一个缺陷，如实写在这里而不是悄悄改掉。**
+CLI 当时用 `config_path()` 选写入目标——那是为**读**造的解析器，会依次试探多个
+根、取第一个已经有文件的。对一个还没有配置的项目运行时，它穿透到了进程 cwd，
+把两个组写进了**本插件自己的**配置里。根因：**"从哪读"和"往哪写"是两个问题**，
+而读解析器的回退链恰恰使它成为第二个问题的错误答案。修在机制层——新增
+`default_project_path()`（确定性）与 `load_file()`（无回退）——并做了同类清扫：
+两处调用点都改、都配了回归测试，连**读**解析器的回退行为也一并钉住，这样以后
+若有人"顺手"把两边都改成确定性，不会静默弄坏钩子那条路径。
+
+另外：[`lib/tomlio.py`](hooks/scripts/lib/tomlio.py) 现在同时拥有 TOML 的**写入**
+原语，圣旨 CLI 与 sync-gate CLI 共用一个编码器，而不是让第二份副本漏掉下一次修复。
+
+测试 565 → 590 个。
+
+> 上一版 v0.30.0 是**对插件自身的结构体检**：删掉七处不可达的死代码、把三处
+> 重复判定（markdown 围栏解析三份、项目根判定两份）各收敛为唯一定义、修掉 Stop
+> 状态表把**未求值**的层报成 "✅ Pass" 的假陈述，并把 `CLAUDE.md` 从 87 KB 缩到
+> 39 KB（它的"当前版本"一节早已长成 changelog 的逐字副本，每次会话整份进上下文）。
 
 历史版本见 [`CHANGELOG.md`](CHANGELOG.md)。
 

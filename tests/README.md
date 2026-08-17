@@ -1,6 +1,6 @@
 # Tests — index
 
-**565 tests, 15 files, zero dependencies.** This file is the index: every
+**590 tests, 16 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -58,6 +58,7 @@ all behave differently when a script is imported instead of executed.
 | [`test_sync_gate.py`](test_sync_gate.py) | 19 | [`lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) — config resolution order, TOML tolerance, any-vs-all mode, `./` glob normalisation, project-relative boundaries. |
 | [`test_gc_state.py`](test_gc_state.py) | 19 | [`gc_state.py`](../hooks/scripts/gc_state.py) — argument validation, dry-run vs apply, threshold semantics, and auto-GC on SessionStart. |
 | [`test_register_read.py`](test_register_read.py) | 5 | [`register_read.py`](../hooks/scripts/register_read.py) — the user-facing stub's own hash verification and exit codes. (The authoritative check lives in `bash_guard`, so it is tested there.) |
+| [`test_manage_sync_gate.py`](test_manage_sync_gate.py) | 25 | [`manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) — the rule-12 config CLI, plus the shared primitives it forced out of hiding (`sync_gate.default_project_path` / `load_file` / `matches_any`, `tomlio.basic_string` / `dumps_check`). Its star test is a **regression**: the CLI's first draft picked its write target with the READ resolver and wrote two groups into this repository's own config. Both directions are pinned — a write lands in the named project, and the read resolver keeps the fallback the hook path depends on. |
 
 ### CI drift gates
 

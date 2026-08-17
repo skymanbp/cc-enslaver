@@ -31,21 +31,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# because the sys.path bootstrap above must run before these lib imports
 from lib import edicts as edicts_lib  # noqa: E402
-# noqa: E402 above because the lib import must follow the sys.path bootstrap
-try:
-    # because this import must also follow the sys.path bootstrap
-    from lib import tomlio  # noqa: E402
-except Exception:
-    # because non-parsing subcommands must still run without tomllib
-    tomlio = None  # type: ignore[assignment]
+# because of the same sys.path bootstrap, this import cannot sit at top
+from lib import tomlio  # noqa: E402
 
-try:
-    # because the write path must validate its own output before committing
-    import tomllib  # noqa: E402
-except Exception:
-    # because without tomllib the CLI still works; validation is skipped
-    tomllib = None  # type: ignore[assignment]
+# v0.31 — the two defensive `try: import` blocks that used to sit here are
+# gone. `lib.tomlio` is always importable (it owns the missing-tomllib
+# fallback internally), and the direct `import tomllib` was a THIRD copy of
+# the same availability sentinel — the exact shape v0.30 spent a release
+# collapsing. Both questions now have one answer each: `tomlio.available()`
+# for "can we parse TOML at all", `tomlio.dumps_check()` for "would this
+# document parse back".
 
 
 class EdictWriteError(RuntimeError):
@@ -119,7 +116,7 @@ def _read_raw_edicts(path: Path) -> list[dict]:
     """
     if not path.is_file():
         return []
-    if tomlio is None:
+    if not tomlio.available():
         sys.stderr.write("Python 3.11+ required (tomllib).\n")
         sys.exit(2)
     data = tomlio.parse_toml_file(
@@ -145,34 +142,12 @@ def _read_raw_edicts(path: Path) -> list[dict]:
 # encoder next to the correct one only invites someone to reach for it.
 
 
-def _toml_basic_string(s: str) -> str:
-    """Encode `s` as a TOML basic string, escaping the control characters.
-
-    v0.25 — the previous encoder escaped only `\\` and `"`, then dropped
-    the result into a single-line basic string. A newline is ILLEGAL
-    there, and a multi-line value is a perfectly legal, natural way to
-    hand-write an edict (`text = \"\"\"…\"\"\"`) — which this script's own
-    header documents as fully supported. Because `_write_edicts` re-emits
-    EVERY edict through this encoder on any add/remove, one pre-existing
-    multi-line edict was enough to make the whole file unparseable: the
-    CLI printed "Added edict …" while leaving a config that tomllib then
-    rejected, silently unenforcing every `must` rule in the project with
-    only a stderr line no user sees.
-    """
-    out = s.replace("\\", "\\\\").replace('"', '\\"')
-    for raw, esc in (
-        ("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t"),
-        ("\b", "\\b"), ("\f", "\\f"),
-    ):
-        out = out.replace(raw, esc)
-    # Any remaining control character must be \uXXXX-escaped. DEL (U+007F)
-    # is one of them: TOML forbids it raw in a basic string, but `>= " "`
-    # is true for it, so the pre-v0.26 guard emitted it literally and the
-    # rewritten file would not parse — taking every edict down with it.
-    return "".join(
-        ch if (ch >= " " and ch != "\x7f") else f"\\u{ord(ch):04X}"
-        for ch in out
-    )
+# v0.31 — the encoder moved to `lib/tomlio.basic_string` so this writer and
+# `manage_sync_gate.py` share one definition. Its two historical defects
+# (a raw newline in a single-line basic string; DEL passing a `>= " "`
+# guard) are documented there. The alias keeps this module's call sites
+# unchanged and keeps the name that its own comments reference.
+_toml_basic_string = tomlio.basic_string
 
 
 def _dump_edict(e: dict) -> str:
@@ -231,16 +206,14 @@ def _write_edicts(path: Path, edicts: list[dict]) -> None:
     body = _HEADER
     for e in edicts:
         body += _dump_edict(e) + "\n"
-    if tomllib is not None:
-        try:
-            tomllib.loads(body)
-        except tomllib.TOMLDecodeError as exc:
-            raise EdictWriteError(
-                f"refusing to write {path}: the result would not parse "
-                f"({exc}). The file on disk is unchanged. This is a "
-                f"serialisation bug — please report the edict content "
-                f"that triggered it."
-            ) from exc
+    err = tomlio.dumps_check(body)
+    if err is not None:
+        raise EdictWriteError(
+            f"refusing to write {path}: the result would not parse "
+            f"({err}). The file on disk is unchanged. This is a "
+            f"serialisation bug — please report the edict content "
+            f"that triggered it."
+        )
     path.write_text(body, encoding="utf-8")
 
 

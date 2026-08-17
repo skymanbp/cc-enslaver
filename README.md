@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.30.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.31.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -214,7 +214,7 @@ Details: [`docs/EDICTS.md`](docs/EDICTS.md)
 
 ### 5 · What you invoke yourself
 
-**5 slash commands**, one subagent, two auto-triggered skills:
+**6 slash commands**, one subagent, two auto-triggered skills:
 
 | Surface | What it does |
 |---|---|
@@ -223,6 +223,7 @@ Details: [`docs/EDICTS.md`](docs/EDICTS.md)
 | `/cc-enslaver:edict` | `list / add / remove / reload / path` for Imperial Edicts (`--global` for personal scope). |
 | `/cc-enslaver:gc` | Lists — or with `--apply`, deletes — session-state files older than N days. Dry-run by default, and the command file forbids the agent from choosing `--apply` for you. |
 | `/cc-enslaver:i18n` | Checks every translation still matches the English skeleton file-for-file and heading-for-heading. |
+| `/cc-enslaver:sync-gate` | `init / list / check / add / remove / path` for this project's rule-12 co-update groups. **`check` is the point**: the gate's loader is failing-open, so a dropped group or a glob that matches no file makes it stop guarding *silently* — an unenforced gate you still trust is worse than none. `check` names both and exits 1, so it works in CI. |
 | **`verifier` subagent** | A deliberately crippled read-only checker (Read/Grep/Glob only — a permission fact, not an instruction). Returns *intact / drift / missing / mismatch / unverifiable* per claim. It cannot become the fixer, so it has no incentive to quietly patch a discrepancy. |
 | **`systematic-debug` skill** | Auto-triggers on bug-fix language and takes over the workflow: build a fast deterministic reproduction loop **first**, then hypothesise. "A 30-second intermittent flaky loop is barely better than no loop; a 2-second deterministic loop is a debugging superpower." |
 | **`repo-refresh` skill** | Auto-triggers on repo-audit language: sweeps code *and* prose together for stale / outdated / redundant / wrong / drifted content, then asks you to convert whatever coupling it found into a sync-gate group. |
@@ -284,16 +285,16 @@ cap: the contract is protected and the (unbounded) edict list is what yields,
 elided at whole-edict boundaries with a pointer — because half an edict still
 reads as a complete instruction.
 
-Eight scripts under [`hooks/scripts/`](hooks/scripts/) sit on eight shared
+Nine scripts under [`hooks/scripts/`](hooks/scripts/) sit on eight shared
 [`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
-registered as hooks; the other four (`register_read.py`, `manage_edicts.py`,
-`gc_state.py`, `i18n_check.py`) back the escape hatch, the slash commands and
-CI. They deliberately stay in the same directory rather than moving to a
-`tools/` tree: `gc_state.py` is imported by `inject_context.py` for auto-GC and
-`register_read.py`'s real logic lives inside `bash_guard.py`, so neither is a
-standalone CLI, and separating them would buy a tidier directory name with a
-cross-tree `sys.path` splice. Full contracts:
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
+registered as hooks; the other five (`register_read.py`, `manage_edicts.py`,
+`manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`) back the escape hatch,
+the slash commands and CI. They deliberately stay in the same directory rather
+than moving to a `tools/` tree: `gc_state.py` is imported by
+`inject_context.py` for auto-GC and `register_read.py`'s real logic lives
+inside `bash_guard.py`, so neither is a standalone CLI, and separating them
+would buy a tidier directory name with a cross-tree `sys.path` splice. Full
+contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
 
 ---
 
@@ -350,6 +351,7 @@ cc-enslaver/
 │       │                        # -- auxiliary entry points (not hooks) --
 │       ├── register_read.py     # SHA-256-verified read-cache escape hatch
 │       ├── manage_edicts.py     # Imperial Edicts CRUD CLI
+│       ├── manage_sync_gate.py  # rule-12 co-update groups: CRUD + `check` diagnostics
 │       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
 │       └── lib/                 # -- eight shared modules --
@@ -357,15 +359,15 @@ cc-enslaver/
 │           ├── mdctx.py         # judgement: markdown fence / blockquote context
 │           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
 │           ├── state.py         # state: per-session, cross-process lock, atomic save
-│           ├── tomlio.py        # config: BOM- and encoding-tolerant TOML reader
+│           ├── tomlio.py        # config: tolerant TOML reader + the shared writer
 │           ├── projroot.py      # config: project-root detection, shared by both loaders
 │           ├── edicts.py        # feature: Imperial Edicts loader / matcher / renderer
-│           └── sync_gate.py     # feature: rule-12 co-update group evaluator
-├── commands/                    # 5 slash commands
+│           └── sync_gate.py     # feature: rule-12 groups — read, write and match
+├── commands/                    # 6 slash commands
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 565 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 590 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -376,7 +378,7 @@ cc-enslaver/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **565 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **590 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -387,40 +389,60 @@ defeating end-of-line anchors, unquoted drive paths).
 
 ---
 
-## New in v0.30.0
+## New in v0.31.0
 
-**A structural audit of the plugin itself** — no new rule, no new detector.
-Three findings, one theme: *a thing that is written down is not a thing that is
-enforced.*
+**The sync gate became inspectable.** Rule 12's co-update groups have been
+enforceable since v0.23 and *authorable* only by hand-writing TOML — with no way
+to see what the loader made of it. That gap mattered because
+[`lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py) is failing-open by design:
+a dropped group, or a glob that matches no file, does not raise. It just stops
+guarding, and prints one stderr line nobody reads.
 
-- **Dead code deleted, not documented.** Seven production symbols were
-  unreachable — `_split_command` and two regexes left behind when v0.26 replaced
-  the text heuristic with a parse model; `_has_rationale` and its two helpers,
-  superseded by `_has_rationale_at`; a `_escape_triple_quoted` marked "kept only
-  so an external caller does not break" that no caller could reach. A retired
-  rationale checker sitting beside the live one is not tidy history: the next
-  reader cannot tell which of the two the guard consults.
-- **Three duplicated judgements collapsed into one each.** Markdown fence
-  parsing existed three times (`stop_guard`, `lib/mdctx`, `i18n_check`), each
-  carrying its own copy of the same v0.25 CommonMark fix. The project-root
-  predicate existed twice, the second copy annotated *"same heuristic as
-  lib/edicts.py"* — a sentence that names an invariant without holding it. Both
-  now have one definition ([`lib/projroot.py`](hooks/scripts/lib/projroot.py) is new).
-- **The Stop status table stopped lying.** Layers are displayed (a)…(i) but
-  evaluated with (b) first, and the table derived both Pass and pending from the
-  *display* index — so every hedge block printed "(a) ✅ Pass", asserting
-  convergence evidence had been found on a turn where `_has_evidence` was never
-  called. Fixed, with a twin test in both directions.
+**An unenforced gate you still trust is worse than no gate**, because you have
+stopped looking. So:
 
-The tree was reclassified rather than rearranged: test files now carry their
-category as a filename prefix, `hooks/scripts/` labels its three roles inline,
-and `docs/` gained an index. The four non-hook scripts deliberately did *not*
-move to a `tools/` directory — two of them are called from inside hooks, so the
-move would trade a tidier directory name for a real cross-tree import splice.
+```
+$ /cc-enslaver:sync-gate check
+  ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
+  !! code-docs.require    'nowhere/*.rst'      → 0 file(s)
 
-`CLAUDE.md` shrank 87 KB → 39 KB: its "current version" section had grown into a
-verbatim second copy of the changelog, re-read into context on every single
-session. The suite grows 564 → 565 tests.
+1 problem(s):
+  • group code-docs: require glob 'nowhere/*.rst' matches NO file in the repo.
+```
+
+`check` reports every group the loader kept, every group it **dropped and why**,
+and every dead glob — exiting 1, so it runs in CI. `init / add / remove / list /
+path` round it out, mirroring the Imperial-Edict CLI that has had exactly this
+treatment since v0.12.
+
+**Deliberately not auto-created.** No hook writes into your project directory —
+that invariant has held for every release, and an auto-created empty template
+would be functionally identical to no file (zero groups means layer (i) stays
+inert), bought at the price of an unrequested file in everyone's `git status`.
+`init` creates it when *you* ask.
+
+**Writes are verified twice.** Not just "does this parse" but "does the loader
+still see every group" — a `require = []` entry is valid TOML that
+`sync_gate.load()` silently discards, so a parse-only check would let the CLI
+report success over a group that guards nothing. On failure the previous file is
+restored byte-for-byte.
+
+**A defect found in this feature's own first smoke test, reported here rather
+than quietly fixed.** The CLI picked its write target with `config_path()` — the
+resolver built for *reading*, which tries several roots and takes the first that
+already holds a file. Run against a project with no config yet, it fell through
+to the process cwd and wrote two groups into *this plugin's own* config. Root
+cause: **"where do I read from" and "where do I write to" are different
+questions**, and a read-resolver's fallback chain is precisely what makes it the
+wrong answer to the second. Fixed at the mechanism — `default_project_path()`
+(deterministic) and `load_file()` (no fallback) — with the class swept: both
+call sites, both pinned by regression tests, and the read resolver's fallback
+explicitly pinned too, so "fixing" it later by making everything deterministic
+cannot silently break the hook path.
+
+Also: `lib/tomlio.py` now owns the TOML *writer* as well as the reader, so the
+edict CLI and the sync-gate CLI share one encoder instead of the second copy
+missing the next fix. Suite 565 → 590 tests.
 
 Earlier releases: [`CHANGELOG.md`](CHANGELOG.md).
 

@@ -150,6 +150,42 @@ def config_path(cwd: str | None = None) -> Path | None:
     return None
 
 
+def default_project_path(cwd: str | None = None) -> Path | None:
+    """Where a NEW config belongs — deterministic, never a search.
+
+    v0.31, and this function exists because its absence was a real bug.
+    `config_path()` above is a READ resolver: it tries several roots and
+    takes the first that already holds a file, which is exactly right for
+    a hook that must find whatever config governs the session even when
+    `CLAUDE_PROJECT_DIR` is missing.
+
+    Using that same resolver to pick a WRITE target is a different
+    question answered with the wrong tool. When the intended project has
+    no config yet, every one of its candidates fails `.is_file()` and the
+    search falls through to the *process cwd* — so a CLI run with
+    `CLAUDE_PROJECT_DIR` pointed at project A, from a shell sitting in
+    project B, appends A's group to **B's** config. Observed live during
+    development: the sync-gate CLI wrote two groups into this repo's own
+    config while under test against a scratch repo.
+
+    So: resolve the ROOT first (explicit cwd → `CLAUDE_PROJECT_DIR` → the
+    process cwd, but only if it carries a project marker), then derive the
+    path from it. Whether a file is already there is irrelevant to where a
+    new one goes. `lib/edicts.py` has modelled this split since v0.18.1
+    (`edicts_path` vs `default_project_path`); this is the missing twin.
+
+    Returns None when no root can be resolved — the caller must surface
+    that rather than guess.
+    """
+    for candidate in (cwd, os.environ.get("CLAUDE_PROJECT_DIR")):
+        if candidate:
+            return Path(candidate) / ".claude" / _PLUGIN_NAME / _CONFIG_FILENAME
+    root = projroot.cwd_if_project_root()
+    if root is None:
+        return None
+    return root / ".claude" / _PLUGIN_NAME / _CONFIG_FILENAME
+
+
 def _coerce_glob_list(raw: dict, field_name: str, gname: str) -> tuple[str, ...]:
     v = raw.get(field_name, [])
     if v is None:
@@ -177,7 +213,7 @@ def _coerce_glob_list(raw: dict, field_name: str, gname: str) -> tuple[str, ...]
 
 
 def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
-    """Load the project's sync-gate config.
+    """Resolve the project's sync-gate config and load it.
 
     Returns (config_path, groups), or None when the project has no
     config (the normal case — the gate is per-project opt-in). Any
@@ -187,6 +223,28 @@ def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
         return None
     p = config_path(cwd)
     if p is None:
+        return None
+    groups = load_file(p)
+    if groups is None:
+        return None
+    return (p, groups)
+
+
+def load_file(p: Path) -> list[Group] | None:
+    """Parse EXACTLY this file — no resolution, no fallback to another root.
+
+    Split out of `load()` in v0.31 as the second half of the same fix as
+    `default_project_path`. A caller that already knows which file it means
+    — because it just wrote it, or was handed the path — must not go back
+    through the searching resolver: `load(str(path.parents[2]))` re-enters
+    `config_path`, whose fallback chain can answer with a DIFFERENT file
+    when the requested one is absent. Verifying a freshly written config
+    that way could report on somebody else's.
+
+    None means "unusable" (missing / unparseable); `[]` means "parsed, no
+    usable groups" — the distinction `load()` already depended on.
+    """
+    if tomllib is None:
         return None
     # Shared reader: strips a UTF-8 BOM and turns a non-UTF-8 file into a
     # diagnostic instead of an uncaught UnicodeDecodeError. Without it a
@@ -199,7 +257,7 @@ def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
     raw_list = data.get("groups", [])
     if not isinstance(raw_list, list):
         _warn(f"{p}: top-level 'groups' must be an array of tables")
-        return (p, [])
+        return []
 
     groups: list[Group] = []
     seen_names: set[str] = set()
@@ -236,7 +294,33 @@ def load(cwd: str | None = None) -> tuple[Path, list[Group]] | None:
         groups.append(Group(
             name=name, when=when, require=require, note=note.strip(), mode=mode,
         ))
-    return (p, groups)
+    return groups
+
+
+def matches_any(rel_path: str, patterns: tuple[str, ...]) -> bool:
+    """True when `rel_path` matches at least one glob in `patterns`.
+
+    The single definition of "does this edited file belong to this glob".
+    Public because `manage_sync_gate.py --check` reports which globs match
+    nothing, and a diagnostic that answers that question differently from
+    the gate is worse than no diagnostic: it would certify a config the
+    gate then ignores. (v0.31)
+
+    fnmatch semantics, deliberately: `*` crosses path separators (so
+    `rules/*.md` also covers `rules/zh/`), and both sides are normcased, so
+    matching is case-insensitive on Windows and tolerant of forward-slash
+    patterns against backslash paths.
+    """
+    return any(fnmatch(rel_path, pat) for pat in patterns)
+
+
+def project_root(config: Path) -> Path:
+    """Repo root implied by a config at `.claude/cc-enslaver/sync-gate.toml`.
+
+    Three levels up. Extracted so `evaluate()` and the CLI derive it the
+    same way rather than each counting `.parents[2]` for themselves.
+    """
+    return config.parents[2]
 
 
 def _project_relative(abs_path: str, root: str) -> str | None:
@@ -272,8 +356,7 @@ def evaluate(edited_abs_paths: list[str], cwd: str | None = None) -> list[Violat
     config, groups = loaded
     if not groups or not edited_abs_paths:
         return []
-    # Project root = three levels up from .claude/cc-enslaver/sync-gate.toml.
-    root = str(config.parents[2])
+    root = str(project_root(config))
     rel_edited = [
         rel for rel in (_project_relative(p, root) for p in edited_abs_paths)
         if rel is not None
@@ -282,9 +365,7 @@ def evaluate(edited_abs_paths: list[str], cwd: str | None = None) -> list[Violat
         return []
     violations: list[Violation] = []
     for g in groups:
-        when_hits = tuple(
-            f for f in rel_edited if any(fnmatch(f, pat) for pat in g.when)
-        )
+        when_hits = tuple(f for f in rel_edited if matches_any(f, g.when))
         if not when_hits:
             continue
         if g.mode == "all":
@@ -294,9 +375,7 @@ def evaluate(edited_abs_paths: list[str], cwd: str | None = None) -> list[Violat
                 any(fnmatch(f, pat) for f in rel_edited) for pat in g.require
             )
         else:
-            require_hit = any(
-                fnmatch(f, pat) for f in rel_edited for pat in g.require
-            )
+            require_hit = any(matches_any(f, g.require) for f in rel_edited)
         if not require_hit:
             violations.append(Violation(group=g, when_hits=when_hits))
     return violations

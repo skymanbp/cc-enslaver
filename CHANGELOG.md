@@ -17,6 +17,176 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.31.0] — 2026-08-17
+
+**The sync gate became inspectable.** Rule 12's co-update groups have been
+*enforceable* since v0.23 and *authorable* only by hand-writing TOML — with
+nothing that could tell you what the loader made of it.
+
+### Why that gap was the dangerous kind
+
+`lib/sync_gate.py` is failing-open by design, and correctly so: a config bug
+must never brick a session. But look at what "failing open" means for each way
+a config can be wrong:
+
+| What you wrote | What happens | What you see |
+|---|---|---|
+| `require = []` | group silently DROPPED by the loader | one stderr line |
+| `when = ["src/*.pyy"]` | group loads, matches nothing, never fires | nothing |
+| non-UTF-8 save | whole file ignored, every group inert | one stderr line |
+
+In all three the gate looks exactly like a healthy one from the outside.
+**An unenforced gate you still trust is worse than no gate at all**, because
+you have stopped looking at that part of the repo.
+
+Compare Imperial Edicts, which got an authoring CLI in v0.12: validated writes,
+and a `list` that shows what the loader *actually parsed*. Sync-gate had
+neither, while `skills/repo-refresh/SKILL.md` has been instructing agents since
+v0.23 to "register the couplings you found into sync-gate.toml" — with no tool
+to do it and no way to check the result.
+
+### `/cc-enslaver:sync-gate`
+
+New [`hooks/scripts/manage_sync_gate.py`](hooks/scripts/manage_sync_gate.py) +
+[`commands/sync-gate.md`](commands/sync-gate.md):
+`init / list / check / add / remove / path`.
+
+`check` is the point of the whole feature:
+
+```
+$ /cc-enslaver:sync-gate check
+config: .../.claude/cc-enslaver/sync-gate.toml
+3 group(s) loaded:
+  hooks-tests
+    when    = ['hooks/scripts/*.py']
+    require = ['tests/*.py']
+
+scanned 114 file(s) under D:\Projects\anti-laziness
+
+  ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
+  ok hooks-tests.require  'tests/*.py'         → 16 file(s)
+
+OK — every group loaded and every glob matches something.
+```
+
+It reports the groups the loader kept, the groups it **declared-but-dropped**
+(with why), and every glob matching no file in the repo — exiting 1, so it is
+usable as a CI step rather than only as a human courtesy.
+
+### Deliberately NOT auto-created
+
+The question that prompted this release was "should `sync-gate.toml` be created
+automatically?". It should not, for three reasons worth recording so it is not
+re-litigated as an oversight:
+
+1. **No hook writes into the user's project directory.** That invariant has held
+   for every release; the only writer of user-repo files is `manage_edicts.py`,
+   which the user invokes. A plugin that tells agents not to produce unrequested
+   side effects does not get to drop a file into your git repo.
+2. **An empty template is functionally identical to no file.** Zero groups means
+   layer (i) still never fires, so auto-creation buys discoverability only — at
+   the cost of an unrequested file in every user's `git status`, and a
+   delete-and-it-returns loop unless yet more state is added to suppress it.
+3. **Auto-*inferred* groups would be worse.** The gate's value is that a *human*
+   asserted "these must move together". A heuristic guess is manufactured
+   confidence — exactly what rule 01 forbids.
+
+`init` creates the file when *you* ask. That is the "auto" part, triggered by
+the person who knows the invariant.
+
+### Writes are verified twice, not once
+
+`manage_edicts._write_edicts` checks that its output PARSES. Necessary, not
+sufficient here: a group with an empty `when` or `require` is **valid TOML that
+`sync_gate.load()` silently discards**. A parse-only check would let the CLI
+print "added" over a group that guards nothing — the precise failure this tool
+exists to make impossible.
+
+So `_write_groups` round-trips the result through the real loader
+(`sync_gate.load_file`) and requires every group to come back. On failure the
+previous file is restored byte-for-byte; a file the CLI itself created is
+removed rather than left as debris.
+
+### A defect found in this feature's own first smoke test
+
+Reported rather than quietly fixed, because it is instructive and because this
+repo's rules require it.
+
+The first draft resolved its write target with `sync_gate.config_path()`. That
+function is a **read** resolver: it tries payload cwd → `CLAUDE_PROJECT_DIR` →
+process cwd, testing each with `.is_file()`, and takes the first that already
+holds a config. Correct for a hook, which must find whatever config governs the
+session even when the env var is missing.
+
+Run against a project that has **no config yet**, every candidate fails
+`.is_file()` and resolution falls through to the process cwd. Under test with
+`CLAUDE_PROJECT_DIR` pointed at a scratch repo, from a shell sitting in this
+one, the CLI appended two groups to **cc-enslaver's own `sync-gate.toml`**.
+
+**Upstream ladder.** Symptom: wrong file written. Propagation: `_write_target`
+trusted a resolver whose contract is "find an existing config". Origin: *"where
+do I read from" and "where do I write to" are different questions*, and a read
+resolver's fallback chain is precisely what makes it the wrong answer to the
+second. `lib/edicts.py` has modelled this split since v0.18.1
+(`edicts_path` vs `default_project_path`); the new module simply failed to
+mirror it.
+
+**Unified fix, class swept.** The diagnosed root cause has two instances, both
+closed in one change:
+
+- `sync_gate.default_project_path()` — deterministic: resolve the ROOT, then
+  derive the path. Never asks whether a file is already there.
+- `sync_gate.load_file(path)` — parses exactly one file. `_load_groups` used
+  `load(str(path.parents[2]))`, which re-enters the searching resolver, so
+  verifying a config we had just written could have reported on a different one.
+
+Both directions are pinned by `tests/test_manage_sync_gate.py`, including the
+counterpart contract — `config_path` **keeps** its fallback — so that "fixing"
+this later by making everything deterministic cannot silently break the hook
+path that depends on it.
+
+### Shared primitives (rather than a second copy)
+
+- **`lib/tomlio.py` now owns the TOML writer as well as the reader**:
+  `basic_string` (moved from `manage_edicts`, whose two historical defects — a
+  raw newline in a single-line basic string, and DEL passing a `>= " "` guard —
+  are documented at the new home), `dumps_check`, and `available()`.
+  `manage_edicts.py` lost its two defensive `try: import` blocks in the process;
+  the direct `import tomllib` was a **third** copy of the same availability
+  sentinel, which is the shape v0.30 spent a release collapsing.
+- **`sync_gate.matches_any`** — one definition of "does this path belong to this
+  glob", shared by `evaluate()` and the CLI's diagnostics. A `check` that
+  answered that question differently from the gate would certify a config the
+  gate then ignores.
+- **`sync_gate.project_root`** — both call sites stop counting `.parents[2]`
+  for themselves.
+
+### Documentation
+
+Both READMEs (command tables, structure trees, the "New in" section), `CLAUDE.md`
+(tree, §6 table, capability list), `docs/ARCHITECTURE.md` §3 (six commands now)
+and §8 (rows for `manage_sync_gate.py` and the `tomlio` writer half), and
+`tests/README.md`.
+
+**Not touched, deliberately:** `rules/12-repo-wide-sync.md` and its `zh` mirror.
+The rule defines the *discipline*; the CLI is tooling for the config the rule
+already describes. Editing it would fan out to `prompts/` + `docs/RULES.md` +
+`commands/checklist.md` for no gain in what the rule says.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **590 tests, OK** (565 → 590 tests).
+- `python hooks/scripts/i18n_check.py` → all translations in sync.
+- Live probes on a two-repo fixture: the write lands in the named project with
+  the other repo byte-identical; `check` exits 1 on a dead glob and 0 when
+  clean; a `require = []` add is refused with the file unchanged.
+- The plugin blocked its own author four times while this was written — twice
+  for a `# noqa` whose rationale had drifted outside the ±1-line window, twice
+  for rolling small edits into one README instead of one systematic pass. Both
+  were correct catches and are recorded rather than worked around.
+
+---
+
 ## [0.30.0] — 2026-08-16
 
 **A structural audit of the plugin itself.** No new rule, no new detector, no

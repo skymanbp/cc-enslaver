@@ -67,9 +67,25 @@ description: 全库更新扫描器。在用户要求"全库更新"、"扫一遍�
 ### Step 6 · 收尾报告
 
 最终回复必须包含：扫描范围 + 五类各查了什么 + findings 表（含"查过但干净"的类别）+
-修复清单（`file:line`）+ 未处置项及原因（rule 07 半成品声明）+ 一条建议：
-把本次发现的可复发连带关系登记进 `.claude/cc-enslaver/sync-gate.toml`
-（rule 12 被动半区），让下次漂移在 Stop layer (i) 被物理拦下。
+修复清单（`file:line`）+ 未处置项及原因（rule 07 半成品声明）+ 把本次发现的**可复发
+连带关系登记进 sync-gate**（rule 12 被动半区），让下次漂移在 Stop layer (i) 被物理拦下。
+
+**登记用 CLI，不要手搓 TOML（v0.31 起）：**
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_sync_gate.py" \
+    add <组名> --when '<glob>' --require '<glob>' --note '<为什么必须一起动>'
+python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_sync_gate.py" check
+```
+
+`add` 落盘前过两道校验（能解析回来 + loader 仍认每个组——`require = []` 是合法 TOML
+却会被静默丢弃）。**`check` 是这一步的收敛验证，不是可选项**：加载器是 failing-open
+的，打错一个 glob 不会报错，只会让那一组永远不触发——一道你以为在守、其实早已失效
+的门，比没有门更坏。`check` 会报出被丢弃的组与打不中任何文件的 glob 并以退出码 1
+结束。完整用法见 [`commands/sync-gate.md`](commands/sync-gate.md)。
+
+**禁止替用户凭猜测 `add`**：sync-gate 的价值在于**人**断言了"这几个必须一起动"；
+启发式猜出来的组是伪造的确信（rule 01）。发现耦合 → 报告并建议，由用户拍板。
 
 ## 禁止行为
 

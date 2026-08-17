@@ -14,6 +14,70 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.32.2] — 2026-08-17
+
+**Answering "are all the docs updated, including the README?" by checking
+instead of asserting — and finding two that were not.** No code change.
+
+### How they were found
+
+The previous four releases touched sixteen markdown files. The audit that
+matters is the complement: `git diff --name-only v0.29.0..HEAD -- '*.md'`
+against `git ls-files '*.md'`, then reading the **untouched** thirty-three for
+claims that v0.30–v0.32.1 invalidated. Both defects were in that set. Neither
+was reachable from "did I update the README" — the README was fine.
+
+### 1 · A cross-document claim that was true in only one direction
+
+`commands/sync-gate.md` (added v0.31.0) tells the reader:
+
+> [`repo-refresh`] should call this command's `add`, and close with `check`.
+
+`skills/repo-refresh/SKILL.md` Step 6 still said *"register the couplings you
+found into `.claude/cc-enslaver/sync-gate.toml`"* — hand-edit the TOML, no
+mention of the CLI that had existed for two releases, and none of `check`.
+
+**Document A asserted that document B does X; document B did not know.** I
+introduced that drift in v0.31.0 by documenting the new coupling on one side
+only. Step 6 now carries the `add` + `check` invocation, states that `check` is
+the step's convergence check rather than an optional extra (the loader is
+failing-open: a mistyped glob never fires and never complains), and repeats the
+rule that groups are **asserted by a human**, never guessed by the agent.
+
+`docs/ARCHITECTURE.md` §8 gains the coupling as a row, with the lesson: a
+cross-document claim *is* a coupling, and it has to be verified from **both**
+ends.
+
+### 2 · The rule → component map omitted rule 12's newest components
+
+`docs/RULES.md`'s component table listed `lib/sync_gate.py` for rule 12 and
+nothing else, so the CLI and slash command that manage its config were absent
+from the one table whose whole job is mapping a rule to the things that enforce
+it. Added, along with `sync_gate`'s v0.31 write-target and glob-matching roles.
+
+### Why no new gate for this
+
+`test_doc_sync` derives every pinned fact **from the code**. This table maps a
+*judgement* — "does this component enforce this rule" — which no derivation can
+produce; a gate over it would compare one hand-maintained list against another,
+which is precisely the doc-to-doc comparison that file's design notes forbid
+("two docs can drift together, and in this repo they demonstrably did"). Stated
+as a known uncovered surface rather than papered over with a gate that would
+only look like coverage.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **601 tests, OK** (unchanged).
+- `python hooks/scripts/i18n_check.py` → in sync.
+- `python hooks/scripts/manage_sync_gate.py check` → exit 0.
+- Second sweep over the still-untouched files (`agents/`, the four other
+  `commands/`, `docs/I18N.md`, both `00-index.md`, `systematic-debug`) for
+  version strings, test counts and sync-gate claims: clean. The rule-12
+  one-line summaries in `00-index.md` describe the gate, not the marker
+  semantics, so v0.32's tightening does not reach them.
+
+---
+
 ## [0.32.1] — 2026-08-17
 
 **Closing the project out: the roadmap is retired and the rule text catches up

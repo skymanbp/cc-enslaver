@@ -17,6 +17,171 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.30.0] — 2026-08-16
+
+**A structural audit of the plugin itself.** No new rule, no new detector, no
+change to what is enforced — except one place where the enforcement was
+describing itself inaccurately. Three findings on one theme: **a thing that is
+written down is not a thing that is enforced.**
+
+Every previous audit round (v0.24 → v0.27) looked for *defects in behaviour*.
+This one looked at *structure*: what is reachable, what is duplicated, what is
+classified where, and whether the documentation that claims to enumerate the
+codebase actually does. It found that the repo had accumulated exactly the
+shapes its own rule 09 forbids — dead siblings kept "just in case", the same
+judgement transcribed into three files, and a status table asserting something
+it had not checked.
+
+### Dead code deleted, not annotated
+
+Seven production symbols were unreachable from anywhere in the tree (verified
+with an AST reachability scan over `hooks/` and `tests/`, not by grepping):
+
+| Removed | Where | Why it was still there |
+|---|---|---|
+| `_split_command` | `bash_guard.py` | v0.26 reduced its body to a one-line delegation to `shellcmd.tokenize`; nothing called it after that. Its docstring narrated the v0.25 / v0.25.1 tokenising bugs, which is what made it *look* load-bearing. |
+| `_CMD_SEPARATOR`, `_SHORT_FLAG_CLUSTER` | `bash_guard.py` | The v0.25 text heuristic's separator list and short-option matcher, orphaned when the parse model replaced it. `import re` and `import shlex` went with them. |
+| `_has_rationale`, `_comment_text`, `_cjk_count` | `read_guard.py` | `_has_rationale` was superseded by `_has_rationale_at` in v0.26 (which judges the window against the *whole* text's lexical state — a three-line window inside a docstring carries no delimiter of its own). Every call site moved; the function did not. |
+| `_escape_triple_quoted` | `manage_edicts.py` | Marked *"Deprecated… kept only so an external caller does not break."* There is no external caller and there cannot be one: it is a module-private helper in a script this repo never installs as an importable package. |
+
+Plus a function-local `import os` in `stop_guard._verify_claims` shadowing the
+module-level one with an identical binding, and three unused test-module
+symbols (`TILDE`, `MARKETPLACE_MANIFEST`, an `import json`).
+
+This is not housekeeping. A *retired rationale checker standing beside the live
+one* is an active hazard: the two answer the same question differently, and the
+next reader has no way to tell which one the guard consults. Rule 09's
+"deprecated but kept" is the same excuse as "suppressed but justified".
+
+### Three duplicated judgements, one definition each
+
+- **Markdown fence geometry existed three times** — `stop_guard._fence_marker`,
+  `mdctx.fence_marker`, `i18n_check._fence_run` — each carrying its own
+  transcription of the same v0.25 CommonMark fix (*a closing fence must be at
+  least as long as its opener*), and `i18n_check`'s copy annotated "Mirrors
+  stop_guard._fence_marker — both files track markdown fences and must agree."
+  Writing that down did not make it so: the fix had to be applied to each copy
+  separately. `mdctx.fence_marker` is now the one definition and the other two
+  call it. Zero behaviour change — the helper is byte-equivalent; what changed
+  is that the next correction lands in one place.
+- **The project-root predicate existed twice** — `lib/edicts.py` and
+  `lib/sync_gate.py` — the second annotated *"Same project-root heuristic as
+  lib/edicts.py"*. A comment that names an invariant without holding it: widen
+  one copy (to recognise `.hg`, a `pyproject.toml` marker) and the other is
+  silently left behind. **New: [`lib/projroot.py`](hooks/scripts/lib/projroot.py)**,
+  the same answer `lib/tomlio.py` gave one layer down. This one is
+  security-shaped rather than cosmetic — the predicate decides whether a
+  session started in `~/Downloads` may load a stranger's `must` edicts.
+
+Deliberately **not** unified: `_compute_sha256` (six stdlib lines, duplicated
+in `bash_guard` and `register_read`) and `_emit_raw_deny`. The first sits under
+this repo's own bar — CLAUDE.md §2.6, *"three lines of duplication beat a
+premature abstraction"* — and the second is duplicated on purpose so the two
+guards' failure modes stay independent. Unifying everything that looks alike is
+the mirror image of the defect above, not its cure.
+
+### The Stop status table stopped making an unfounded claim
+
+Layers are **displayed** (a)…(i) because that is how every doc, recovery blurb
+and test names them. They are **evaluated** with (b) first: a hedge invalidates
+a done-claim however much evidence sits beside it, so grading the evidence
+first would be wasted work.
+
+`_render_status_table` derived both verdicts from the **display** index. So
+every layer-(b) block printed:
+
+```
+| (a)   | 06   | ✅ Pass     |                                   |
+| (b)   | 01   | ❌ **FAIL** | hedge near done-claim             |
+```
+
+— a positive assertion that convergence evidence had been found, printed on a
+turn where `_has_evidence` was never called. A gate whose entire purpose is
+catching claims made without checking does not get to make one in its own
+output. Verdicts now come from a `_EVAL_ORDER` tuple; the display order is
+untouched.
+
+Two tests changed, and the direction matters. `test_layer_a_failure_table_shape`
+asserted that (b) must **not** show ✅ on a layer-(a) block, under the comment
+"they were never evaluated" — false for (b), which runs first and had genuinely
+passed. It now pins the accurate contract, and a new twin,
+`test_layer_b_failure_does_not_claim_a_passed`, pins the other direction. No
+enforcement decision changes; only what the table reports about itself.
+
+### File tree: reclassified, not rearranged
+
+- **Tests are indexed.** [`tests/README.md`](tests/README.md) was three years of
+  stale — it described "the three hook scripts" (there are eight) and listed
+  four of sixteen files. It is now the complete, per-file index: what each file
+  covers, its test count, and the two house rules (every "allowed" assertion
+  needs a DENY twin; fixtures are assembled at runtime because the plugin scans
+  its own test files). Three release-stamped filenames became category-stamped:
+  `test_v026_models.py` → `test_audit_v026_models.py`, `test_v026_audit2.py` →
+  `test_audit_v026_round2.py`, `test_v027_contracts.py` →
+  `test_audit_v027_contracts.py`.
+- **`hooks/scripts/` labels its three roles inline** — four hook entry points,
+  four auxiliary entry points, eight shared `lib/` modules (themselves grouped:
+  judgement models / state + config / features).
+- **New [`docs/README.md`](docs/README.md)** — an index of the four documents
+  and where everything else lives.
+- **The four non-hook scripts deliberately did NOT move to a `tools/`
+  directory.** The tidy-looking split is wrong here: `gc_state.py` is imported
+  by `inject_context.py` for auto-GC, and `register_read.py`'s authoritative
+  logic lives inside `bash_guard.py`. Neither is a standalone CLI, and moving
+  them would replace a same-directory `from lib import …` with a cross-tree
+  `sys.path` splice — trading a real fragility for a directory name. Recorded
+  here so the question does not get re-opened as an oversight.
+
+### `CLAUDE.md`: 87 KB → 39 KB
+
+Its "current version" section had grown into a **verbatim second copy of this
+changelog** — 545 lines, ~62 KB. `CLAUDE.md` is loaded in full at the start of
+every Claude Code session in this repo, so the real cost was roughly 18k tokens
+of context per session, spent on text that already exists here. Worse, it was a
+second source of truth: two narratives free to drift, which is precisely how
+v0.22.1 shipped a stale `marketplace.json` and v0.26 shipped five stale test
+counts.
+
+§6 is now a one-line-per-release table plus the standing capability inventory.
+The splice was mechanical (`sed` range delete) and both kept regions were
+diffed byte-for-byte against the pre-edit file before the suite was re-run.
+
+### Documentation
+
+- `docs/ARCHITECTURE.md` §3 said **"Two user-invokable surfaces"** and listed
+  `checklist` + `verify`. Three more commands shipped between v0.6.1 and v0.21,
+  documented everywhere *except* the architecture doc that claims to enumerate
+  that layer. Now five, each with its backing script.
+- §8's connected-files map gained rows for `lib/projroot.py` and the shared
+  fence helper, and its `test_v026_models.py` references follow the rename.
+- Both READMEs: structure trees, the `lib/` inventory (seven → eight modules),
+  the `hooks/scripts/` role split, the status-table note, and a rewritten
+  "New in" section.
+- The `plugin.json` / `marketplace.json` `description` fields were 11 KB and
+  15 KB of accumulated release narrative — in the field a user reads in the
+  `/plugin` picker. Rewritten to describe the plugin, then this release.
+
+**Refuted, not fixed:** an early sweep flagged 46 markdown links in
+`prompts/`, `commands/`, `skills/` and `agents/` as broken, because they are
+written relative to the repo root while living in subdirectories. They are
+correct: those files are *prompt payloads*, resolved by an agent whose cwd is
+the project root, not pages rendered by GitHub. `test_doc_sync.py` resolves
+links from either base for exactly this reason. Documented in ARCHITECTURE §3
+rather than "fixed" into breakage.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **565 tests, OK** (564 → 565 tests).
+- `python hooks/scripts/i18n_check.py` → all translations in sync.
+- The doc gate caught two of this release's own errors while it was being
+  written: a missing `projroot.py` in both structure trees, and a
+  `test_*_sync.py` glob whose `_sync.py` fragment read as a file that does not
+  exist. Both are recorded rather than quietly corrected — they are the gate
+  working, and the second is the same class of mistake (a written-down pattern
+  that does not match reality) this whole release is about.
+
+---
+
 ## [0.29.0] — 2026-08-15
 
 **The contract could not reach the agent it governs.** Two instances of

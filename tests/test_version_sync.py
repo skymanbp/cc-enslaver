@@ -43,7 +43,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PLUGIN_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
-MARKETPLACE_MANIFEST = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+# `MARKETPLACE_MANIFEST` used to sit here and was referenced by nothing:
+# the marketplace file is reached through EXPECTED_VERSION_POINTERS below,
+# which addresses every manifest by repo-relative path so the pointer set
+# stays the single closed registry. (v0.30)
 README = REPO_ROOT / "README.md"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 

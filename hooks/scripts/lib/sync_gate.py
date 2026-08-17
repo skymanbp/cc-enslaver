@@ -74,7 +74,7 @@ except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and the gate must fail open
     tomllib = None  # type: ignore[assignment]
 
-from . import tomlio
+from . import projroot, tomlio
 
 _PLUGIN_NAME = "cc-enslaver"
 _CONFIG_FILENAME = "sync-gate.toml"
@@ -104,16 +104,11 @@ def _warn(msg: str) -> None:
     sys.stderr.write(f"[cc-enslaver sync-gate] {msg}\n")
 
 
-def _looks_like_project_root(p: Path) -> bool:
-    """Same project-root heuristic as lib/edicts.py (.git or .claude/)."""
-    try:
-        if (p / ".git").exists():
-            return True
-        if (p / ".claude").is_dir():
-            return True
-    except OSError:
-        return False
-    return False
+# v0.30 — this was a verbatim copy of the edicts predicate, introduced
+# with the docstring "Same project-root heuristic as lib/edicts.py". Both
+# now call `lib/projroot.py`, so the sentence is enforced instead of
+# merely asserted.
+_looks_like_project_root = projroot.looks_like_project_root
 
 
 def config_path(cwd: str | None = None) -> Path | None:

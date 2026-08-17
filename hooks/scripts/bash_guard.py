@@ -32,8 +32,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
-import shlex
 import sys
 import traceback
 from pathlib import Path
@@ -275,14 +273,12 @@ STATIC_PATTERNS = [
 ]
 
 
-# Shell command separators. A compound command is split on these so a
-# flag is only ever attributed to the sub-command that owns it (v0.25).
-_CMD_SEPARATOR = re.compile(r"&&|\|\||;|\n|\|")
-
-# A single-dash short-option cluster, e.g. `-f`, `-fu`, `-uf`, `-fq`.
-# `git push -fu origin main` IS a force push (git accepts stacked short
-# options), so matching only the exact token `-f` under-blocks.
-_SHORT_FLAG_CLUSTER = re.compile(r"(?:^|\s)-([A-Za-z]+)(?=\s|$)")
+# v0.30 — `_CMD_SEPARATOR` and `_SHORT_FLAG_CLUSTER` used to live here.
+# They were the v0.25 text heuristic's separator list and short-option
+# matcher; v0.26 replaced that heuristic with `lib/shellcmd`'s parse model
+# and left both constants behind, referenced by nothing. Keeping a dead
+# regex next to a live detector is worse than useless: the next reader has
+# to prove it is unreachable before they can trust the one below it.
 
 
 def _detect_force_push(cmd: str) -> dict | None:
@@ -415,32 +411,12 @@ def _emit_deny(command: str, pattern_name: str, rule: str, explanation: str) -> 
 _REGISTER_SCRIPT_NAME = "register_read.py"
 
 
-def _split_command(command: str) -> list[str] | None:
-    """Tokenise a shell command, preserving Windows path separators.
-
-    v0.25 — `shlex.split(command, posix=True)` treats a backslash as an
-    escape character, so an UNQUOTED Windows path came back mangled
-    # example only, not a path this module depends on:
-        C:\\Users\\me\\note.txt   ->   C:Usersmenote.txt
-
-    `_handle_register_invocation` then denied with "file does not exist on
-    disk", i.e. the documented recovery path for a false rule-04 DENY was
-    itself broken on this plugin's own primary platform. It survived 21
-    releases because every existing test quotes the path (`--file "%s"`),
-    and quoting happens to survive posix splitting.
-
-    v0.25.1 — the `posix=False` fix that replaced it traded one bug for
-    another: non-posix mode does not group a QUOTED value, so a valid
-    `--file="C:\\Dir With Space\\x.py"` came back split across three
-    tokens and was denied as a non-existent path. The correct primitive
-    is posix-style quoting with backslash escaping DISABLED, which
-    `shlex.shlex(escape="")` provides: quotes group and are stripped,
-    backslashes stay literal. POSIX keeps real escape semantics.
-    """
-    # v0.26.0 — delegated to lib/shellcmd, which is also what the
-    # force-push detector now parses with. Two hand-rolled tokenisers had
-    # already drifted apart; sharing one is the point.
-    return shellcmd.tokenize(command)
+# v0.30 — `_split_command` used to live here. It was the last remnant of
+# this module's own tokeniser: v0.26 reduced its body to a one-line
+# delegation to `shellcmd.tokenize`, and nothing has called it since. Its
+# docstring narrated the v0.25 / v0.25.1 tokenising bugs, which is why it
+# looked load-bearing; that history now lives where the tokeniser does
+# (`lib/shellcmd.tokenize`) and in the CHANGELOG, not in a dead wrapper.
 
 
 def _parse_register_invocation(command: str) -> dict | None:

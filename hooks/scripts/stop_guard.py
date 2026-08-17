@@ -122,17 +122,27 @@ of the last block, we skip the heuristic and allow the Stop. The
 agent gets one (well, up to three) chances to recover before we
 fire again.
 
-# Why four layered checks instead of one
+# Why layered checks instead of one
 
-The bar tightens monotonically: (a) → (b) → (c) → (d) only fire if
-the preceding gate passed. (a) catches the laziest case (no work
-shown). (b) catches sloppy completion (hedged language). (c) catches
-faked rule-06 evidence (any `$ ls` output passes (a) but the agent
-must engage with the rule-06 self-quiz to pass (c)). (d) catches the
-different axis covered by rule 07 — even an agent who genuinely
-converged on the part it edited may have silently dropped sub-tasks,
-downgraded "mandatory" to "soft", or buried TODOs. Each gate has its
-own block template so the agent sees exactly which discipline failed.
+The bar tightens monotonically: each layer fires only if the preceding
+one passed. (a) catches the laziest case (no work shown). (b) catches
+sloppy completion (hedged language). (c) catches faked rule-06 evidence
+(any `$ ls` output passes (a) but the agent must engage with the rule-06
+self-quiz to pass (c)). (d) catches the different axis covered by rule 07
+— even an agent who genuinely converged on the part it edited may have
+silently dropped sub-tasks, downgraded "mandatory" to "soft", or buried
+TODOs. Each gate has its own block template so the agent sees exactly
+which discipline failed.
+
+**Evaluation order is not display order.** The layers are *displayed*
+alphabetically, (a)…(i), because that is how every doc and recovery
+message names them. They are *evaluated* in `_EVAL_ORDER`, which puts (b)
+first: a hedge invalidates a done-claim regardless of how much evidence
+sits next to it, so there is no point grading the evidence first. The
+status table renders Pass / pending from the EVALUATION position — an
+earlier v0.12–v0.29 version used the display position and therefore
+printed "(a) ✅ Pass" whenever (b) failed, asserting that evidence had
+been found when `_has_evidence` had never been called.
 
 Permissiveness within (c) and (d): we accept 2 of N self-questions
 OR any single explicit marker, so an agent who truly performed the
@@ -789,27 +799,18 @@ def _strip_item_decorations(s: str) -> str:
     return s
 
 
-def _fence_marker(stripped_line: str) -> str | None:
-    """Return the full fence run (e.g. '```' / '````'), or None.
-
-    v0.25 — the previous code truncated every fence to its first 3 chars,
-    so an inner ``` fence inside an outer ```` fence compared EQUAL to the
-    opener and closed it. CommonMark requires a closing fence to be at
-    least as long as the opening one; a shorter run is content. Once the
-    outer fence was spuriously closed, the rest of its body was scanned as
-    prose — and a `tldr:` line inside quoted fixture text got measured,
-    blocking layer (h) with "tldr item overlong" on text the reply merely
-    quoted. Nested fences are routine in this repo's own rule docs.
-    """
-    for ch in ("`", "~"):
-        if stripped_line.startswith(ch * 3):
-            run = len(stripped_line) - len(stripped_line.lstrip(ch))
-            return ch * run
-    return None
-
-
 def _is_fence(stripped_line: str) -> bool:
-    return _fence_marker(stripped_line) is not None
+    """True when the line opens or closes a fenced code block.
+
+    v0.30 — the fence-run helper this used to carry privately is gone;
+    `mdctx.fence_marker` is the one definition, and this module already
+    consumes `mdctx` for the rest of layer (h)'s context model. Three
+    byte-identical copies existed (here, in `lib/mdctx`, and in
+    `i18n_check`), each with its own comment explaining the same v0.25
+    CommonMark fix — which is precisely the shape that drifts: whoever
+    corrects one has no reason to suspect the other two.
+    """
+    return mdctx.fence_marker(stripped_line) is not None
 
 
 def _tldr_items(text: str) -> list[str]:
@@ -1159,7 +1160,10 @@ def _verify_claims(
     Otherwise the claim is unverifiable (no baseline) or verified
     (changed since baseline) — we report nothing.
     """
-    import os
+    # v0.30 — the function-local `import os` that used to sit here shadowed
+    # the module-level import with an identical binding. Harmless, but it
+    # reads as "this needs a deferred import", which is a claim about the
+    # module that was never true.
     contradictions: list[str] = []
     for verb, path, ctype in claims:
         # Resolve relative paths against cwd if provided.
@@ -1310,27 +1314,47 @@ _LAYER_TLDR = {
 }
 
 
+# The order `main()` actually evaluates the layers in — NOT the display
+# order. (b) runs first because a hedge invalidates a done-claim however
+# much evidence accompanies it, so grading the evidence first would be
+# wasted work. Everything after that follows the letters.
+#
+# This tuple exists so the status table can tell "passed" from "never
+# reached". v0.12–v0.29 derived both from the DISPLAY index, so a layer-(b)
+# block rendered "(a) ✅ Pass" — a positive assertion that convergence
+# evidence had been found, printed on a turn where `_has_evidence` was
+# never called. Being wrong in that direction is the failure this whole
+# hook exists to catch, so it is fixed rather than documented.
+_EVAL_ORDER: tuple[str, ...] = (
+    "(b)", "(a)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)",
+)
+
+
 def _render_status_table(
     fail_layer_id: str, edit_turn: bool, fail_note: str | None = None,
 ) -> str:
     """Render the per-layer status table as a markdown table string.
 
     fail_layer_id is one of "(a)" .. "(i)" — the layer that just failed.
+    Rows are DISPLAYED in `LAYER_META` order (a)…(i), because that is how
+    every doc, recovery blurb and test names them; each row's verdict is
+    computed from its position in `_EVAL_ORDER`, which is the order
+    `main()` really runs. A layer that sorts earlier alphabetically but
+    later in evaluation shows "not evaluated", not "Pass".
+
     edit_turn is True iff the agent actually ran Edit/Write this turn:
         - False → layers (e)/(f)/(g)/(i) display "— n/a (non-edit turn)"
-        - True  → layers > fail_layer_id display "⏸  pending"
+        - True  → layers not yet evaluated display "⏸  pending"
     fail_note optionally overrides the failing row's default note (used
     by the v0.23 tldr length check, which fails (h) for a different
     reason than a missing marker).
     """
-    # Build rows. Layer order is fixed (a)-(i).
-    fail_idx = next(
-        i for i, meta in enumerate(LAYER_META) if meta["id"] == fail_layer_id
-    )
+    fail_rank = _EVAL_ORDER.index(fail_layer_id)
     rows = []
-    for i, meta in enumerate(LAYER_META):
+    for meta in LAYER_META:
         lid = meta["id"]
         rule = meta["rule"]
+        rank = _EVAL_ORDER.index(lid)
         # e/f/g/i only apply on edit turns — show n/a on non-edit turns
         # regardless of position relative to the failing layer. (Needed
         # since v0.20: layer (h) fires after the edit-only block, so on a
@@ -1339,16 +1363,16 @@ def _render_status_table(
         if lid in ("(e)", "(f)", "(g)", "(i)") and not edit_turn:
             status = "—  n/a"
             note = "(non-edit turn)"
-        elif i < fail_idx:
+        elif rank < fail_rank:
             status = "✅ Pass"
             note = ""
-        elif i == fail_idx:
+        elif rank == fail_rank:
             status = "❌ **FAIL**"
             note = fail_note or _LAYER_FAIL_NOTE.get(lid, "")
         else:
-            # Layer not evaluated yet (gated by earlier fail).
+            # Layer not evaluated (gated by the failure above).
             status = "⏸  pending"
-            note = "(gated by earlier fail)"
+            note = "(not evaluated)"
         rows.append(
             f"| {lid:5s} | {rule:4s} | {status:<11s} | {note:<33s} |"
         )

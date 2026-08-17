@@ -27,7 +27,6 @@ Why we rewrite the whole file instead of patching:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -135,26 +134,15 @@ def _read_raw_edicts(path: Path) -> list[dict]:
     return [r for r in raw if isinstance(r, dict)]
 
 
-def _escape_triple_quoted(s: str) -> str:
-    """Deprecated: triple-quoted literals cannot round-trip a regex.
-
-    Kept only so an external caller does not break. Two independent
-    defects made the literal form unusable for regex fields (v0.26.0
-    audit):
-
-    * The `'''` replacement below is NOT TOML string concatenation — TOML
-      has no `+` operator in that position — so a regex containing `'''`
-      came back as the literal text `foo'' + \\"'\\" + ''bar`. The file
-      stayed valid, the edict stayed listed, and its pattern silently
-      stopped matching what it was written to match.
-    * A literal string cannot represent a control character at all, so a
-      regex containing one produced invalid TOML and disabled every edict
-      in the file.
-
-    `_toml_basic_string` handles both, at the cost of escaping
-    backslashes — which is correct, not lossy.
-    """
-    return s.replace("'''", r"'' + \"'\" + ''")
+# v0.30 — `_escape_triple_quoted` used to live here, marked "deprecated,
+# kept only so an external caller does not break". There is no external
+# caller and there cannot be one: it is a module-private helper in a
+# script this repo never installs as an importable package, and nothing in
+# the tree referenced it. The v0.26 audit correctly proved the
+# triple-quoted literal form cannot round-trip a regex (it mangled any
+# pattern containing `'''`, and could not encode a control character at
+# all) and moved every caller to `_toml_basic_string`. Keeping the broken
+# encoder next to the correct one only invites someone to reach for it.
 
 
 def _toml_basic_string(s: str) -> str:

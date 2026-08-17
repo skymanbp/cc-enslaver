@@ -1,8 +1,10 @@
 # Architecture
 
 > Audience: developers extending or auditing the plugin.
-> Companion docs: [`../CLAUDE.md`](../CLAUDE.md) (project-level rules),
-> [`./RULES.md`](./RULES.md) (catalog of every rule).
+> Doc index: [`./README.md`](./README.md). Companion docs:
+> [`../CLAUDE.md`](../CLAUDE.md) (project-level rules),
+> [`./RULES.md`](./RULES.md) (catalog of every rule),
+> [`../tests/README.md`](../tests/README.md) (the suite, file by file).
 
 ---
 
@@ -72,6 +74,7 @@ catches the lazy behaviour, often via a different signal.
     that `-c` / `-m` take code/module operands, not scripts). Consumed by
     `bash_guard`'s force-push detector *and* its register parser, which were
     two independent text heuristics that had already drifted apart.
+- **Project-root detection shared by both config loaders (v0.30)**: [`../hooks/scripts/lib/projroot.py`](../hooks/scripts/lib/projroot.py). Both hand-edited configs (`edicts.toml`, `sync-gate.toml`) fall back to the process cwd when `CLAUDE_PROJECT_DIR` is missing — which Claude Code's Bash tool does not reliably propagate on Windows (the v0.18.1 finding) — but only when that cwd carries a `.git` / `.claude` marker, so a session started in `~/Downloads` cannot load a stranger's hard rules. The predicate lived in both loaders until v0.30, the second copy annotated *"Same project-root heuristic as lib/edicts.py"*: a comment that names an invariant without holding it, so widening one copy leaves the other silently behind. Same answer `tomlio` gave one layer down.
 - Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session. **v0.25.1 extends this to the parsed values, not just the bytes**: `severity = ["must"]` / `mode = []` are valid TOML, and `value not in SET` raises `TypeError: unhashable type` — which escaped the same two loaders through a different door. Both now type-check before the membership test, and `manage_edicts.py` was finally routed through this module too (v0.25 wired the two hook-side loaders and never swept the tree, so `edict list / add / remove` still crashed on a file the hooks read fine — the repo-wide-sync omission rule 12 exists to catch).
 
 Five hook entries across four events:
@@ -710,16 +713,30 @@ because only the hook payload exposes `session_id`.
 
 **Wired in:** [`../commands/`](../commands/).
 
-Two user-invokable surfaces:
+Five user-invokable surfaces. (This section said "two" from v0.12, when
+`/cc-enslaver:edict` shipped, until v0.30 — three commands existed and were
+documented everywhere except the architecture doc that claims to enumerate the
+layer.)
 
 | Command | Source | Use case |
 |---|---|---|
-| `/cc-enslaver:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the pre-action / pre-finish discipline checklist. |
+| `/cc-enslaver:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the eight-section pre-action / pre-finish discipline checklist. |
 | `/cc-enslaver:verify`    | [`../commands/verify.md`](../commands/verify.md)    | Trigger a re-verification pass on the agent's recent claims. |
+| `/cc-enslaver:edict`     | [`../commands/edict.md`](../commands/edict.md)      | `list / add / remove / reload / path` for Imperial Edicts (v0.12). Backed by [`../hooks/scripts/manage_edicts.py`](../hooks/scripts/manage_edicts.py). |
+| `/cc-enslaver:gc`        | [`../commands/gc.md`](../commands/gc.md)            | List — or with `--apply`, delete — session-state files older than N days (v0.6.1). Backed by [`../hooks/scripts/gc_state.py`](../hooks/scripts/gc_state.py). |
+| `/cc-enslaver:i18n`      | [`../commands/i18n.md`](../commands/i18n.md)        | Report structural drift between every translation and the English skeleton (v0.21). Backed by [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py). |
 
 Slash commands in Claude Code are flat Markdown files in `commands/`. Their YAML
 frontmatter declares the command's behaviour; the body is the prompt the agent
 receives when invoked.
+
+**Why their links look repo-root-relative.** A command / skill / agent / prompt
+file is a *prompt payload*, not a rendered page: the agent that reads it resolves
+paths against the project root, not against the file's own directory. So
+`[rules/03-root-cause.md](rules/03-root-cause.md)` inside `commands/checklist.md`
+is correct as written, and `test_doc_sync.py` resolves links from either base for
+exactly this reason. Documents meant for a human reader on GitHub —
+`README*.md`, `docs/`, `rules/`, `CLAUDE.md` — use file-relative links instead.
 
 ---
 
@@ -891,10 +908,12 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn` + `record_edited_file`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn` + `get_edited_files`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
 | `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), `hooks/scripts/lib/tomlio.py` (config reader), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` + `tests/test_sync_gate.py` (sync-gate cases) |
-| `hooks/scripts/lib/srclex.py` (v0.26) | `hooks/scripts/read_guard.py` (every rule 09/10/11 content detector + the rationale hatch), this doc §2 (shared-models list), `tests/test_v026_models.py` (`TestSrclex` + the rule-09/10/11 regression classes). Changing what counts as a comment / docstring / literal changes what the rationale hatch accepts, so the twin assertions in `TestRationaleHatchV026` must be re-checked in BOTH directions. |
-| `hooks/scripts/lib/mdctx.py` (v0.26) | `hooks/scripts/stop_guard.py` — **both** halves of layer (h) (`_has_tldr` presence + `_tldr_items` length). They must stay on one model; the defect this replaced was exactly the two disagreeing. Also this doc §2, `tests/test_v026_models.py` (`TestMdctx`, `TestTldrContextV026`) + `tests/test_stop_guard.py` (`TestTldrLayerH`, `TestTldrLengthLayerH`). |
-| `hooks/scripts/lib/shellcmd.py` (v0.26) | `hooks/scripts/bash_guard.py` — **both** the force-push detector and `_parse_register_invocation`. It exists so those two stop being independent text heuristics that drift; a change here needs both directions re-checked (real bypasses still denied, innocent commands still allowed). Also this doc §2, `tests/test_v026_models.py` (`TestShellcmd`, `TestForcePushCommandModelV026`, `TestRegisterCommandModelV026`) + `tests/test_bash_guard.py`. |
+| `hooks/scripts/lib/srclex.py` (v0.26) | `hooks/scripts/read_guard.py` (every rule 09/10/11 content detector + the rationale hatch), this doc §2 (shared-models list), `tests/test_audit_v026_models.py` (`TestSrclex` + the rule-09/10/11 regression classes). Changing what counts as a comment / docstring / literal changes what the rationale hatch accepts, so the twin assertions in `TestRationaleHatchV026` must be re-checked in BOTH directions. |
+| `hooks/scripts/lib/mdctx.py` (v0.26) | `hooks/scripts/stop_guard.py` — **both** halves of layer (h) (`_has_tldr` presence + `_tldr_items` length). They must stay on one model; the defect this replaced was exactly the two disagreeing. Also this doc §2, `tests/test_audit_v026_models.py` (`TestMdctx`, `TestTldrContextV026`) + `tests/test_stop_guard.py` (`TestTldrLayerH`, `TestTldrLengthLayerH`). |
+| `hooks/scripts/lib/shellcmd.py` (v0.26) | `hooks/scripts/bash_guard.py` — **both** the force-push detector and `_parse_register_invocation`. It exists so those two stop being independent text heuristics that drift; a change here needs both directions re-checked (real bypasses still denied, innocent commands still allowed). Also this doc §2, `tests/test_audit_v026_models.py` (`TestShellcmd`, `TestForcePushCommandModelV026`, `TestRegisterCommandModelV026`) + `tests/test_bash_guard.py`. |
 | `hooks/scripts/lib/tomlio.py` (v0.25) | **Both** TOML config loaders — `hooks/scripts/lib/edicts.py` and `hooks/scripts/lib/sync_gate.py`. A change here changes how *every* hand-edited config degrades, so it needs both `tests/test_edicts.py` and `tests/test_sync_gate.py` re-checked. It exists precisely so the BOM / non-UTF-8 hardening is not hand-copied into two loaders that then drift apart. |
+| `hooks/scripts/lib/projroot.py` (v0.30) | **Both** config loaders again — `lib/edicts.py` and `lib/sync_gate.py` alias it. Widening what counts as a project root widens where *both* configs may be picked up, which is a security-shaped change, not a convenience one: a false positive makes another project's `must` edicts apply to this session. Re-check `tests/test_edicts.py` (`TestCwdFallback`, `TestManageCLICwdFallback`) and `tests/test_sync_gate.py` (`TestConfigPath`). |
+| `hooks/scripts/lib/mdctx.py` — fence helper (v0.30) | `mdctx.fence_marker` now has THREE consumers: `stop_guard._is_fence`, `stop_guard`'s layer-(h) context model, and `i18n_check._fence_run`. It used to be copied into all three, each with its own comment claiming they "must agree". Changing fence geometry changes which headings `i18n_check` sees AND which tldr lines layer (h) measures — re-run `python hooks/scripts/i18n_check.py` as well as the stop-guard suite. |
 | `.claude/cc-enslaver/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
 | `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5 |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |

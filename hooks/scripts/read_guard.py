@@ -426,7 +426,9 @@ def _scan_bare_try_except_pass(text: str) -> list[tuple[int, int]]:
         same-line spelling of this bug and left the own-line spelling in
         place — including in the regression test it added, which passed
         for the wrong reason.) Comment lines are now skipped, so the
-        marker fires and the ±1-line window genuinely decides.
+        marker fires and the ±1-line window genuinely decides. (The
+        checker itself is now ``_has_rationale_at``; the v0.25.1-era
+        ``_has_rationale`` was retired in v0.30.)
       * **``except Exception: pass`` one-liners were invisible** — the
         most compact spelling of the antipattern.
       * **Only the first hit was returned**, so a justified swallow
@@ -684,33 +686,20 @@ def _line_window(text: str, span_start: int, span_end: int) -> str:
     return text[prev_start:next_end]
 
 
-def _comment_text(window: str, lang: str = "auto") -> str:
-    """Return only the COMMENT portions of a window, one per line.
-
-    v0.25.1 — the rationale escape hatch is documented as a "why-comment",
-    but `_has_rationale` used to lowercase the whole raw window, so any
-    token anywhere in executable code satisfied it:
-
-        reason = compute()
-        x = legacy()  # noqa      <- allowed, because `reason` is a variable
-
-    The same leak applied to rules 10 + 11, where an adjacent identifier
-    like `vendor_id`, or a secret VALUE containing `sample`, silenced the
-    detector. Restricting the search to comment text makes the hatch mean
-    what its own deny message says.
-
-    v0.26.0 — delegated to `srclex`, because "find the first `#` or `//`"
-    is not the same question as "where does a comment start". It found the
-    `#` inside `"http://host/#frag"` and the `//` inside ANY url, so a
-    single neighbouring line such as `API = "https://api.example.com"`
-    silenced the rule-10 SECRET detector (`example` is a rationale token
-    and `example.com` is the IANA example domain — i.e. the leak fired
-    exactly where credentials are most likely to sit). It also could not
-    see `/* … */` block comments at all, so a legitimate adjacent
-    JavaScript rationale was rejected. Lexing answers both.
-    """
-    return srclex.comment_text(window, lang)
-
+# v0.30 — `_comment_text`, `_cjk_count` and `_has_rationale` used to live
+# here and are gone; nothing called any of them.
+#
+# `_has_rationale` was the ±1-line rationale search that v0.26 replaced
+# with `_has_rationale_at`, which evaluates the window against the WHOLE
+# text's lexical state (a three-line window inside a docstring carries no
+# delimiter of its own, so judged alone it reads as bare code). Every call
+# site moved; the function did not. `_comment_text` was its one-line
+# delegation to `srclex.comment_text`, and `_cjk_count` duplicated a
+# counting loop that `_inline_reason_is_substantive` performs inline.
+#
+# Leaving a superseded rationale checker beside the live one is not
+# harmless housekeeping: the two answer the same question differently, and
+# the next reader has no way to tell which one the guard actually consults.
 
 # CJK ranges: Han, Han extension A, kana, hangul. Used to size a rationale
 # written in a language that does not delimit words with spaces.
@@ -719,22 +708,6 @@ _CJK_RANGES = (
 )
 _MIN_INLINE_REASON_CJK_CHARS = 6
 _MIN_DISTINCT_CJK_CHARS = 5
-
-
-def _cjk_count(text: str) -> int:
-    return sum(
-        1 for ch in text
-        if any(lo <= ord(ch) <= hi for lo, hi in _CJK_RANGES)
-    )
-
-
-def _has_rationale(
-    snippet: str,
-    tokens: tuple[str, ...] = RATIONALE_TOKENS,
-    lang: str = "auto",
-) -> bool:
-    snippet_lc = _comment_text(snippet, lang).lower()
-    return any(tok in snippet_lc for tok in tokens)
 
 
 # Words that look like a reason but assert nothing. Leading one of these
@@ -797,9 +770,11 @@ def _find_unjustified_patch_marker(
       2. Single-line regexes in ``PATCH_MARKERS``. All O(N) safe by
          construction.
 
-    Both stages reuse the same ``_line_window`` + ``_has_rationale``
-    rationale-allowance check, so adjacent ``because`` / ``原因`` / etc.
-    comments suppress the DENY.
+    Both stages reuse the same ``_has_rationale_at`` allowance check (the
+    window is located by ``_window_bounds`` but judged against the whole
+    text's lexical state), so adjacent ``because`` / ``原因`` / etc.
+    comments suppress the DENY. ``_line_window`` only builds the snippet
+    the deny message displays.
 
     `scannable` is False for prose docs (.md / .rst / …), where the
     markers are discussed rather than executed. Those targets keep the

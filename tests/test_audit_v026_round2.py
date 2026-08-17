@@ -39,7 +39,6 @@ from lib import mdctx, srclex, state as state_lib  # noqa: E402
 CR = chr(13)
 TAB = chr(9)
 BACKTICK = chr(96)
-TILDE = chr(126)
 HOME_VAR = "$" + "HOME"
 Q = chr(34)
 # A credential-shaped literal, built so this file does not contain one.

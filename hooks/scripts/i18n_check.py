@@ -60,6 +60,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import mdctx  # noqa: E402
+# noqa: E402 above because the lib import must follow the sys.path bootstrap
+
 # Plugin root = two levels up from hooks/scripts/i18n_check.py
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
@@ -84,17 +88,15 @@ class Drift:
         return f"[{self.kind}] {loc}: {self.detail}"
 
 
-def _fence_run(stripped_line: str) -> str | None:
-    """Return the full fence run (e.g. '```' / '````'), or None.
-
-    Mirrors stop_guard._fence_marker — both files track markdown fences
-    and must agree, so the contract lives in both with the same shape.
-    """
-    for ch in ("`", "~"):
-        if stripped_line.startswith(ch * 3):
-            run = len(stripped_line) - len(stripped_line.lstrip(ch))
-            return ch * run
-    return None
+# v0.30 — the fence-run helper is `mdctx.fence_marker`, imported above.
+# It used to be copied here verbatim under the comment "Mirrors
+# stop_guard._fence_marker — both files track markdown fences and must
+# agree, so the contract lives in both with the same shape." Writing that
+# down is not the same as enforcing it: there were three copies, and the
+# v0.25 CommonMark fix (a closing fence must be at least as long as its
+# opener) had to be applied to each one separately. One definition, three
+# consumers.
+_fence_run = mdctx.fence_marker
 
 
 def _header_levels(text: str) -> list[int]:

@@ -52,7 +52,7 @@ except ModuleNotFoundError:
     # because Python < 3.11 has no tomllib and edicts must fail open
     tomllib = None  # type: ignore[assignment]
 
-from . import tomlio
+from . import projroot, tomlio
 
 _PLUGIN_NAME = "cc-enslaver"
 _EDICTS_FILENAME = "edicts.toml"
@@ -85,45 +85,13 @@ class Edict:
         )
 
 
-def _looks_like_project_root(p: Path) -> bool:
-    """True if `p` has a marker that strongly suggests it's a project root.
-
-    Two markers are sufficient:
-      - `.git` exists (directory in a normal clone; FILE in a worktree
-        or submodule — `Path.exists()` covers both).
-      - `.claude/` exists as a directory (Claude Code per-project
-        config dir).
-
-    Either alone is enough; we don't require both because some
-    projects use one without the other (a fresh clone before
-    `.claude/` is created; a `.claude/`-only directory for
-    non-git-tracked workspaces).
-    """
-    try:
-        if (p / ".git").exists():
-            return True
-        if (p / ".claude").is_dir():
-            return True
-    except OSError:
-        # Defensive: permission errors / network FS hiccups. Treat as
-        # "not a project root" rather than crashing path resolution.
-        return False
-    return False
-
-
-def _cwd_if_project_root() -> Path | None:
-    """Return cwd if it looks like a project root, else None.
-
-    Used as a fallback path source when `CLAUDE_PROJECT_DIR` is unset
-    (which happens when Claude Code's Bash tool subprocess doesn't
-    inherit the env var — verified to occur on Windows). See
-    `edicts_path()` / `default_project_path()` for the call sites.
-    """
-    try:
-        cwd = Path.cwd()
-    except OSError:
-        return None
-    return cwd if _looks_like_project_root(cwd) else None
+# v0.30 — the project-root predicate and its cwd wrapper moved to
+# `lib/projroot.py`. `sync_gate.py` carried a byte-identical copy under a
+# comment saying "same heuristic as lib/edicts.py", which named the
+# invariant without holding it. These aliases keep this module's own
+# call sites reading the way they always did.
+_looks_like_project_root = projroot.looks_like_project_root
+_cwd_if_project_root = projroot.cwd_if_project_root
 
 
 def edicts_path() -> Path | None:

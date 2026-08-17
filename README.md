@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.29.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.30.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -179,6 +179,13 @@ on the next attempt — you can never be blocked twice for the same row — but 
 *different* layer you are still violating will still fire. Escalation is bounded
 by the layer count and any clean reply resets it.
 
+The table reports **evaluation** order, not the alphabet (v0.30). (b) runs first,
+because a hedge invalidates a done-claim however much evidence sits beside it, so
+a layer-(a) block shows "(b) ✅ Pass" and a layer-(b) block shows "(a) ⏸ pending".
+Until v0.30 both verdicts came from the display index, so a hedge block printed
+"(a) ✅ Pass" — asserting evidence had been found on a turn where the evidence
+check never ran. A gate built to catch unfounded claims does not get to make one.
+
 ### 4 · Imperial Edicts (圣旨) — your own hard rules
 
 Most "custom rules" features are just more text in a prompt. Here your rule
@@ -277,8 +284,15 @@ cap: the contract is protected and the (unbounded) edict list is what yields,
 elided at whole-edict boundaries with a pointer — because half an edict still
 reads as a complete instruction.
 
-Eight scripts under [`hooks/scripts/`](hooks/scripts/) sit on seven shared
-[`lib/`](hooks/scripts/lib/) modules. Full contracts:
+Eight scripts under [`hooks/scripts/`](hooks/scripts/) sit on eight shared
+[`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
+registered as hooks; the other four (`register_read.py`, `manage_edicts.py`,
+`gc_state.py`, `i18n_check.py`) back the escape hatch, the slash commands and
+CI. They deliberately stay in the same directory rather than moving to a
+`tools/` tree: `gc_state.py` is imported by `inject_context.py` for auto-GC and
+`register_read.py`'s real logic lives inside `bash_guard.py`, so neither is a
+standalone CLI, and separating them would buy a tidier directory name with a
+cross-tree `sys.path` splice. Full contracts:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
 
 ---
@@ -328,30 +342,41 @@ cc-enslaver/
 ├── hooks/
 │   ├── hooks.json               # event → script wiring
 │   └── scripts/
+│       │                        # -- hook entry points (the four in hooks.json) --
 │       ├── inject_context.py    # soft layer: SessionStart + per-turn injection
 │       ├── read_guard.py        # hard layer: read-before-edit, content + frequency gates
 │       ├── bash_guard.py        # hard layer: command discipline, read registration
 │       ├── stop_guard.py        # hard layer: the nine-layer done-claim gate
+│       │                        # -- auxiliary entry points (not hooks) --
 │       ├── register_read.py     # SHA-256-verified read-cache escape hatch
 │       ├── manage_edicts.py     # Imperial Edicts CRUD CLI
-│       ├── gc_state.py          # session-state garbage collection (dry-run default)
+│       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
-│       └── lib/
-│           ├── srclex.py        # tolerant source lexer: code vs comment vs docstring
-│           ├── shellcmd.py      # tokenise → segments → argv → git subcommand
-│           ├── mdctx.py         # markdown fence / blockquote context
-│           ├── state.py         # per-session state, cross-process lock, atomic save
-│           ├── edicts.py        # Imperial Edicts loader / matcher / renderer
-│           ├── sync_gate.py     # rule-12 co-update group evaluator
-│           └── tomlio.py        # BOM- and encoding-tolerant TOML reader
+│       └── lib/                 # -- eight shared modules --
+│           ├── srclex.py        # judgement: code vs comment vs docstring vs literal
+│           ├── mdctx.py         # judgement: markdown fence / blockquote context
+│           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
+│           ├── state.py         # state: per-session, cross-process lock, atomic save
+│           ├── tomlio.py        # config: BOM- and encoding-tolerant TOML reader
+│           ├── projroot.py      # config: project-root detection, shared by both loaders
+│           ├── edicts.py        # feature: Imperial Edicts loader / matcher / renderer
+│           └── sync_gate.py     # feature: rule-12 co-update group evaluator
 ├── commands/                    # 5 slash commands
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
-├── docs/                        # ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 564 black-box + unit tests (python -m unittest discover tests)
+├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
+└── tests/                       # 565 black-box + unit tests (python -m unittest discover tests)
+    │                            # each file is named after what it covers — see tests/README.md
+    ├── _helpers.py              #   shared run_hook(...) subprocess fixture
+    ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
+    ├── test_<lib|cli>.py        #   unit tests for shared modules and auxiliary scripts
+    ├── test_version_sync.py     #   drift gate: every version pointer vs plugin.json
+    ├── test_doc_sync.py         #   drift gate: documented counts + inventories vs code
+    ├── test_i18n_sync.py        #   drift gate: every translation vs the English skeleton
+    └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **564 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **565 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -362,21 +387,40 @@ defeating end-of-line anchors, unquoted drive paths).
 
 ---
 
-## New in v0.29.0
+## New in v0.30.0
 
-**The contract could not reach the agent it governs** — two instances of one
-root cause, swept in a single fix.
+**A structural audit of the plugin itself** — no new rule, no new detector.
+Three findings, one theme: *a thing that is written down is not a thing that is
+enforced.*
 
-The injection had outgrown Claude Code's 10,000-character hook-output cap
-(SessionStart measured 18,761 characters), so the harness persisted it to a file
-and the agent saw only a preview: the mandatory reply schema sat past the
-boundary and went unread for an entire session while every hook reported green.
-And Stop grace forgave the whole *check* rather than the failed *layer*, so a
-recovery reply that fixed the row it had been shown while still violating
-another was never tested against the other.
+- **Dead code deleted, not documented.** Seven production symbols were
+  unreachable — `_split_command` and two regexes left behind when v0.26 replaced
+  the text heuristic with a parse model; `_has_rationale` and its two helpers,
+  superseded by `_has_rationale_at`; a `_escape_triple_quoted` marked "kept only
+  so an external caller does not break" that no caller could reach. A retired
+  rationale checker sitting beside the live one is not tidy history: the next
+  reader cannot tell which of the two the guard consults.
+- **Three duplicated judgements collapsed into one each.** Markdown fence
+  parsing existed three times (`stop_guard`, `lib/mdctx`, `i18n_check`), each
+  carrying its own copy of the same v0.25 CommonMark fix. The project-root
+  predicate existed twice, the second copy annotated *"same heuristic as
+  lib/edicts.py"* — a sentence that names an invariant without holding it. Both
+  now have one definition ([`lib/projroot.py`](hooks/scripts/lib/projroot.py) is new).
+- **The Stop status table stopped lying.** Layers are displayed (a)…(i) but
+  evaluated with (b) first, and the table derived both Pass and pending from the
+  *display* index — so every hedge block printed "(a) ✅ Pass", asserting
+  convergence evidence had been found on a turn where `_has_evidence` was never
+  called. Fixed, with a twin test in both directions.
 
-Both are closed: injections are now 9,826 / 7,225 characters with a structural
-cap guard, and grace is per layer. Tests 556 → 564.
+The tree was reclassified rather than rearranged: test files now carry their
+category as a filename prefix, `hooks/scripts/` labels its three roles inline,
+and `docs/` gained an index. The four non-hook scripts deliberately did *not*
+move to a `tools/` directory — two of them are called from inside hooks, so the
+move would trade a tidier directory name for a real cross-tree import splice.
+
+`CLAUDE.md` shrank 87 KB → 39 KB: its "current version" section had grown into a
+verbatim second copy of the changelog, re-read into context on every single
+session. The suite grows 564 → 565 tests.
 
 Earlier releases: [`CHANGELOG.md`](CHANGELOG.md).
 

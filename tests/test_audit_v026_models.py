@@ -25,7 +25,6 @@ user-home path in this file would be denied on write.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import shutil
 import sys

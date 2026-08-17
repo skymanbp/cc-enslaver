@@ -168,6 +168,12 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 免罚——同一行永远不会拦你两次——但你仍在违反的**另一层**照样会拦。升级次数被
 层数上界限住，任何一次干净的回复都会重置。
 
+状态表报的是**求值**顺序而不是字母序（v0.30）：(b) 跑在最前——旁边堆多少证据
+也救不了一个模棱两可的完成声明——所以 (a) 失败时表里是 "(b) ✅ Pass"，(b) 失败时
+是 "(a) ⏸ pending"。v0.30 之前两种判定都取自显示序，于是每次 hedge 拦截都会打印
+"(a) ✅ Pass"，在证据检查根本没跑的那一轮断言"已找到证据"。一个专门抓无据断言的
+闸门，自己的输出里不能有一句。
+
 ### 四 · 圣旨（Imperial Edicts）—— 你自己的硬规则
 
 多数"自定义规则"功能不过是往 prompt 里再塞一段文字。这里你的规则会变成一条正则，
@@ -253,8 +259,13 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 让位的是无界增长的圣旨列表，且按**整条圣旨**边界截断并留指针——因为半条圣旨
 读起来仍是一条完整指令。
 
-[`hooks/scripts/`](hooks/scripts/) 下 8 个脚本建立在 7 个共享
-[`lib/`](hooks/scripts/lib/) 模块上。完整契约见
+[`hooks/scripts/`](hooks/scripts/) 下 8 个脚本建立在 8 个共享
+[`lib/`](hooks/scripts/lib/) 模块上。注册为钩子的只有上表那四个；另外四个
+（`register_read.py`、`manage_edicts.py`、`gc_state.py`、`i18n_check.py`）分别
+服务于 escape hatch、slash 命令与 CI。它们**刻意不搬进单独的 `tools/` 目录**：
+`gc_state.py` 被 `inject_context.py` 直接 import（auto-GC），`register_read.py`
+的真正逻辑住在 `bash_guard.py` 里——两者都不是独立 CLI，搬走只会用一个更好看的
+目录名换来真实的跨目录 `sys.path` 拼接。完整契约见
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2。
 
 ---
@@ -299,30 +310,41 @@ cc-enslaver/
 ├── hooks/
 │   ├── hooks.json               # 事件 → 脚本的接线
 │   └── scripts/
+│       │                        # —— 钩子入口（hooks.json 注册的四个）——
 │       ├── inject_context.py    # 软层：SessionStart + 每轮注入
 │       ├── read_guard.py        # 硬层：改前必读、内容与频率闸门
 │       ├── bash_guard.py        # 硬层：命令纪律、read 登记
 │       ├── stop_guard.py        # 硬层：九层完成声明闸门
+│       │                        # —— 辅助入口（不是钩子）——
 │       ├── register_read.py     # SHA-256 校验的 read 缓存逃生口
 │       ├── manage_edicts.py     # 圣旨 CRUD 命令行
-│       ├── gc_state.py          # 会话状态回收（默认 dry-run）
+│       ├── gc_state.py          # 会话状态回收：CLI + auto-GC 被调方
 │       ├── i18n_check.py        # 骨架 ↔ 翻译的结构对等检查
-│       └── lib/
-│           ├── srclex.py        # 容错词法器：代码 / 注释 / docstring 区分
-│           ├── shellcmd.py      # tokenize → 分段 → argv → git 子命令
-│           ├── mdctx.py         # markdown 围栏 / 引用块上下文
-│           ├── state.py         # 会话状态、跨进程锁、原子落盘
-│           ├── edicts.py        # 圣旨加载 / 匹配 / 渲染
-│           ├── sync_gate.py     # rule-12 连带更新组求值
-│           └── tomlio.py        # 容忍 BOM 与编码异常的 TOML 读取
+│       └── lib/                 # —— 八个共享模块 ——
+│           ├── srclex.py        # 判定：代码 / 注释 / docstring / 数据字面量
+│           ├── mdctx.py         # 判定：markdown 围栏 / 引用块上下文
+│           ├── shellcmd.py      # 判定：tokenize → 分段 → argv → 子命令
+│           ├── state.py         # 状态：会话状态、跨进程锁、原子落盘
+│           ├── tomlio.py        # 配置：容忍 BOM 与编码异常的 TOML 读取
+│           ├── projroot.py      # 配置：项目根判定，两个加载器共用
+│           ├── edicts.py        # 功能：圣旨加载 / 匹配 / 渲染
+│           └── sync_gate.py     # 功能：rule-12 连带更新组求值
 ├── commands/                    # 5 个 slash 命令
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
-├── docs/                        # ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 564 个测试（python -m unittest discover tests）
+├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
+└── tests/                       # 565 个测试（python -m unittest discover tests）
+    │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
+    ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
+    ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
+    ├── test_<lib|cli>.py        #   共享模块与辅助脚本的单元件
+    ├── test_version_sync.py     #   漂移门：所有版本指针 vs plugin.json
+    ├── test_doc_sync.py         #   漂移门：文档里的数字与清单 vs 代码
+    ├── test_i18n_sync.py        #   漂移门：每份翻译 vs 英文骨架
+    └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **564 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **565 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。
@@ -331,18 +353,33 @@ Windows 那条腿不是走形式——本仓库好几个回归天生只在 Windo
 
 ---
 
-## v0.29.0 新增
+## v0.30.0 新增
 
-**合约到不了它所管的 agent** —— 同一根因的两处实例，一趟修掉。
+**对插件自身做一次结构体检** —— 没有新规则，也没有新检测器。三条发现，
+一个主题：**写下来的约束不等于被执行的约束。**
 
-注入体积超出了 Claude Code 的 10,000 字符 hook 输出上限（SessionStart 实测
-18,761 字符），于是 harness 把它落盘、agent 只看得到预览：那份强制回复 schema
-整段落在边界之外，整个会话没被读到，而所有钩子照常显示绿色。同时 Stop 的宽限
-forgive 的是整个**检查**而非失败的那一**层**，于是"修好了被点名那层、却仍违反
-另一层"的恢复回复从未被另一层检验。
+- **删死代码，而不是给死代码写说明。** 七处生产符号已不可达：`_split_command`
+  与两个正则是 v0.26 换成解析模型后留下的残骸；`_has_rationale` 及其两个辅助
+  函数已被 `_has_rationale_at` 取代；`_escape_triple_quoted` 标着"仅为外部调用者
+  保留"，而根本不存在能够到它的调用者。一个退役的理由检查器摆在在用的那个旁边
+  不是"保留历史"：下一个读代码的人无法判断守卫实际调用的是哪一个。
+- **三处重复判定各收敛为一处。** markdown 围栏解析存在三份（`stop_guard`、
+  `lib/mdctx`、`i18n_check`），每份都各自抄了一遍同一个 v0.25 CommonMark 修复。
+  项目根判定存在两份，第二份还注着"与 lib/edicts.py 同一套启发式"——一句**点名了
+  不变量却并不持有它**的话。现在各有唯一定义（新增
+  [`lib/projroot.py`](hooks/scripts/lib/projroot.py)）。
+- **Stop 状态表不再说假话。** 层的显示顺序是 (a)…(i)，求值顺序却把 (b) 放在最前，
+  而表格的 Pass/pending 两种判定都取自**显示**序——于是每一次 hedge 拦截都会打印
+  "(a) ✅ Pass"，在 `_has_evidence` 根本没被调用的那一轮断言"已找到收敛证据"。
+  已修复，并配了双向孪生测试。
 
-两处均已闭合：注入现在是 9,826 / 7,225 字符并有结构性上限保护，宽限改为按层。
-测试 556 → 564。
+文件树是**重新分类**而不是重新摆放：测试文件把类别写进文件名前缀，
+`hooks/scripts/` 在树里就地标注三种角色，`docs/` 补了索引。四个非钩子脚本
+**刻意没有**搬进 `tools/`——其中两个是被钩子内部调用的，搬走等于拿一个更好看的
+目录名去换一段真实的跨目录 import。
+
+`CLAUDE.md` 从 87 KB 缩到 39 KB：它的"当前版本"一节早已长成 changelog 的逐字
+副本，而这份副本每次会话都会被整份读进上下文。测试 564 → 565 个。
 
 历史版本见 [`CHANGELOG.md`](CHANGELOG.md)。
 

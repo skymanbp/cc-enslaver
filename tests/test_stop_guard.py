@@ -1890,14 +1890,33 @@ class TestV012StatusTableFormat(_StopBase):
         # Headline names the failed layer and its rule.
         self.assertIn("FAILED at Layer (a)", r)
         self.assertIn("rule 06", r)
-        # (a) is the failing row; later layers are pending or n/a.
+        # (a) is the failing row.
         self.assertIn("| (a)   | 06   | ❌", r)
-        # Later layers must not be marked ✅ — they were never evaluated.
-        for later in ["(b)", "(c)", "(d)", "(e)", "(f)", "(h)", "(i)"]:
-            # Each later row should be either pending or n/a, never Pass.
+        # v0.30 — the table reports EVALUATION position, not alphabetical
+        # position. (b) runs before (a) and genuinely passed here, so it
+        # reads ✅; every layer after (a) in `_EVAL_ORDER` is pending / n/a.
+        b_row = next(l for l in r.splitlines() if l.startswith("| (b)"))
+        self.assertIn("✅ Pass", b_row)
+        for later in ["(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)"]:
             row = [line for line in r.splitlines() if line.startswith(f"| {later}")]
             self.assertEqual(len(row), 1, msg=f"missing row for {later}")
             self.assertNotIn("✅", row[0])
+
+    def test_layer_b_failure_does_not_claim_a_passed(self) -> None:
+        """The twin of the case above — and the defect v0.30 fixed.
+
+        (a) sorts first alphabetically but runs SECOND, so a layer-(b)
+        block used to print "(a) ✅ Pass": a positive assertion that
+        convergence evidence had been found, on a turn where
+        `_has_evidence` was never called. A hook whose whole purpose is
+        catching unfounded claims must not make one in its own output.
+        """
+        rc, out, _ = self._stop("我觉得已修复了。")
+        r = out["reason"]
+        self.assertIn("FAILED at Layer (b)", r)
+        a_row = next(l for l in r.splitlines() if l.startswith("| (a)"))
+        self.assertNotIn("✅", a_row)
+        self.assertIn("pending", a_row)
 
     def test_layer_c_failure_marks_earlier_layers_pass(self) -> None:
         # Done + evidence but no quiz → (a)(b) pass, (c) FAIL.

@@ -52,10 +52,13 @@ cc-enslaver:
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
   fidelity: {request coverage: [...], standard: ..., no degradation: ...}   # rule 07
   closing: {root cause: ..., impact: ..., solution: ...}        # rule 08+09
+  sync-check: <co-files updated, or why none needed>            # rule 12, edit turns
   tldr: "<one plain sentence>"
 ```
 
 **Any reply with a done-claim must include the `tldr` field, else Stop layer (h) BLOCK.**
+**`sync-check` settles only groups a previous block NAMED — a first violation still
+BLOCKS at layer (i) and names the group. `sync-check: n/a` answers nothing.**
 **`tldr` length (v0.23): one sentence per item — cause, action, outcome — ≤ 160 chars;
 several things → one item per line, each within the cap, else Stop layer (h) BLOCK.**
 

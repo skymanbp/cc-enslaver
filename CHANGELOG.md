@@ -17,6 +17,114 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.31.1] — 2026-08-17
+
+**`sync-check` became a field in the reply schema instead of loose prose.**
+
+### The asymmetry this closes
+
+Every closing obligation this plugin imposes has been a *field* in the
+canonical YAML schema since v0.20 — and the v0.20 design is that **the field
+name IS the Stop-hook detection marker**:
+
+| Obligation | Rule | Schema field |
+|---|---|---|
+| think-before-write | 02 / 08 | `before` |
+| what changed | 09 | `edits` |
+| convergence | 06 | `convergence` |
+| task fidelity | 07 | `fidelity` |
+| root cause + impact + solution | 08 / 09 | `closing` |
+| plain-language takeaway | — | `tldr` |
+| **repo-wide sweep** | **12** | **— nothing —** |
+
+Rule 12 landed in v0.23, three releases after the schema was fixed, and was
+never folded in. Its acknowledgement stayed free prose the agent had to
+remember to write *somewhere* — the only duty with no slot to write it in, and
+therefore the only one whose omission looked like an ordinary reply.
+
+It is now a field, in all four injected prompts:
+
+```yaml
+  closing: {root cause: ..., impact: ..., solution: ...}
+  sync-check: <co-files updated, or why none needed>   # rule 12, edit turns
+  tldr: "<one plain sentence>"
+```
+
+Chinese uses `同步核对:`, which is the zh member of `SYNC_MARKERS`.
+
+### Why this is a patch release, and why it does not weaken layer (i)
+
+**Zero code changed in any hook.** No new detector, no new layer, no altered
+verdict: the key already matches `SYNC_MARKERS`, exactly as the v0.20 design
+intended. What changed is the prompt text.
+
+The obvious worry is that a schema field mandating `sync-check` on every
+modification turn would make layer (i) unfireable. **Verified by probe rather
+than by reading the code**, on a two-repo fixture with a real unmet group:
+
+```
+edit verdict: ALLOW
+  WITH sync-check  -> BLOCK at (i)
+  WITHOUT          -> ALLOW          (grace: layer (i) already spent, v0.29)
+```
+
+A first violation still blocks, because since v0.27 a marker settles only
+groups a previous block actually **named**. The schema field is where the
+answer to *that named group* goes on the next turn — which is precisely the
+"one informed answer per group" contract, now with somewhere to write it.
+
+**Not changed, and recorded rather than silently skipped:** a vacuous
+`sync-check: n/a` still satisfies a named group. That is true of free-prose
+markers today too, so this release does not make it worse — but a mandatory
+field does invite boilerplate, so both prompts now say so in as many words.
+Adding a `has_substance` check like layer (h)'s would be a strictness contract
+change and is **not** made here.
+
+### A pre-existing drift the release found
+
+`README.zh.md`'s version badge said **0.29.0** while the plugin was at 0.31.1 —
+two releases stale, with every gate green. `test_version_sync` pinned
+`README.md`'s badge and not its mirror.
+
+Same lesson as `EXPECTED_VERSION_POINTERS` in that very file: **checking the
+site you happened to think of lets its mirror rot.** The badge check now
+discovers every `README*.md` from disk, so a `README.<lang>.md` added later is
+pinned the day it appears rather than the day someone remembers to register it.
+Red-first: the new assertion reports `{'README.zh.md': '0.29.0'}` on the
+unfixed tree.
+
+### Budget
+
+Adding a field costs characters, and SessionStart had ~978 to spare against
+Claude Code's 10,000-char hook-output cap. The first draft spent ~500 of them
+on a prose caveat — and `test_edicts_appear_in_session_start_injection` went
+red, because the contract then squeezed the **edict block** out of the
+injection entirely. That is a real regression: user-defined hard rules
+vanishing from SessionStart.
+
+The caveat was duplicating what the per-turn injection already says, which is
+exactly what v0.29 deleted §4 for. Condensed, the field costs **75 characters
+net**:
+
+| Injection | before | after | headroom |
+|---|---:|---:|---:|
+| SessionStart (en) | 9,022 | 9,097 | 903 |
+| UserPromptSubmit (en) | 6,424 | 6,672 | 3,328 |
+| SessionStart (zh) | — | 6,007 | 3,993 |
+| UserPromptSubmit (zh) | — | 4,086 | 5,914 |
+
+### Verification
+
+- `python -m unittest discover -s tests` → **594 tests, OK** (590 → 594 tests).
+- `python hooks/scripts/i18n_check.py` → all translations in sync.
+- New `TestSyncCheckIsASchemaField` pins both halves that neither implies:
+  the field is present in all four prompts, **and** its name still matches a
+  real `SYNC_MARKERS` pattern — with a twin asserting a renamed field
+  (`sync-sweep:`) would *not* satisfy the gate, so the first assertion cannot
+  pass vacuously. Cap-fit is asserted for both languages.
+
+---
+
 ## [0.31.0] — 2026-08-17
 
 **The sync gate became inspectable.** Rule 12's co-update groups have been

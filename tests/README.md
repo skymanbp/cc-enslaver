@@ -1,6 +1,6 @@
 # Tests — index
 
-**590 tests, 16 files, zero dependencies.** This file is the index: every
+**594 tests, 16 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -45,7 +45,7 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
-| [`test_inject_context.py`](test_inject_context.py) | 22 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, and the 10,000-character output cap. |
+| [`test_inject_context.py`](test_inject_context.py) | 26 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, and the 10,000-character output cap. |
 | [`test_read_guard.py`](test_read_guard.py) | 99 | [`read_guard.py`](../hooks/scripts/read_guard.py) — read-before-edit allow/deny matrix, the rule 09 / 10 / 11 content detectors, the rolling-patch counter, path normalisation, `edited_files` recording, 12-way concurrent state writes, and fail-open. |
 | [`test_bash_guard.py`](test_bash_guard.py) | 21 | [`bash_guard.py`](../hooks/scripts/bash_guard.py) — the bypass-pattern catalog, force-push spellings, the register-as-read hatch (including its chaining and command-position rules), event gating, fail-open. |
 | [`test_stop_guard.py`](test_stop_guard.py) | 133 | [`stop_guard.py`](../hooks/scripts/stop_guard.py) — all nine layers, the status-table format contract, per-layer grace, production-shape payloads (no `turn_count`), transcript fallback, tldr presence and length. |

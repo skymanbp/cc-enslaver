@@ -434,5 +434,68 @@ class TestOutputCap(unittest.TestCase):
         self.assertIn("H" * 100, out)
 
 
+class TestSyncCheckIsASchemaField(unittest.TestCase):
+    """v0.31.1 — rule 12's closing obligation joined the reply schema.
+
+    Every other closing duty (before / edits / convergence / fidelity /
+    closing / tldr) has been a schema FIELD since v0.20, and the v0.20
+    design is that the field name IS the Stop-hook marker. Rule 12
+    arrived three releases later and its acknowledgement stayed loose
+    prose the agent had to remember to write — the one obligation with
+    no slot to write it in.
+
+    Two things must hold, and neither is implied by the other:
+      1. the field is present in all four injected prompts, and
+      2. its name still matches a real `SYNC_MARKERS` pattern.
+    Renaming the field without (2) would produce a schema that looks
+    complete and satisfies nothing.
+    """
+
+    def _prompt(self, rel: str) -> str:
+        return (PLUGIN_ROOT / "prompts" / rel).read_text(encoding="utf-8")
+
+    def test_every_injected_prompt_carries_the_field(self) -> None:
+        for rel, key in (
+            ("session-start.md", "sync-check:"),
+            ("user-prompt.md", "sync-check:"),
+            ("zh/session-start.md", "同步核对:"),
+            ("zh/user-prompt.md", "同步核对:"),
+        ):
+            with self.subTest(prompt=rel):
+                self.assertIn(key, self._prompt(rel))
+
+    def test_the_field_name_is_a_real_stop_marker(self) -> None:
+        """The v0.20 contract: field names ARE the detection markers."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard  # noqa: E402 -- after the path bootstrap above
+        for line in ('  sync-check: "co-files updated"',
+                     '  同步核对: "require 侧无需变更"'):
+            with self.subTest(line=line):
+                self.assertTrue(stop_guard._has_sync_marker(line))
+
+    def test_a_renamed_field_would_not_satisfy_the_gate(self) -> None:
+        """Twin: proves the assertion above is not vacuously true."""
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard  # noqa: E402 -- after the path bootstrap above
+        self.assertFalse(stop_guard._has_sync_marker('  sync-sweep: "done"'))
+
+    def test_both_languages_still_fit_under_the_cap(self) -> None:
+        """Adding a field costs characters; SessionStart had ~1k spare."""
+        for lang in ("", "zh"):
+            for event, rel in (("SessionStart", "session-start.md"),
+                               ("UserPromptSubmit", "user-prompt.md")):
+                with self.subTest(lang=lang or "en", event=event):
+                    _, out, _ = run_hook(
+                        [INJECT, "--event", event],
+                        stdin_payload={"session_id": "t",
+                                       "hook_event_name": event},
+                        env_overrides={"CC_ENSLAVER_LANG": lang or "en"},
+                    )
+                    ctx = out["hookSpecificOutput"]["additionalContext"]
+                    self.assertLessEqual(len(ctx), ic.OUTPUT_CAP)
+                    self.assertIn(
+                        "同步核对" if lang == "zh" else "sync-check", ctx)
+
+
 if __name__ == "__main__":
     unittest.main()

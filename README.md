@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.31.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.31.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -367,7 +367,7 @@ cc-enslaver/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 590 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 594 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -378,7 +378,7 @@ cc-enslaver/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **590 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **594 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -389,9 +389,31 @@ defeating end-of-line anchors, unquoted drive paths).
 
 ---
 
-## New in v0.31.0
+## New in v0.31.1
 
-**The sync gate became inspectable.** Rule 12's co-update groups have been
+**`sync-check` is now a field in the reply schema, not loose prose.** Every
+other closing obligation — `before / edits / convergence / fidelity / closing /
+tldr` — has been a schema field since v0.20, and the v0.20 design is that *the
+field name IS the Stop-hook marker*. Rule 12 arrived three releases later, so
+its acknowledgement was the one duty with no slot to write it in. Now:
+
+```yaml
+  closing: {root cause: ..., impact: ..., solution: ...}
+  sync-check: <co-files updated, or why none needed>   # rule 12, edit turns
+  tldr: "<one plain sentence>"
+```
+
+No detector changed — the key already matches `SYNC_MARKERS`. **It does not
+weaken layer (i)**, which was verified by probe rather than by reading the
+code: since v0.27 a marker settles only groups a previous block actually
+*named*, so a first violation still blocks and names its group. Also fixed: the
+Chinese README's version badge had drifted two releases behind while every gate
+was green — the badge check pinned `README.md` and not its mirror, so it now
+discovers every `README*.md` from disk. Suite 590 → 594 tests.
+
+---
+
+### v0.31.0 — the sync gate became inspectable Rule 12's co-update groups have been
 enforceable since v0.23 and *authorable* only by hand-writing TOML — with no way
 to see what the loader made of it. That gap mattered because
 [`lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py) is failing-open by design:

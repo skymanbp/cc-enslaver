@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.29.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.31.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -336,7 +336,7 @@ cc-enslaver/
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 590 个测试（python -m unittest discover tests）
+└── tests/                       # 594 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
     ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
@@ -347,7 +347,7 @@ cc-enslaver/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **590 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **594 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。
@@ -356,9 +356,32 @@ Windows 那条腿不是走形式——本仓库好几个回归天生只在 Windo
 
 ---
 
-## v0.31.0 新增
+## v0.31.1 新增
 
-**同步门禁变得可检查了。** rule 12 的连带更新组自 v0.23 起就能强制执行，却
+**`同步核对` 现在是回复 schema 里的一个字段，不再是散落的散文。** 其余每一项
+收尾义务——`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`——自 v0.20 起都是 schema
+字段，而 v0.20 的设计就是**字段名本身即 Stop hook 的 marker**。rule 12 晚了三个
+版本才到，于是它的核对声明成了唯一一项"没有格子可写"的义务。现在：
+
+```yaml
+  收尾: {根因: ..., 影响范围: ..., 方案: ...}
+  同步核对: <连带改了哪些，或为什么不用改>      # rule 12，edit 轮
+  tldr: "<一句大白话>"
+```
+
+没有改动任何检测器——这个键本来就匹配 `SYNC_MARKERS`。**它不会削弱 layer (i)**，
+这一点是用**活体探针**验证的而非读代码推断：自 v0.27 起，标记只结清上一次拦截
+**点名过**的组，所以首次违规照样 BLOCK 并告诉你是哪一组。
+
+顺带修掉一处既有漂移：中文 README 的版本徽章已经落后两个版本（插件 0.31.1 而
+徽章还写 0.29.0），而所有门都是绿的——因为版本门只钉了 `README.md` 的徽章、没钉
+它的镜像。现在改为从磁盘发现**每一个** `README*.md`。测试 590 → 594 个。
+
+---
+
+### v0.31.0 —— 同步门禁变得可检查
+
+rule 12 的连带更新组自 v0.23 起就能强制执行，却
 只能靠手写 TOML 来**编写**——而且没有任何办法看到 loader 究竟认下了什么。
 这个缺口要命，因为 [`lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py)
 **是故意 failing-open 的**：某个组被丢弃、某个 glob 打不中任何文件，它都不报错，

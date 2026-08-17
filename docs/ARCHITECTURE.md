@@ -332,9 +332,23 @@ enforced as a closing readability convention, deliberately **not**
 promoted to a tenth numbered rule (which would require the full
 `rules/*.md` + `rules/zh/` + `00-index` + docs fan-out). The v0.20
 canonical reply schema is a YAML block whose field names (`改前 / 改中 /
-收敛 / 忠实 / 收尾 / tldr`, English: `before / edits / convergence /
-fidelity / closing / tldr`) ARE the layer markers above — so a
+收敛 / 忠实 / 收尾 / 同步核对 / tldr`, English: `before / edits /
+convergence / fidelity / closing / sync-check / tldr`) ARE the layer
+markers above — so a
 schema-conformant reply passes (a)-(h) with no detector changes.
+
+**v0.31.1 — `sync-check` / `同步核对` joins the schema.** Rule 12 shipped in
+v0.23, three releases after the v0.20 schema was fixed, and its
+acknowledgement was the one closing obligation with no field to write it in:
+free prose the agent had to remember. It is now a field like the rest, and —
+per the v0.20 design — the field name IS the `SYNC_MARKERS` pattern, so no
+detector changed. **It does not weaken layer (i)**, verified by probe rather
+than by reading: since v0.27 a marker settles only groups a previous block
+actually NAMED, so a first violation still blocks and names its group, and the
+schema field is where the answer to *that* group goes on the next turn. A
+vacuous `sync-check: n/a` remains the presence-instead-of-meaning failure the
+prompts now call out explicitly; whether to add a `has_substance` check like
+layer (h)'s is a strictness contract change and is **not** made here.
 
 **v0.20.0 block-reason 大白话 line**: every block reason now appends a
 one-line plain-language takeaway (`大白话: ...`) before the one-shot

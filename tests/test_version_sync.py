@@ -118,12 +118,34 @@ class TestVersionSync(unittest.TestCase):
         )
 
     def test_readme_badge_matches_plugin_json(self) -> None:
-        match = _BADGE_RE.search(README.read_text(encoding="utf-8"))
-        self.assertIsNotNone(match, "README.md has no shields.io version badge")
+        """EVERY README's badge, not just the English one.
+
+        v0.31.1 — this pinned `README.md` alone, and `README.zh.md` had
+        drifted two releases behind (still showing 0.29.0 at 0.31.1) with
+        every gate green. Same closed-set lesson as
+        EXPECTED_VERSION_POINTERS above: checking the site you happened to
+        think of lets its mirror rot. The set is discovered from disk, so a
+        `README.<lang>.md` added later is pinned the day it appears rather
+        than the day someone remembers to register it.
+        """
+        readmes = sorted(REPO_ROOT.glob("README*.md"))
+        self.assertGreaterEqual(
+            len(readmes), 2,
+            "expected at least README.md and one translation; if a README "
+            "was removed, this count is the wrong kind of green",
+        )
+        drifted: dict[str, str] = {}
+        for path in readmes:
+            match = _BADGE_RE.search(path.read_text(encoding="utf-8"))
+            self.assertIsNotNone(
+                match, f"{path.name} has no shields.io version badge")
+            if match.group(1) != self.authoritative:
+                drifted[path.name] = match.group(1)
         self.assertEqual(
-            match.group(1), self.authoritative,
-            f"README badge says {match.group(1)}, plugin.json says "
-            f"{self.authoritative}",
+            drifted, {},
+            f"README badge drift: plugin.json says {self.authoritative}, "
+            f"but {drifted}. A translated README is the first thing a "
+            f"Chinese-reading user sees.",
         )
 
     def test_changelog_newest_release_matches_plugin_json(self) -> None:

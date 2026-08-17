@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.31.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -336,7 +336,7 @@ cc-enslaver/
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 594 个测试（python -m unittest discover tests）
+└── tests/                       # 601 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
     ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
@@ -347,7 +347,7 @@ cc-enslaver/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **594 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **601 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。
@@ -356,9 +356,33 @@ Windows 那条腿不是走形式——本仓库好几个回归天生只在 Windo
 
 ---
 
-## v0.31.1 新增
+## v0.32.0 新增
 
-**`同步核对` 现在是回复 schema 里的一个字段，不再是散落的散文。** 其余每一项
+**v0.31 只记录、没关掉的两件事，这一版关掉了。** 都由用户裁定；两件都不是缺陷
+修复，所以走 minor。
+
+**layer (i) 拒绝什么都没答的核对声明。** v0.31.1 自己写明了把 `sync-check` 变成
+必填字段的代价——必填招套话，而 `同步核对: 无` 结清一个已点名的组，和一份真实的
+清扫报告一样有效。现在它必须是 agent **自己**那一行（走 layer (h) 同一套
+`lib/mdctx` 模型，所以引用的、围栏里的都不算），**且**要有内容：
+
+```
+同步核对: prompts 侧核对过，本次改动不影响注入文案。   → 结清该组
+同步核对: 无  ·  n/a  ·  -  ·  （空）                  → BLOCK（v0.32）
+```
+
+配了测试钉住它的**边界**，免得这条限制悄悄变成隐含承诺：`同步核对: 核对过了`
+同样空洞，**仍然放行**。这只堵最低一档——纯占位——不多声称一分，因为拒绝一份诚实
+的报告是更坏的错误。这是刻意的严格度上调。
+
+**`check` 现在对本仓库自己跑，并进 CI。** v0.31.0 发它时的论点就是"一道你还信着
+却早已失效的门比没有门更坏"，还专门给了非零退出码好进 CI——然后从没对自己跑过。
+现在写成测试（与 `test_i18n_sync` 同构，本地 `unittest` 也覆盖），并配了防止空配置
+蒙混过关的孪生断言。测试 594 → 601 个。
+
+---
+
+### v0.31.1 —— `同步核对` 成为回复 schema 的字段 其余每一项
 收尾义务——`改前 / 改中 / 收敛 / 忠实 / 收尾 / tldr`——自 v0.20 起都是 schema
 字段，而 v0.20 的设计就是**字段名本身即 Stop hook 的 marker**。rule 12 晚了三个
 版本才到，于是它的核对声明成了唯一一项"没有格子可写"的义务。现在：

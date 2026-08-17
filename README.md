@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.31.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -367,7 +367,7 @@ cc-enslaver/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 594 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 601 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -378,7 +378,7 @@ cc-enslaver/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **594 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **601 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -389,9 +389,38 @@ defeating end-of-line anchors, unquoted drive paths).
 
 ---
 
-## New in v0.31.1
+## New in v0.32.0
 
-**`sync-check` is now a field in the reply schema, not loose prose.** Every
+**Two things v0.31 recorded instead of closing.** Both decided by the user;
+neither is a defect fix, so this is a minor.
+
+**Layer (i) rejects an acknowledgement that answers nothing.** v0.31.1 named
+the consequence of making `sync-check` mandatory — a required field invites
+boilerplate, and `sync-check: n/a` settled a named group as firmly as a real
+sweep report. It now must be the agent's own line (read through the same
+`lib/mdctx` model layer (h) uses, so a quoted or fenced marker does not count)
+**and** carry content:
+
+```
+同步核对: prompts 侧核对过，本次改动不影响注入文案。   → settles the group
+sync-check: n/a  ·  无  ·  -  ·  (empty)               → BLOCK (v0.32)
+```
+
+Pinned by its own test so the limit cannot drift into an implied guarantee:
+`sync-check: checked it` is just as empty and **still passes**. This closes the
+bottom tier — bare placeholders — and claims nothing more, because refusing an
+honest report is the worse error. A deliberate strictness increase.
+
+**`check` now runs against this repository, in CI.** v0.31.0 shipped it on the
+argument that an unenforced gate you still trust is worse than none, gave it a
+non-zero exit so it could run in CI — and then never ran it on itself. Wired as
+a test (matching `test_i18n_sync`, so a local `unittest` run covers it too),
+with the twin that keeps it from passing on an empty config. Suite 594 → 601
+tests.
+
+---
+
+### v0.31.1 — `sync-check` became a reply-schema field Every
 other closing obligation — `before / edits / convergence / fidelity / closing /
 tldr` — has been a schema field since v0.20, and the v0.20 design is that *the
 field name IS the Stop-hook marker*. Rule 12 arrived three releases later, so

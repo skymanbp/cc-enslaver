@@ -35,6 +35,7 @@ from lib import sync_gate as sg  # noqa: E402
 from lib import tomlio  # noqa: E402
 
 CLI = str(SCRIPTS_DIR / "manage_sync_gate.py")
+REPO_ROOT = SCRIPTS_DIR.parent.parent
 
 _GROUP = """[[groups]]
 name = "%s"
@@ -306,6 +307,45 @@ class TestModeAllRoundTrips(_RepoBase):
         self.assertNotIn("mode =", emitted)
         groups = sg.load_file(self._cfg(self.a)) or []
         self.assertEqual([g.mode for g in groups], ["any"])
+
+
+class TestThisRepoConfigIsHealthy(unittest.TestCase):
+    """v0.32 — cc-enslaver's OWN sync-gate config is checked in CI.
+
+    v0.31.0 shipped `check` on the argument that an unenforced gate you
+    still trust is worse than none, and exited 1 specifically so it could
+    run in CI — and then this repository never ran it on itself. The same
+    defect one level up: a diagnostic nobody runs is a diagnostic that
+    reports nothing.
+
+    Wired as a test rather than a workflow step, matching
+    `test_i18n_sync.py`, which calls `check_sync()` on the real tree. That
+    way `python -m unittest discover tests` covers it locally too — a
+    workflow-only step is invisible until push.
+    """
+
+    def test_check_passes_on_this_repository(self) -> None:
+        rc, out, err = _run(["check"], cwd=REPO_ROOT, project_dir=REPO_ROOT)
+        self.assertEqual(
+            rc, 0,
+            f"this repo's own .claude/cc-enslaver/sync-gate.toml has a "
+            f"problem — a dropped group or a glob matching no file means "
+            f"Stop layer (i) is silently not guarding what the config "
+            f"claims.\n\nstdout:\n{out}\nstderr:\n{err}",
+        )
+
+    def test_the_check_is_actually_armed_here(self) -> None:
+        """Twin: a green `check` must mean groups exist, not that none do.
+
+        Without this, deleting every group from the config would make the
+        assertion above pass — the "0 items, therefore no failures" shape
+        that `test_doc_sync` calls a vacuous green.
+        """
+        groups = sg.load_file(
+            REPO_ROOT / ".claude" / "cc-enslaver" / "sync-gate.toml")
+        self.assertTrue(groups, "this repo dogfoods rule 12; groups vanished")
+        _, out, _ = _run(["check"], cwd=REPO_ROOT, project_dir=REPO_ROOT)
+        self.assertIn(f"{len(groups)} group(s) loaded", out)
 
 
 class TestSharedPrimitives(unittest.TestCase):

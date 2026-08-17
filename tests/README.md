@@ -1,6 +1,6 @@
 # Tests — index
 
-**594 tests, 16 files, zero dependencies.** This file is the index: every
+**601 tests, 16 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -48,7 +48,7 @@ all behave differently when a script is imported instead of executed.
 | [`test_inject_context.py`](test_inject_context.py) | 26 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, and the 10,000-character output cap. |
 | [`test_read_guard.py`](test_read_guard.py) | 99 | [`read_guard.py`](../hooks/scripts/read_guard.py) — read-before-edit allow/deny matrix, the rule 09 / 10 / 11 content detectors, the rolling-patch counter, path normalisation, `edited_files` recording, 12-way concurrent state writes, and fail-open. |
 | [`test_bash_guard.py`](test_bash_guard.py) | 21 | [`bash_guard.py`](../hooks/scripts/bash_guard.py) — the bypass-pattern catalog, force-push spellings, the register-as-read hatch (including its chaining and command-position rules), event gating, fail-open. |
-| [`test_stop_guard.py`](test_stop_guard.py) | 133 | [`stop_guard.py`](../hooks/scripts/stop_guard.py) — all nine layers, the status-table format contract, per-layer grace, production-shape payloads (no `turn_count`), transcript fallback, tldr presence and length. |
+| [`test_stop_guard.py`](test_stop_guard.py) | 138 | [`stop_guard.py`](../hooks/scripts/stop_guard.py) — all nine layers, the status-table format contract, per-layer grace, production-shape payloads (no `turn_count`), transcript fallback, tldr presence and length. |
 
 ### Shared modules and auxiliary scripts
 
@@ -58,7 +58,7 @@ all behave differently when a script is imported instead of executed.
 | [`test_sync_gate.py`](test_sync_gate.py) | 19 | [`lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) — config resolution order, TOML tolerance, any-vs-all mode, `./` glob normalisation, project-relative boundaries. |
 | [`test_gc_state.py`](test_gc_state.py) | 19 | [`gc_state.py`](../hooks/scripts/gc_state.py) — argument validation, dry-run vs apply, threshold semantics, and auto-GC on SessionStart. |
 | [`test_register_read.py`](test_register_read.py) | 5 | [`register_read.py`](../hooks/scripts/register_read.py) — the user-facing stub's own hash verification and exit codes. (The authoritative check lives in `bash_guard`, so it is tested there.) |
-| [`test_manage_sync_gate.py`](test_manage_sync_gate.py) | 25 | [`manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) — the rule-12 config CLI, plus the shared primitives it forced out of hiding (`sync_gate.default_project_path` / `load_file` / `matches_any`, `tomlio.basic_string` / `dumps_check`). Its star test is a **regression**: the CLI's first draft picked its write target with the READ resolver and wrote two groups into this repository's own config. Both directions are pinned — a write lands in the named project, and the read resolver keeps the fallback the hook path depends on. |
+| [`test_manage_sync_gate.py`](test_manage_sync_gate.py) | 27 | [`manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) — the rule-12 config CLI, plus the shared primitives it forced out of hiding (`sync_gate.default_project_path` / `load_file` / `matches_any`, `tomlio.basic_string` / `dumps_check`). Its star test is a **regression**: the CLI's first draft picked its write target with the READ resolver and wrote two groups into this repository's own config. Both directions are pinned — a write lands in the named project, and the read resolver keeps the fallback the hook path depends on. |
 
 ### CI drift gates
 

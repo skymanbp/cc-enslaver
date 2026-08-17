@@ -17,6 +17,95 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.32.0] — 2026-08-17
+
+**Two things v0.31 recorded instead of closing.** Both were surfaced as open
+items and both were decided by the user on 2026-08-17; neither is a defect fix,
+so this is a minor rather than a patch.
+
+### 1 · Layer (i) rejects an acknowledgement that answers nothing
+
+v0.31.1 made `sync-check` a schema field and named the consequence in its own
+release notes: a mandatory field invites boilerplate, and `sync-check: n/a`
+settled a named group exactly as firmly as a real sweep report. The check was
+`any(pattern.search(text))` — presence, nothing more.
+
+`_has_sync_marker` now asks two further questions, both of which layer (h)
+already asks about `tldr`, and both answered by the same shared model:
+
+- **Attribution** — lines are read through [`lib/mdctx`](hooks/scripts/lib/mdctx.py),
+  so a marker inside a non-canonical fence or a blockquote is illustrative text,
+  not the agent's own claim. Quoting someone else's `sync-check` no longer
+  settles your group. (One judgement, one implementation — separate private
+  copies are exactly how layer (h)'s two halves came to disagree in v0.26.)
+- **Substance** — the marker must introduce content, on its own line or the
+  next non-blank one. A bare placeholder is treated as absent:
+
+  ```
+  同步核对: prompts 侧核对过，本次改动不影响注入文案。   → settles the group
+  sync-check: n/a                                        → BLOCK (v0.32)
+  sync-check: 无 / - / (empty)                           → BLOCK (v0.32)
+  sync-check: n/a
+  随便一句无关的话。                                      → BLOCK — a non-answer
+                                                            cannot borrow the
+                                                            following line
+  ```
+
+**What this does NOT do, pinned by its own test so the limit cannot drift into
+an implied guarantee:** `同步核对: 核对过了` ("checked it") is just as empty and
+still passes. `_SYNC_NON_ANSWERS` closes the bottom tier — bare negations and
+placeholders — and claims nothing more. Judging whether prose says something
+real is not attempted, because over-reaching here refuses honest reports, and a
+false block on a correct reply is the worse error.
+
+This is a **deliberate strictness increase**, recorded as such.
+
+### 2 · `check` now runs against this repository, in CI
+
+v0.31.0 shipped `check` on the argument that *an unenforced gate you still
+trust is worse than none*, and gave it a non-zero exit specifically so it could
+run in CI — and then this repo never ran it on itself. The same defect one
+level up: a diagnostic nobody runs reports nothing.
+
+Wired as a test rather than a workflow step, matching `test_i18n_sync.py`,
+which calls `check_sync()` on the real tree — so `python -m unittest discover
+tests` covers it locally too. A workflow-only step is invisible until push.
+
+It ships with the twin that keeps it from going vacuously green: a passing
+`check` must also mean groups *exist*. Deleting every group from the config
+would otherwise satisfy "no failures" — the empty-set green `test_doc_sync`
+warns about.
+
+### Also
+
+Both `user-prompt` injections (en + zh) now state the placeholder rule as an
+enforced outcome rather than advice, since it is one.
+
+**Explicitly unchanged, per the same round of decisions:** the four non-hook
+scripts stay in `hooks/scripts/` (two are imported from inside hooks; moving
+them buys a directory name and costs a cross-tree `sys.path` splice), and
+`rules/12-repo-wide-sync.md` still describes the discipline without naming the
+CLI that manages its config.
+
+**Still open, with the blocker named rather than left vague:** per-session
+ephemeral edicts (`/cc-enslaver:edict add --session`) cannot be built with the
+current CLI shape — the CLI is a Bash subprocess with no `session_id`, which is
+precisely why `register_read`'s authoritative half lives inside `bash_guard`.
+It needs its own design round, not a corner of this one.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **601 tests, OK** (594 → 601 tests).
+- `python hooks/scripts/i18n_check.py` → all translations in sync.
+- `python hooks/scripts/manage_sync_gate.py check` → exit 0 on this repo (now
+  asserted, not just run by hand).
+- A 13-case probe over the marker shapes that matter — real answers in both
+  languages, placeholders, empty values, next-line values, fenced and
+  blockquoted markers, and the canonical ```yaml block — before any test was
+  written; the suite pins the same matrix in both directions.
+
+---
+
 ## [0.31.1] — 2026-08-17
 
 **`sync-check` became a field in the reply schema instead of loose prose.**

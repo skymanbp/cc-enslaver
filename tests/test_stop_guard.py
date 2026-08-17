@@ -2351,5 +2351,65 @@ class TestGraceAckScopeV0251(_StopBase):
         )
 
 
+class TestSyncMarkerSubstanceV032(unittest.TestCase):
+    """v0.32 — a sync acknowledgement must answer, not merely occupy the slot.
+
+    v0.31.1 made `sync-check` a schema field and recorded, rather than
+    closed, the consequence: a mandatory field invites boilerplate, and
+    `sync-check: n/a` settled a named group exactly as firmly as a real
+    sweep report. The user chose to close it on 2026-08-17. This is a
+    deliberate strictness increase, so BOTH directions are pinned — an
+    over-strict version that rejected honest reports would cost a turn on
+    every correct reply, which is the worse failure.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import stop_guard
+        self.sg = stop_guard
+
+    def test_real_answers_are_accepted(self) -> None:
+        for text in (
+            "同步核对: prompts 侧核对过，本次改动不影响注入文案。",
+            "sync-check: prompts need no change for this edit.",
+            '  sync-check: "co-files updated"',
+            "sync-check:\nrules 侧已连带更新。",
+            "顺带提一句，日志里出现过 sync-check 这个词。",
+        ):
+            with self.subTest(text=text[:40]):
+                self.assertTrue(self.sg._has_sync_marker(text))
+
+    def test_placeholders_no_longer_settle_a_group(self) -> None:
+        """The twin of the above — without it, an always-True check passes."""
+        for text in ("同步核对: 无", "sync-check: n/a", "sync-check: -",
+                     "sync-check:", "同步核对：暂无", "sync-check: TODO"):
+            with self.subTest(text=text):
+                self.assertFalse(self.sg._has_sync_marker(text))
+
+    def test_a_non_answer_cannot_borrow_the_following_line(self) -> None:
+        """`sync-check: n/a` + unrelated prose must not pass on the prose."""
+        self.assertFalse(
+            self.sg._has_sync_marker("sync-check: n/a\n随便一句无关的话。"))
+
+    def test_attribution_matches_layer_h(self) -> None:
+        """Quoted / illustrative markers are not the agent's own claim."""
+        self.assertFalse(self.sg._has_sync_marker(
+            "```text\nsync-check: quoting someone else\n```"))
+        self.assertFalse(self.sg._has_sync_marker("> sync-check: 别人说的"))
+        # …but the canonical schema block IS the agent's own.
+        self.assertTrue(self.sg._has_sync_marker(
+            "```yaml\ncc-enslaver:\n  sync-check: rules 已同步\n```"))
+
+    def test_the_documented_limit_is_still_the_limit(self) -> None:
+        """Recorded honestly: vacuous PROSE is not detected, and is not claimed to be.
+
+        `_SYNC_NON_ANSWERS` closes the bottom tier — bare placeholders. A
+        reply that says "checked it" says nothing more, and still passes.
+        Pinning that keeps the docstring honest instead of letting the
+        limitation quietly drift into an implied guarantee.
+        """
+        self.assertTrue(self.sg._has_sync_marker("同步核对: 核对过了"))
+
+
 if __name__ == "__main__":
     unittest.main()

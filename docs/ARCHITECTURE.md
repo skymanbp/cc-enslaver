@@ -346,9 +346,18 @@ detector changed. **It does not weaken layer (i)**, verified by probe rather
 than by reading: since v0.27 a marker settles only groups a previous block
 actually NAMED, so a first violation still blocks and names its group, and the
 schema field is where the answer to *that* group goes on the next turn. A
-vacuous `sync-check: n/a` remains the presence-instead-of-meaning failure the
-prompts now call out explicitly; whether to add a `has_substance` check like
-layer (h)'s is a strictness contract change and is **not** made here.
+**v0.32 closes the gap v0.31.1 recorded.** `_has_sync_marker` was
+`any(pattern.search(text))` — presence only — so `sync-check: n/a`, and a
+marker the agent merely *quoted*, both settled a named group. It now applies
+the two tests layer (h) already applies to `tldr`, through the same `lib/mdctx`
+model: **attribution** (a marker inside a non-canonical fence or a blockquote
+is illustrative, not a claim) and **substance** (the value must carry content,
+on its own line or the next non-blank one; `_SYNC_NON_ANSWERS` treats a bare
+placeholder as absent, and a non-answer cannot borrow the following line).
+Deliberate strictness increase, decided by the user on 2026-08-17. **The limit
+is pinned by its own test**: vacuous *prose* (`sync-check: checked it`) is not
+detected and is not claimed to be — over-reaching would refuse honest reports,
+which is the worse error.
 
 **v0.20.0 block-reason 大白话 line**: every block reason now appends a
 one-line plain-language takeaway (`大白话: ...`) before the one-shot

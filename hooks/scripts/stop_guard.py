@@ -938,8 +938,79 @@ SYNC_MARKERS = [
 ]
 
 
+# Values that occupy the slot without answering it. Kept to the shapes that
+# are unambiguously non-answers — a bare negation or placeholder — because
+# this list is the only place where a HUMAN-legible sweep report can be
+# refused, and over-reaching here costs a turn on an honest reply.
+#
+# Deliberately NOT attempted: judging whether prose says anything real.
+# `同步核对: 核对过了` ("checked it") is just as empty and still passes. This
+# closes the bottom tier only, which is what it claims to close.
+_SYNC_NON_ANSWERS = {
+    "n/a", "na", "none", "nil", "no", "nope", "skip", "todo", "tbd", "-", "--",
+    "无", "没有", "不用", "不需要", "略", "暂无",
+}
+
+
+def _sync_value_answers(value: str) -> bool:
+    """True when `value` carries an actual answer rather than a placeholder."""
+    cleaned = value.strip().strip("'\"`*_ \t").rstrip("。.！!；;，,")
+    if cleaned.lower() in _SYNC_NON_ANSWERS:
+        return False
+    return mdctx.has_substance(cleaned)
+
+
 def _has_sync_marker(text: str) -> bool:
-    return any(p.search(text) for p in SYNC_MARKERS)
+    """True when the reply carries a sync acknowledgement that says something.
+
+    v0.32 — presence alone no longer suffices. Until now this was
+    `any(pattern.search(text))`, so `sync-check: n/a` settled a group as
+    firmly as a real sweep report, and — because the marker was searched
+    over the RAW text — so did quoting someone else's inside a fenced
+    example.
+
+    Two changes, both mirroring what layer (h) already does for `tldr`:
+
+      * **Attribution.** Lines are read through `lib/mdctx`, the same model
+        both halves of layer (h) consume, so a marker inside a non-canonical
+        fence or a blockquote is illustrative text rather than the agent's
+        own claim. One judgement, one implementation — the alternative is
+        how layer (h)'s two halves came to disagree in the first place.
+      * **Substance.** The marker must introduce content: on its own line,
+        or on the next non-blank line when the value is empty. A bare
+        placeholder (`n/a` / `无` / `-`) is treated as absent.
+
+    This is a deliberate strictness increase, decided by the user on
+    2026-08-17 after v0.31.1 recorded the gap rather than closing it. It is
+    NOT a claim to detect vacuous prose — see `_SYNC_NON_ANSWERS`.
+    """
+    ctx = mdctx.lines(text)
+    for i, line in enumerate(ctx):
+        if not line.attributable:
+            continue
+        for pattern in SYNC_MARKERS:
+            m = pattern.search(line.raw)
+            if m is None:
+                continue
+            rest = line.raw[m.end():].lstrip(" \t:：|>-").strip()
+            if _sync_value_answers(rest):
+                return True
+            if rest.strip(" \t:：'\"") and not _sync_value_answers(rest):
+                # An explicit non-answer: do not fall through to the next
+                # line, or `sync-check: n/a` followed by unrelated prose
+                # would pass on that prose.
+                continue
+            for nxt in ctx[i + 1:]:
+                if nxt.is_fence_delim:
+                    break
+                if not nxt.raw.strip():
+                    continue
+                if not nxt.attributable:
+                    break
+                if _sync_value_answers(nxt.raw.strip().strip("-*• \t")):
+                    return True
+                break
+    return False
 
 
 def _pending_sync_violations(

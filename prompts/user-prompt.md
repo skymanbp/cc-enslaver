@@ -58,7 +58,8 @@ cc-enslaver:
 
 **Any reply with a done-claim must include the `tldr` field, else Stop layer (h) BLOCK.**
 **`sync-check` settles only groups a previous block NAMED — a first violation still
-BLOCKS at layer (i) and names the group. `sync-check: n/a` answers nothing.**
+BLOCKS at layer (i) and names the group. A placeholder value (`n/a` / `无` / `-`)
+is treated as ABSENT and still BLOCKS (v0.32), as is one you merely quoted.**
 **`tldr` length (v0.23): one sentence per item — cause, action, outcome — ≤ 160 chars;
 several things → one item per line, each within the cap, else Stop layer (h) BLOCK.**
 

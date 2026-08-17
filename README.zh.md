@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.32.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -356,10 +356,18 @@ Windows 那条腿不是走形式——本仓库好几个回归天生只在 Windo
 
 ---
 
-## v0.32.0 新增
+## v0.32 新增
 
-**v0.31 只记录、没关掉的两件事，这一版关掉了。** 都由用户裁定；两件都不是缺陷
-修复，所以走 minor。
+**v0.32.1 —— 路线图清空，是裁定不是搁置。** 最后两项都退役而非继续挂着：
+per-session 临时圣旨（结构性受阻——圣旨 CLI 是 Bash 子进程，拿不到 `session_id`）
+与 layer (g) 内容哈希升级（前提实测不成立——本机 mtime 可分辨到 **1 ms**，而
+layer (g) 比的是首次接触基线与收尾时刻，真实间隔是数秒级）。一个挂着永远不做的
+条目的功能列表，本身就是本仓库在治的那种陈旧。这一版还抓到 `rules/12` 仍在描述
+**v0.32 之前**的逃生口——而 `rules/` 就是那个 LLM-agnostic 产品本身，规则文件过时
+等于给每一个非 Claude Code 的消费者发了更弱的纪律。
+
+**v0.32.0 —— v0.31 只记录、没关掉的两件事。** 都由用户裁定；两件都不是缺陷修复，
+所以那一版走 minor。
 
 **layer (i) 拒绝什么都没答的核对声明。** v0.31.1 自己写明了把 `sync-check` 变成
 必填字段的代价——必填招套话，而 `同步核对: 无` 结清一个已点名的组，和一份真实的

@@ -9,11 +9,61 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Planned (roadmap)
+Nothing planned. The roadmap is empty by decision, not by neglect — see
+v0.32.1 for why its last two entries were retired rather than carried.
 
-- **Per-session ephemeral 圣旨 / Imperial Edicts** — `/cc-enslaver:edict
-  add --session ...` for one-shot prompts (currently project-persistent
-  only).
+---
+
+## [0.32.1] — 2026-08-17
+
+**Closing the project out: the roadmap is retired and the rule text catches up
+with what the code enforces.** No behaviour change.
+
+### The rule pack was describing weaker enforcement than it ships
+
+This is the one that mattered. `rules/` is not internal documentation — it is
+the **LLM-agnostic product**: `cat rules/*.md` is a documented install path for
+agents that do not speak Claude Code's plugin protocol. v0.32 tightened layer
+(i) so that a quoted marker, or a placeholder value, no longer settles a group;
+`rules/12-repo-wide-sync.md` still described the v0.27 behaviour.
+
+An agent reading the rule pack was therefore told the escape hatch was looser
+than the hook actually is — the same class of defect as v0.26's "the docstring
+claimed nesting was handled", one layer out. Both the English skeleton and the
+`zh` mirror now state the v0.32 rule, and `commands/checklist.md` H4 says it at
+the point of use.
+
+### The roadmap is empty, by decision
+
+A feature list carrying entries nobody will ever build is exactly the staleness
+this repo exists to catch. Both remaining entries are retired with a reason,
+in all three places they were listed (`CHANGELOG`, `CLAUDE.md`, `docs/EDICTS.md`
+— the third would have been missed by anyone editing only the first two):
+
+- **Per-session ephemeral edicts** — *dropped* (user decision, 2026-08-17). The
+  blocker is structural, not effort: the edict CLI is a Bash subprocess with no
+  `session_id`; only a hook payload carries one, which is why
+  `register_read`'s authoritative half lives inside `bash_guard.py`. Building
+  it means a second hook-mediated write path for a feature whose entire value
+  is being temporary, and `--should` already covers the light-touch case.
+- **Layer (g) content-hash upgrade** — *retired, premise measured false.* The
+  entry assumed 1-second mtime granularity. Measured on this plugin's primary
+  platform (Windows / NTFS), consecutive writes are distinguishable at **1 ms**,
+  while layer (g) compares a *first-encounter baseline* against *closing time* —
+  seconds apart in any real turn, three orders of magnitude clear of the
+  collision window. The failure mode has never been observed. Reopen on a
+  reproduction, not on a hypothesis.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **601 tests, OK** (unchanged; this
+  release adds no code).
+- `python hooks/scripts/i18n_check.py` → in sync, including the `zh` mirror of
+  the new rule-12 paragraph.
+- `python hooks/scripts/manage_sync_gate.py check` → exit 0.
+- Editing `rules/12` armed the repo's own `rules-fanout` group; satisfied by the
+  `commands/checklist.md` co-update in the same session — the gate exercised on
+  its own rule text.
 
 ---
 

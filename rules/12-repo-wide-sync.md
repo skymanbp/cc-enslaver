@@ -78,6 +78,12 @@ blindly. **v0.27**: a marker settles only the groups you have actually
 been shown, so the flow is "blocked once, group named, then answered".
 One *informed* answer per group is the contract; one blanket sentence
 covering groups you never considered is not.
+**v0.32**: the marker must also be *yours* and must *say something*. A
+marker inside a code fence or a blockquote is quoted material, not your
+claim, and a placeholder value — `n/a`, `无`, `-`, or an empty one — is
+treated as absent and still BLOCKS. The bottom tier only: `sync-check:
+checked it` is equally empty and is still accepted, because refusing an
+honest report costs more than missing a lazy one.
 An acknowledged group is remembered for the session
 (`sync_acked_groups`), so one explicit answer suffices and later
 unrelated edits are not re-blocked by it. Globs match project-relative

@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.32.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -389,10 +389,21 @@ defeating end-of-line anchors, unquoted drive paths).
 
 ---
 
-## New in v0.32.0
+## New in v0.32
 
-**Two things v0.31 recorded instead of closing.** Both decided by the user;
-neither is a defect fix, so this is a minor.
+**v0.32.1 — the roadmap is empty, by decision.** Both remaining entries were
+retired rather than carried: per-session ephemeral edicts (structurally
+blocked — the edict CLI is a Bash subprocess with no `session_id`) and the
+layer-(g) content-hash upgrade (premise measured false — mtime here resolves to
+**1 ms**, while layer (g) compares a first-encounter baseline against closing
+time, seconds apart). A feature list carrying entries nobody will build is the
+staleness this repo exists to catch. The release also caught `rules/12` still
+describing the *pre-v0.32* escape hatch — and `rules/` is the LLM-agnostic
+product, so a stale rule file ships weaker discipline to every non-Claude-Code
+consumer.
+
+**v0.32.0 — two things v0.31 recorded instead of closing.** Both decided by the
+user; neither is a defect fix, so that one was a minor.
 
 **Layer (i) rejects an acknowledgement that answers nothing.** v0.31.1 named
 the consequence of making `sync-check` mandatory — a required field invites

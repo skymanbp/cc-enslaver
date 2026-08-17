@@ -223,11 +223,21 @@ note = "并发会被串行化；用 Promise.all(arr.map(async ...))"
 
 ---
 
-## 6. Limitations & future work
+## 6. Limitations
 
-- **Per-session ephemeral edicts** (e.g. `/cc-enslaver:edict add --session ...`)
-  not yet supported. Add an edict to the file or pass `--should` for a
-  light-touch reminder instead.
+These are decided, not pending. There is no "future work" list here any more:
+the one item that was on it is retired below with its reason, because a
+limitations section that doubles as a wish-list is how a permanent constraint
+gets read as a temporary one.
+
+- **Per-session ephemeral edicts** (`/cc-enslaver:edict add --session ...`) —
+  proposed since v0.12, **dropped in v0.32.1**, not deferred. The blocker is
+  structural, not effort: this CLI is a Bash subprocess and has no
+  `session_id`. Only the hook payload carries one, which is precisely why
+  `register_read`'s authoritative half lives inside `bash_guard.py`. Building
+  it would mean a second hook-mediated write path for a feature whose whole
+  value is being temporary — and a `should` edict already covers the
+  light-touch case without any of that. Use the file, or pass `--should`.
 - **No exception mechanism** — an edict either matches or it doesn't.
   If you want a per-file exemption, write a more specific regex or
   remove the edict.

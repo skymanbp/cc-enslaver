@@ -1,9 +1,9 @@
 ---
-description: 打印 cc-enslaver 十二条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改 / 全库同步）。
+description: 打印 cc-enforcer 十二条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改 / 全库同步）。
 argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (可选；默认 all)"
 ---
 
-# /cc-enslaver:checklist
+# /cc-enforcer:checklist
 
 > 强制纪律检查。无参数则同时输出 A "改前"、B "改后"、C "收敛验证"、D "任务忠实"、E "改前必读·写前必想"、F "系统式修改"、G "大白话 TL;DR 收尾"、H "全库同步" 八份清单；
 > 参数为 `before` / `after` / `converge` / `fidelity` / `pre-edit` / `systematic` / `tldr` / `sync` 则只输出对应一份。
@@ -139,7 +139,7 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (
 > v0.20：含 done-claim 的回复**末尾必含**一行大白话总结（YAML schema 的 `tldr` 字段）。
 > 物理强制：`Stop` layer (h) 在任何含 done-claim 的回复缺 `tldr` 时 BLOCK（edit / 非 edit 都查）。
 
-- [ ] **G1 · YAML schema 收尾** — 回复末尾是否输出了 ```yaml `cc-enslaver:` 块？修改类用全量（改前/改中/收敛/忠实/收尾），非修改类用精简形（收敛/忠实/tldr）。
+- [ ] **G1 · YAML schema 收尾** — 回复末尾是否输出了 ```yaml `cc-enforcer:` 块？修改类用全量（改前/改中/收敛/忠实/收尾），非修改类用精简形（收敛/忠实/tldr）。
 - [ ] **G2 · tldr 字段存在** — schema 末尾是否有 `tldr:` 字段（或 `大白话:` / `一句话总结:` / `TL;DR:` 行）？
 - [ ] **G3 · tldr 是人话** — 这句是否用大白话讲清「到底干了啥 / 结果如何 / 用户接下来要不要做什么」，而**不是**复述规则检查？
 - [ ] **G4 · tldr 长度（v0.23 硬强制）** — 每条 tldr 是否都是**一句话**（前因 + 动作 + 结果）且 ≤ 160 字符？多条内容是否逐条一行、每条各自一句短话？
@@ -152,13 +152,13 @@ argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (
 ## H. 全库同步（参考 `rules/12`） —— **物理强制层** 🚨
 
 > rule 12 被动半区：修改不是"目标文件改对"就完，而是**全库引用**一起走。
-> 物理强制：`Stop` layer (i) 在 sync-gate 组未满足且回复无同步标记时 BLOCK（仅在有 `.claude/cc-enslaver/sync-gate.toml` 的项目、且为 edit 轮）。
+> 物理强制：`Stop` layer (i) 在 sync-gate 组未满足且回复无同步标记时 BLOCK（仅在有 `.claude/cc-enforcer/sync-gate.toml` 的项目、且为 edit 轮）。
 
 - [ ] **H1 · 引用集枚举** — 对本次改动的符号 / 文件名 / 数量 / 版本 / 概念做过全库 Grep（代码 + 文档 + 测试 + 翻译）？引用：列出 grep 与命中。
 - [ ] **H2 · 逐项分类** — 每个命中标了"必须改" / "核对过无需改"？没有"没看"类。
 - [ ] **H3 · 同会话连带更新** — 所有"必须改"（下游代码 / 陈述该事实的文档 / 钉住它的测试 / 镜像翻译）都在本会话改了？
 - [ ] **H4 · 清扫已汇报** — 收尾回复有 `同步核对:` / `sync-check:` 行，点名连带改了什么、核对过什么？（v0.32：占位值 `无` / `n/a` / `-` / 空值按**缺失**处理，照样 BLOCK；写在围栏或引用块里的标记算引用别人的，不算数）
-- [ ] **H5 · sync-gate 组满足** — 本项目 `.claude/cc-enslaver/sync-gate.toml` 的各组：`when` 命中的组，`require` 侧是否有编辑（或 H4 的标记里说明了为何无需改）？
+- [ ] **H5 · sync-gate 组满足** — 本项目 `.claude/cc-enforcer/sync-gate.toml` 的各组：`when` 命中的组，`require` 侧是否有编辑（或 H4 的标记里说明了为何无需改）？
 - [ ] **H6 · 不变量登记** — 本次暴露的新连带关系是否值得登记为新 sync-gate 组？
 
 > 任意 H 项 ❌ 且组未满足 → **会被 Stop layer (i) BLOCK**。

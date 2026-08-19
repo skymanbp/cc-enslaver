@@ -47,7 +47,7 @@ severity: must
 被动半区物理化的"代码门禁"：
 
 ```toml
-# .claude/cc-enslaver/sync-gate.toml
+# .claude/cc-enforcer/sync-gate.toml
 [[groups]]
 name = "rules-fanout"
 when = ["rules/*.md"]                       # 改了这些中的任何一个 ...

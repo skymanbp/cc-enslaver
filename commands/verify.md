@@ -3,7 +3,7 @@ description: 让 agent 重新核对最近回复中的所有 file:line 引用与�
 argument-hint: "[要核对的回复编号或'last'(默认)]"
 ---
 
-# /cc-enslaver:verify
+# /cc-enforcer:verify
 
 > 触发独立验证流程。要求 receiving agent 把"自己刚才说过的话"当作不可信输入重新核对。
 
@@ -66,7 +66,7 @@ argument-hint: "[要核对的回复编号或'last'(默认)]"
 
 ## 禁止行为
 
-- ❌ 把 `/cc-enslaver:verify` 当成形式主义、所有条目都标 ✅ 而不真做工具调用。
+- ❌ 把 `/cc-enforcer:verify` 当成形式主义、所有条目都标 ✅ 而不真做工具调用。
 - ❌ 用"我相信刚才说的没问题"当作核对结果。
 - ❌ 跳过"重新运行命令"那一步。
 

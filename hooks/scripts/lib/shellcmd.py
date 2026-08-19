@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — a small model of what a shell command actually invokes.
+"""cc-enforcer — a small model of what a shell command actually invokes.
 
 Root cause this module exists to kill (v0.26.0 audit, root cause a):
 `bash_guard` asked two structural questions and answered both by looking

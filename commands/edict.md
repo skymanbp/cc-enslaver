@@ -1,13 +1,13 @@
 ---
-description: 管理 cc-enslaver 圣旨（用户自定义硬规则；项目级 + 全局；list / add / remove / reload / path）。
+description: 管理 cc-enforcer 圣旨（用户自定义硬规则；项目级 + 全局；list / add / remove / reload / path）。
 argument-hint: "list | add ID \"TEXT\" [--must|--should] [--deny-edit REGEX]* [--deny-bash REGEX]* [--note ...] [--global] | remove ID [--global] | reload | path"
 ---
 
-# /cc-enslaver:edict
+# /cc-enforcer:edict
 
 > 圣旨 = 用户为本项目自定义的硬规则，优先级高于通用 12 条。
-> 默认文件：`${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`（项目级，可入 git 团队共享）。
-> `--global`（v0.14）：写入 `~/.claude/cc-enslaver/edicts.toml`（个人全局，跨项目生效）。
+> 默认文件：`${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml`（项目级，可入 git 团队共享）。
+> `--global`（v0.14）：写入 `~/.claude/cc-enforcer/edicts.toml`（个人全局，跨项目生效）。
 
 ## 子命令
 
@@ -35,12 +35,12 @@ python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" $ARGUMENTS
 ## 示例
 
 ```
-/cc-enslaver:edict list
-/cc-enslaver:edict add E01 "禁止使用 mongoose，统一用 prisma" --must --deny-edit 'from\s+["'"'"']mongoose["'"'"']' --deny-bash 'npm\s+(i|install)\s+mongoose'
-/cc-enslaver:edict add E02 "所有 API 必须经过 src/api/client.ts" --should --note "见 PR #142"
-/cc-enslaver:edict add G01 "永不 sudo rm -rf root paths" --must --global --deny-bash 'rm\s+-rf?\s+/'
-/cc-enslaver:edict remove E01
-/cc-enslaver:edict path
+/cc-enforcer:edict list
+/cc-enforcer:edict add E01 "禁止使用 mongoose，统一用 prisma" --must --deny-edit 'from\s+["'"'"']mongoose["'"'"']' --deny-bash 'npm\s+(i|install)\s+mongoose'
+/cc-enforcer:edict add E02 "所有 API 必须经过 src/api/client.ts" --should --note "见 PR #142"
+/cc-enforcer:edict add G01 "永不 sudo rm -rf root paths" --must --global --deny-bash 'rm\s+-rf?\s+/'
+/cc-enforcer:edict remove E01
+/cc-enforcer:edict path
 ```
 
 ## 设计契约

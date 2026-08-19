@@ -3,9 +3,9 @@ description: 管理本项目的 rule 12 同步门禁（sync-gate.toml）—— i
 argument-hint: "check | list | init | add NAME --when GLOB --require GLOB [--all] [--note ...] | remove NAME | path"
 ---
 
-# /cc-enslaver:sync-gate
+# /cc-enforcer:sync-gate
 
-> rule 12 的**被动半区**由 `.claude/cc-enslaver/sync-gate.toml` 驱动：某组的
+> rule 12 的**被动半区**由 `.claude/cc-enforcer/sync-gate.toml` 驱动：某组的
 > `when` glob 命中了本会话编辑过的文件，而 `require` 侧一个都没动 → Stop
 > layer (i) 拦下完成声明（除非回复里有 `同步核对:` / `sync-check:` 标记）。
 > 本命令调用 [`hooks/scripts/manage_sync_gate.py`](hooks/scripts/manage_sync_gate.py)。

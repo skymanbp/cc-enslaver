@@ -1,9 +1,9 @@
-"""cc-enslaver — shared, hardened TOML config reader (v0.25).
+"""cc-enforcer — shared, hardened TOML config reader (v0.25).
 
 Two independent hand-edited configs drive hard guards:
 
-    .claude/cc-enslaver/edicts.toml      → PreToolUse DENY (lib/edicts)
-    .claude/cc-enslaver/sync-gate.toml   → Stop layer (i)  (lib/sync_gate)
+    .claude/cc-enforcer/edicts.toml      → PreToolUse DENY (lib/edicts)
+    .claude/cc-enforcer/sync-gate.toml   → Stop layer (i)  (lib/sync_gate)
 
 Both had the same three failure modes, and in both the failure was
 SILENT DISABLEMENT of enforcement — the worst possible direction for a
@@ -70,7 +70,7 @@ def parse_toml_file(
     """Read + parse a TOML config; None (with a diagnostic) on any failure.
 
     `warn` is the caller's stderr-diagnostic function so the message keeps
-    that module's prefix (e.g. "[cc-enslaver edicts]").
+    that module's prefix (e.g. "[cc-enforcer edicts]").
     """
     if tomllib is None:
         return None

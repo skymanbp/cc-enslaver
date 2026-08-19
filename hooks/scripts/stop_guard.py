@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — Stop hook enforcing rules 06 + 07 + 08 + 09 + TL;DR.
+"""cc-enforcer — Stop hook enforcing rules 06 + 07 + 08 + 09 + TL;DR.
 
 At every Stop event, this hook inspects the agent's last assistant
 message and refuses to let the agent finish the turn when any of nine
@@ -70,7 +70,7 @@ laziness signals appear in proximity to a "done" claim:
 
   (i) [v0.23.0 NEW] Rule 12 — repo-wide sync gate. Edit turns only, and
       only in projects that committed a co-update config at
-      .claude/cc-enslaver/sync-gate.toml (per-project opt-in; see
+      .claude/cc-enforcer/sync-gate.toml (per-project opt-in; see
       lib/sync_gate.py). For each configured group: if a file edited
       this session matches a `when` glob but no edited file matches any
       `require` glob, AND the reply carries no sync-acknowledgement
@@ -90,7 +90,7 @@ gets one corrective turn.
 
 Every block reason has the same four-part shape:
 
-    cc-enslaver · Stop check FAILED at Layer (X) [rule NN — short label]
+    cc-enforcer · Stop check FAILED at Layer (X) [rule NN — short label]
 
     | Layer | Rule | Status      | Note                              |
     |-------|------|-------------|-----------------------------------|
@@ -1081,7 +1081,7 @@ def _ack_pending_sync_groups(session_id: str, cwd: str | None) -> None:
 #     blocking on (per the recovery message), so we accept this edge
 #
 # A user-controlled escape hatch is provided via the
-# `CC_ENSLAVER_DISABLE_LAYER_G` env var (set to any non-empty value to
+# `CC_ENFORCER_DISABLE_LAYER_G` env var (set to any non-empty value to
 # skip the layer entirely) — for cases where the layer misfires on a
 # real workflow we don't yet know how to handle.
 # --------------------------------------------------------------------------- #
@@ -1370,7 +1370,7 @@ _LAYER_FAIL_NOTE = {
 }
 
 # v0.20 — per-layer one-line plain-language takeaway ("大白话"). Appended to
-# every block reason so cc-enslaver's OWN output also ends with a readable
+# every block reason so cc-enforcer's OWN output also ends with a readable
 # summary, symmetric with the layer-(h) requirement it imposes on the agent.
 _LAYER_TLDR = {
     "(a)": "你说做完了但没贴证据——补一段「命令 + 输出」就放行。",
@@ -1480,7 +1480,7 @@ def _build_block_reason(
     """
     meta = next(m for m in LAYER_META if m["id"] == fail_layer_id)
     headline = (
-        f"cc-enslaver · Stop check FAILED at Layer {fail_layer_id} "
+        f"cc-enforcer · Stop check FAILED at Layer {fail_layer_id} "
         f"[{meta['label']}]"
     )
     table = _render_status_table(fail_layer_id, edit_turn, fail_note)
@@ -1671,7 +1671,7 @@ Do not compress by dropping the outcome — drop the process detail
 instead; the body of the reply already carries the detail."""
 
 _RECOVERY_I = """One or more of this project's co-update groups
-(.claude/cc-enslaver/sync-gate.toml) are unmet for this session's edits:
+(.claude/cc-enforcer/sync-gate.toml) are unmet for this session's edits:
 
 {violations}
 
@@ -1958,9 +1958,9 @@ def main() -> int:
             # Parse "I edited X" / "我修改了 X" claims and verify them
             # against baselines captured by read_guard. Only block when
             # the on-disk evidence definitively contradicts a claim.
-            # Honors CC_ENSLAVER_DISABLE_LAYER_G escape hatch.
+            # Honors CC_ENFORCER_DISABLE_LAYER_G escape hatch.
             if (
-                not os.environ.get("CC_ENSLAVER_DISABLE_LAYER_G")
+                not os.environ.get("CC_ENFORCER_DISABLE_LAYER_G")
                 and _live("(g)")
             ):
                 claims = _extract_file_claims(message)
@@ -2083,7 +2083,7 @@ def main() -> int:
         state_lib.clear_blocked_layers(session_id)
     except Exception:
         # Failing open: log to stderr but never block by accident.
-        sys.stderr.write("[cc-enslaver] stop_guard exception:\n")
+        sys.stderr.write("[cc-enforcer] stop_guard exception:\n")
         sys.stderr.write(traceback.format_exc())
     return 0
 

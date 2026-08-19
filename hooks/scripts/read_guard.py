@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — read-before-edit guard + patch-style content guard.
+"""cc-enforcer — read-before-edit guard + patch-style content guard.
 
 A single PreToolUse handler covering Read / Write / Edit. Recording and
 gating live in the same hook event so they share a scope:
@@ -92,7 +92,7 @@ HANDLED_TOOLS = {"Read", "Write", "Edit"}
 # --------------------------------------------------------------------------- #
 # Deny messages.
 # --------------------------------------------------------------------------- #
-UNREAD_DENY_TEMPLATE = """cc-enslaver · rule 04 + 08 violation (read-before-edit)
+UNREAD_DENY_TEMPLATE = """cc-enforcer · rule 04 + 08 violation (read-before-edit)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -177,7 +177,7 @@ def _classify_change(old_string: str, new_string: str) -> str:
     return "medium"
 
 
-ROLLING_PATCH_DENY_TEMPLATE = """cc-enslaver · rule 09 violation (rolling-patch interception)
+ROLLING_PATCH_DENY_TEMPLATE = """cc-enforcer · rule 09 violation (rolling-patch interception)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -226,7 +226,7 @@ suppression.
 """
 
 
-PATCH_DENY_TEMPLATE = """cc-enslaver · rule 09 violation (patch-style new_string)
+PATCH_DENY_TEMPLATE = """cc-enforcer · rule 09 violation (patch-style new_string)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -260,7 +260,7 @@ manually -- the discipline exists to flag laziness, not block you.
 """
 
 
-HARDCODE_DENY_TEMPLATE = """cc-enslaver · rule 10 violation (non-essential hardcoding)
+HARDCODE_DENY_TEMPLATE = """cc-enforcer · rule 10 violation (non-essential hardcoding)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -300,7 +300,7 @@ from this detector; it targets freshly authored *code*.
 """
 
 
-PATHDEP_DENY_TEMPLATE = """cc-enslaver · rule 11 violation (non-essential path dependency)
+PATHDEP_DENY_TEMPLATE = """cc-enforcer · rule 11 violation (non-essential path dependency)
 
 Tool: {tool_name}
 Target: {file_path}
@@ -1324,7 +1324,7 @@ def main() -> int:
     except Exception:
         # Failing open: log and exit 0 so the agent is never blocked
         # by a bug in our own guard.
-        sys.stderr.write("[cc-enslaver] read_guard exception:\n")
+        sys.stderr.write("[cc-enforcer] read_guard exception:\n")
         sys.stderr.write(traceback.format_exc())
     return 0
 

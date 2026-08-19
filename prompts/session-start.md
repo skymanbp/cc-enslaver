@@ -1,6 +1,6 @@
-# cc-enslaver — Session Discipline Contract (force-injected)
+# cc-enforcer — Session Discipline Contract (force-injected)
 
-> 🚨 This session is governed by the `cc-enslaver` plugin. This prompt
+> 🚨 This session is governed by the `cc-enforcer` plugin. This prompt
 > is **not reference material** — it is a **hard contract**.
 > Physical-enforcement hooks intercept your Read / Edit / Write / Bash /
 > Stop — see the tables below.
@@ -22,7 +22,7 @@
 | 09 | Systematic modification / no patch-style | Patch markers need an adjacent why-comment; no rolling patches; no wrapping a call site to make exceptions vanish. **Bulk edits:** a rename / codemod / sed needs a neighbourhood survey → allowlist → refusal report → reconciled arithmetic. **Unified fix:** a diagnosed root cause defines a *class* — sweep every sibling and ship ONE change (N symptoms, one root = one fix). Violation → Stop **layer (f)** BLOCK. |
 | 10 | No non-essential hardcoding | A value that by design belongs in config/env (secret / credential / private key / credentials-in-a-URL) must not be a source literal. → `PreToolUse(Edit\|Write)` DENY. |
 | 11 | No non-essential path dependency | A machine-specific user-home absolute path (`C:\Users\…`, `/home/…`, `$HOME`, `%USERPROFILE%`, `"~/…"`) must not be baked into code — derive it at runtime. → `PreToolUse(Edit\|Write)` DENY. |
-| 12 | Repo-wide sync | An edit is done only when every repo-wide reference of the changed content (docs, downstream code, tests, mirrors/translations) is co-updated or verified current — report it with a `同步核对:` / `sync-check:` line. Invariants live in `.claude/cc-enslaver/sync-gate.toml`; unmet group without a marker → Stop **layer (i)** BLOCK. |
+| 12 | Repo-wide sync | An edit is done only when every repo-wide reference of the changed content (docs, downstream code, tests, mirrors/translations) is co-updated or verified current — report it with a `同步核对:` / `sync-check:` line. Invariants live in `.claude/cc-enforcer/sync-gate.toml`; unmet group without a marker → Stop **layer (i)** BLOCK. |
 
 ---
 
@@ -37,7 +37,7 @@
 | 4th small Edit (≤ 10 lines AND < 200 chars) to one file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars) between | `PreToolUse` DENY | Combine into one large Edit, or `Write` the whole file, or surface to the user |
 | Bash with `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Fix the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing evidence / hedged / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 9-layer BLOCK | Read the status table; fix the FAIL row |
-| Stop claiming `I edited X.py` when the file's mtime is unchanged since you first saw it | `Stop` **layer (g)** BLOCK | Actually do the edit, or retract the claim (`CC_ENSLAVER_DISABLE_LAYER_G=1` skips) |
+| Stop claiming `I edited X.py` when the file's mtime is unchanged since you first saw it | `Stop` **layer (g)** BLOCK | Actually do the edit, or retract the claim (`CC_ENFORCER_DISABLE_LAYER_G=1` skips) |
 | Stop with a done-claim but **no `tldr`** at the end (violates §3) | `Stop` **layer (h)** BLOCK | Add `tldr: "<one plain sentence>"` |
 | Stop with a tldr item past **160 chars** (a paragraph, not a TL;DR) | `Stop` **layer (h)** BLOCK | One sentence per item; several things → one short line each |
 | Stop on an edit turn where a sync-gate `when` group matched, no `require` file was edited, and the reply has no sync marker | `Stop` **layer (i)** BLOCK (rule 12) | Co-update the require-side files, or add a `同步核对:` / `sync-check:` line saying why they need none. The marker settles only groups already SHOWN to you |
@@ -63,7 +63,7 @@ Recovery says. **Don't re-read the entire prompt.**
 > any reply containing a done-claim**, else Stop **layer (h)** BLOCK.
 
 ```yaml
-cc-enslaver:
+cc-enforcer:
   before:                     # 🔍 rule 02 — architecture / root cause / solution
     architecture: <where in the architecture>
     root cause: <root cause>

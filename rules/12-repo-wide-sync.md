@@ -57,7 +57,7 @@ Each project can register its known co-update invariants in a committed
 config — the "代码门禁" that makes the passive half physical:
 
 ```toml
-# .claude/cc-enslaver/sync-gate.toml
+# .claude/cc-enforcer/sync-gate.toml
 [[groups]]
 name = "rules-fanout"
 when = ["rules/*.md"]                       # editing any of these ...

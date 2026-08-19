@@ -9,7 +9,7 @@
 ## 语言
 
 - **English（骨架 / source of truth）** — [`../rules/01-*.md` ~ `../rules/12-*.md`](../rules/)（root 层）。英文是**骨架语言**：钩子注入默认英文（`prompts/` root），任意其它层的规则语义都以英文骨架为准。命令 / skill 的**正文**用中文书写（作者语言，可以是任意语言），但它们引用的规则**定义**以英文骨架为准。
-- **中文翻译** — [`../rules/zh/`](../rules/zh/)。逐节跟随英文骨架、与英文 1-1 对应；**如出现 drift，以英文骨架为准**（CI 硬门 [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py) 会拦，见 [`I18N.md`](./I18N.md)）。运行时用 `CC_ENSLAVER_LANG=zh` 切换注入语言；任意新语言放 `rules/<code>/` + `prompts/<code>/`，缺失文件自动回退英文骨架。
+- **中文翻译** — [`../rules/zh/`](../rules/zh/)。逐节跟随英文骨架、与英文 1-1 对应；**如出现 drift，以英文骨架为准**（CI 硬门 [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py) 会拦，见 [`I18N.md`](./I18N.md)）。运行时用 `CC_ENFORCER_LANG=zh` 切换注入语言；任意新语言放 `rules/<code>/` + `prompts/<code>/`，缺失文件自动回退英文骨架。
 
 ---
 
@@ -161,7 +161,7 @@
   强制形态。与 v0.22.1 同一先例，**零新检测器**：这是推理形态而非钩子可匹配的语法
   形态，落在规则文本 + 注入表；既有硬层（补丁标记内容层、rolling-patch 频率层、
   Stop layer (f) 三件套）仍是物理地板。
-- **12 是输出端（仓库引用图轴）约束**（v0.23）：06 收敛"被改的部分"，07 覆盖"用户要的部分"，12 补上"仓库其余部分跟着走"——所改内容的全库引用（文档 / 下游 / 测试 / 镜像翻译）必须连带更新或显式核对。被动半区由项目级 `.claude/cc-enslaver/sync-gate.toml` + Stop layer (i) 物理强制（组未满足且无 `同步核对` / `sync-check` 标记 → BLOCK；无配置的项目该层关闭）；主动半区是 `repo-refresh` skill 的全库五类缺陷扫描。
+- **12 是输出端（仓库引用图轴）约束**（v0.23）：06 收敛"被改的部分"，07 覆盖"用户要的部分"，12 补上"仓库其余部分跟着走"——所改内容的全库引用（文档 / 下游 / 测试 / 镜像翻译）必须连带更新或显式核对。被动半区由项目级 `.claude/cc-enforcer/sync-gate.toml` + Stop layer (i) 物理强制（组未满足且无 `同步核对` / `sync-check` 标记 → BLOCK；无配置的项目该层关闭）；主动半区是 `repo-refresh` skill 的全库五类缺陷扫描。
 
 ---
 
@@ -178,7 +178,7 @@
 | [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) | 规则 04 + 08（read-before-edit）+ 规则 09（new_string 补丁标记物理拦截）+ 规则 10 + 11（硬编码 / user-home 路径依赖内容检测）+ 规则 12（edited_files 会话记录，v0.23）|
 | [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py) | 规则 03 + 09（bypass 模式拦截）|
 | [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) + 规则 01+06 layer (g) + TL;DR 收尾约定 layer (h, v0.20；v0.23 加单条 160 字符长度上限) + 规则 12 sync-gate layer (i, v0.23) |
-| [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) | 规则 12 被动半区：`.claude/cc-enslaver/sync-gate.toml` 加载 + 连带组求值（v0.23）；写目标解析（`default_project_path`，确定性）与 glob 匹配（`matches_any`，与门禁共用唯一定义）v0.31 |
+| [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) | 规则 12 被动半区：`.claude/cc-enforcer/sync-gate.toml` 加载 + 连带组求值（v0.23）；写目标解析（`default_project_path`，确定性）与 glob 匹配（`matches_any`，与门禁共用唯一定义）v0.31 |
 | [`../hooks/scripts/manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) + [`../commands/sync-gate.md`](../commands/sync-gate.md) | 规则 12 的**配置编写与体检**（v0.31）：`init / list / check / add / remove / path`。`check` 是关键——加载器 failing-open，被丢弃的组与打不中文件的 glob 都不会报错，只会静默停止守护；`check` 把两者点名并以退出码 1 结束，可进 CI（本仓库自 v0.32 起对自己的配置断言它） |
 
 ---

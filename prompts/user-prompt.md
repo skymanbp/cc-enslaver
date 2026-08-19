@@ -1,4 +1,4 @@
-# cc-enslaver — Decision-time triggers (per-turn injection)
+# cc-enforcer — Decision-time triggers (per-turn injection)
 
 > Self-check before replying: any **hit** below → stop, verify or add
 > the missing step before continuing.
@@ -33,16 +33,16 @@
 | Left TODO / FIXME but said "done" / did refactors the user didn't ask for | rule 07 fidelity | Stop layer (d) BLOCK |
 | A done-claim reply with no `tldr` / plain-language summary at the end | v0.20 reply schema | **Stop layer (h) v0.20 BLOCK** |
 | A `tldr` item longer than one sentence / 160 chars (a paragraph is not a TL;DR; several things → one short line each) | v0.23 tldr length contract | **Stop layer (h) v0.23 BLOCK** |
-| Closing an edit without a repo-wide reference sweep (docs / downstream / tests / translations), when a sync-gate `when` group matched but no `require` file was edited and no `同步核对` / `sync-check` line is present | rule 12 repo-wide sync | **Stop layer (i) v0.23 BLOCK** (projects with `.claude/cc-enslaver/sync-gate.toml`) |
+| Closing an edit without a repo-wide reference sweep (docs / downstream / tests / translations), when a sync-gate `when` group matched but no `require` file was edited and no `同步核对` / `sync-check` line is present | rule 12 repo-wide sync | **Stop layer (i) v0.23 BLOCK** (projects with `.claude/cc-enforcer/sync-gate.toml`) |
 
 ## Closing schema (YAML · mandatory)
 
-Reply must end with a ```yaml `cc-enslaver:` block. Field names ARE the Stop-hook
+Reply must end with a ```yaml `cc-enforcer:` block. Field names ARE the Stop-hook
 detection markers — don't rename them. Modification tasks use the full form,
 non-modification tasks (Q&A, lookup) the minimal form (convergence / fidelity / tldr):
 
 ```yaml
-cc-enslaver:
+cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}   # rule 02
   edits: [{file: "path:line", what: "..."}]                     # rule 09
   convergence:                                                  # rule 06

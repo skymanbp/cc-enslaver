@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""cc-enslaver — Imperial Edicts (圣旨) CRUD helper.
+"""cc-enforcer — Imperial Edicts (圣旨) CRUD helper.
 
-Used by the /cc-enslaver:edict slash command and by users editing the
+Used by the /cc-enforcer:edict slash command and by users editing the
 edicts.toml file from the command line.
 
 Subcommands:
@@ -12,7 +12,7 @@ Subcommands:
   reload                     Re-print the loaded edicts (sanity check).
   path                       Print the resolved edicts.toml location.
 
-This script writes to ${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml
+This script writes to ${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml
 by default. Editing the file by hand is also fully supported — the format
 is small enough that the file is the source of truth, and this script is
 just an ergonomic shortcut.
@@ -49,9 +49,9 @@ class EdictWriteError(RuntimeError):
     """Raised when a rewrite would produce an unparseable edicts file."""
 
 
-_HEADER = """# cc-enslaver — Imperial Edicts (圣旨) file
+_HEADER = """# cc-enforcer — Imperial Edicts (圣旨) file
 #
-# This file defines project-specific hard rules that the cc-enslaver
+# This file defines project-specific hard rules that the cc-enforcer
 # plugin enforces on top of the built-in 12 rules.
 #
 # Schema:
@@ -86,15 +86,20 @@ def _project_path() -> Path:
             "Fix one of:\n"
             "  • cd into the project root (containing .git/ or .claude/), or\n"
             "  • set CLAUDE_PROJECT_DIR=/path/to/project, or\n"
-            "  • pass --global to write to ~/.claude/cc-enslaver/edicts.toml.\n"
+            "  • pass --global to write to ~/.claude/cc-enforcer/edicts.toml.\n"
         )
         sys.exit(2)
     return p
 
 
 def _global_path() -> Path:
-    """Personal-global edicts.toml under ~/.claude (v0.14)."""
-    return Path.home() / ".claude" / "cc-enslaver" / "edicts.toml"
+    """Personal-global edicts.toml under ~/.claude (v0.14).
+
+    v0.33 — delegates to the loader's `global_path()` instead of building
+    the path from a second copy of the plugin-name literal, so the WRITE
+    target cannot drift from what `load()` READS.
+    """
+    return edicts_lib.global_path()
 
 
 def _resolve_path(use_global: bool = False) -> Path:
@@ -120,7 +125,7 @@ def _read_raw_edicts(path: Path) -> list[dict]:
         sys.stderr.write("Python 3.11+ required (tomllib).\n")
         sys.exit(2)
     data = tomlio.parse_toml_file(
-        path, lambda m: sys.stderr.write(f"[cc-enslaver edicts] {m}\n"),
+        path, lambda m: sys.stderr.write(f"[cc-enforcer edicts] {m}\n"),
     )
     if data is None:
         sys.stderr.write(f"Could not parse {path}; refusing to rewrite it.\n")
@@ -327,7 +332,7 @@ def main() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description="cc-enslaver Imperial Edicts (圣旨) CRUD helper",
+        description="cc-enforcer Imperial Edicts (圣旨) CRUD helper",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -352,8 +357,8 @@ def main() -> int:
     p_add.add_argument("--note", help="Optional rationale shown in deny reason.")
     p_add.add_argument(
         "--global", action="store_true", dest="global_",
-        help="Write to personal global ~/.claude/cc-enslaver/edicts.toml "
-        "instead of project-level .claude/cc-enslaver/edicts.toml (v0.14).",
+        help="Write to personal global ~/.claude/cc-enforcer/edicts.toml "
+        "instead of project-level .claude/cc-enforcer/edicts.toml (v0.14).",
     )
     p_add.set_defaults(func=cmd_add)
 

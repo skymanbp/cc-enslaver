@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — markdown line context for the Stop hook.
+"""cc-enforcer — markdown line context for the Stop hook.
 
 Root cause this module exists to kill (v0.26.0 audit, root cause α, and
 its sibling β "each site re-implements the same judgement"): the Stop

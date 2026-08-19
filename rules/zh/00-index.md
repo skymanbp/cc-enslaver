@@ -4,7 +4,7 @@ title: "规则索引"
 severity: info
 ---
 
-# cc-enslaver 规则索引（中文翻译）
+# cc-enforcer 规则索引（中文翻译）
 
 > 本文件是英文骨架 [`../`](../)（`rules/`）的**中文翻译**，逐节对应、
 > best-effort 跟随骨架。**骨架为英文（source of truth）；两者漂移时以英文为准。**
@@ -60,7 +60,7 @@ severity: info
 - **12** —— *输出侧（改完之后，仓库引用图轴）*约束：只有所改内容的
   全库引用都被连带更新或显式确认无需改，修改才算完成。被动半区 =
   每次修改的连带更新纪律 + 项目级同步门禁
-  （`.claude/cc-enslaver/sync-gate.toml`，Stop layer (i)）；主动半区 =
+  （`.claude/cc-enforcer/sync-gate.toml`，Stop layer (i)）；主动半区 =
   `repo-refresh` 全库陈旧/过时/冗余/错误/漂移扫描 skill。与 06
   （收敛被改部分）、07（覆盖用户请求）互补，补上"带着仓库其余部分
   一起走"这一轴。

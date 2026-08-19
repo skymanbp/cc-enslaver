@@ -150,7 +150,7 @@ class TestThresholdBoundary(_GcBase):
 
 
 class TestAutoGCOnSessionStart(_GcBase):
-    """v0.18 — opt-in auto-GC at SessionStart via CC_ENSLAVER_AUTO_GC_DAYS.
+    """v0.18 — opt-in auto-GC at SessionStart via CC_ENFORCER_AUTO_GC_DAYS.
 
     The auto-GC entry lives in `inject_context.py`'s SessionStart code
     path. These tests drive inject_context as a subprocess (same
@@ -188,7 +188,7 @@ class TestAutoGCOnSessionStart(_GcBase):
         self._make_session_file("old2", age_days=40)
         self._make_session_file("fresh", age_days=1)
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+            "CC_ENFORCER_AUTO_GC_DAYS": "30",
         })
         self.assertEqual(proc.returncode, 0)
         self.assertFalse((self.sessions_dir / "old1.json").exists())
@@ -209,7 +209,7 @@ class TestAutoGCOnSessionStart(_GcBase):
 
         self._make_session_file("old", age_days=60)
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+            "CC_ENFORCER_AUTO_GC_DAYS": "30",
         })
         self.assertEqual(proc.returncode, 0)
         # Old file should still exist because rate limit kicked in.
@@ -225,7 +225,7 @@ class TestAutoGCOnSessionStart(_GcBase):
 
         self._make_session_file("old", age_days=60)
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+            "CC_ENFORCER_AUTO_GC_DAYS": "30",
         })
         self.assertEqual(proc.returncode, 0)
         self.assertFalse((self.sessions_dir / "old.json").exists())
@@ -241,7 +241,7 @@ class TestAutoGCOnSessionStart(_GcBase):
         os.utime(marker, (old_time, old_time))
 
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "30",
+            "CC_ENFORCER_AUTO_GC_DAYS": "30",
         })
         self.assertEqual(proc.returncode, 0)
         # Marker still exists (was rewritten by the GC pass with fresh ts).
@@ -253,7 +253,7 @@ class TestAutoGCOnSessionStart(_GcBase):
     def test_bad_env_value_is_skipped_silently(self) -> None:
         self._make_session_file("old", age_days=60)
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "not-a-number",
+            "CC_ENFORCER_AUTO_GC_DAYS": "not-a-number",
         })
         self.assertEqual(proc.returncode, 0)
         # Old file remains; no marker written.
@@ -265,7 +265,7 @@ class TestAutoGCOnSessionStart(_GcBase):
     def test_zero_or_negative_threshold_disables(self) -> None:
         self._make_session_file("old", age_days=60)
         proc = self._run_inject_session_start({
-            "CC_ENSLAVER_AUTO_GC_DAYS": "0",
+            "CC_ENFORCER_AUTO_GC_DAYS": "0",
         })
         self.assertEqual(proc.returncode, 0)
         self.assertTrue((self.sessions_dir / "old.json").exists())
@@ -281,7 +281,7 @@ class TestAutoGCOnSessionStart(_GcBase):
                 "hook_event_name": "UserPromptSubmit",
             }).encode("utf-8"),
             capture_output=True,
-            env={**self.env, "CC_ENSLAVER_AUTO_GC_DAYS": "30"},
+            env={**self.env, "CC_ENFORCER_AUTO_GC_DAYS": "30"},
         )
         self.assertEqual(proc.returncode, 0)
         self.assertTrue((self.sessions_dir / "old.json").exists())

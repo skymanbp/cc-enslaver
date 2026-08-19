@@ -1,6 +1,6 @@
 # 圣旨 — User-Defined Imperial Edicts
 
-> Project-specific hard rules that ride on top of cc-enslaver's built-in
+> Project-specific hard rules that ride on top of cc-enforcer's built-in
 > 12 rules. v0.12 introduces this as a layer-0 customisation mechanism.
 
 ---
@@ -29,8 +29,8 @@ hooks still run first).
 
 ## 2. File format
 
-Location: `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`.
-Fallback: `~/.claude/cc-enslaver/edicts.toml` (personal global).
+Location: `${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml`.
+Fallback: `~/.claude/cc-enforcer/edicts.toml` (personal global).
 
 Format: TOML, array of tables.
 
@@ -85,14 +85,14 @@ severity = "should"                         # soft layer only: injected as remin
 ### Bilingual rendering (v0.17; default flipped to English in v0.21)
 
 Both the soft-layer injection block and the hard-layer DENY reason
-honor the `CC_ENSLAVER_LANG` env var that v0.15 introduced for the
+honor the `CC_ENFORCER_LANG` env var that v0.15 introduced for the
 base prompts. Since the v0.21 skeleton flip, English is the default and
 unknown codes fall back to English:
 
-| `CC_ENSLAVER_LANG` | Injection banner | DENY headline |
+| `CC_ENFORCER_LANG` | Injection banner | DENY headline |
 |---|---|---|
-| unset / `en` / unknown | `🏛️ Imperial Edicts (project hard rules; priority > builtin 12)` | `cc-enslaver · Imperial Edict E01 violation` |
-| `zh` | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 12 条）` | `cc-enslaver · 圣旨 E01 violation` |
+| unset / `en` / unknown | `🏛️ Imperial Edicts (project hard rules; priority > builtin 12)` | `cc-enforcer · Imperial Edict E01 violation` |
+| `zh` | `🏛️ 圣旨（项目自定义硬规则；优先级 > 通用 12 条）` | `cc-enforcer · 圣旨 E01 violation` |
 
 The edict `text` / `note` strings themselves are passed through
 verbatim — they're whatever you wrote in `edicts.toml`. Only the
@@ -136,13 +136,13 @@ hook fires before reaching the edict layer.
 
 ## 4. Managing edicts
 
-### Slash command (`/cc-enslaver:edict`)
+### Slash command (`/cc-enforcer:edict`)
 
 ```
-/cc-enslaver:edict list
-/cc-enslaver:edict add E01 "禁止 mongoose" --must --deny-edit 'mongoose' --deny-bash 'npm i mongoose'
-/cc-enslaver:edict remove E01
-/cc-enslaver:edict path
+/cc-enforcer:edict list
+/cc-enforcer:edict add E01 "禁止 mongoose" --must --deny-edit 'mongoose' --deny-bash 'npm i mongoose'
+/cc-enforcer:edict remove E01
+/cc-enforcer:edict path
 ```
 
 ### Direct CLI
@@ -157,9 +157,9 @@ python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/manage_edicts.py" path
 
 #### `--global` flag (v0.14)
 
-By default `add` writes to `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
+By default `add` writes to `${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml`
 (team-shareable, recommended). Pass `--global` to write to
-`${HOME}/.claude/cc-enslaver/edicts.toml` instead — useful for
+`${HOME}/.claude/cc-enforcer/edicts.toml` instead — useful for
 personal rules that should apply across all your projects (e.g. "never
 let claude touch my dotfiles", "always use my preferred test runner").
 
@@ -230,7 +230,7 @@ the one item that was on it is retired below with its reason, because a
 limitations section that doubles as a wish-list is how a permanent constraint
 gets read as a temporary one.
 
-- **Per-session ephemeral edicts** (`/cc-enslaver:edict add --session ...`) —
+- **Per-session ephemeral edicts** (`/cc-enforcer:edict add --session ...`) —
   proposed since v0.12, **dropped in v0.32.1**, not deferred. The blocker is
   structural, not effort: this CLI is a Bash subprocess and has no
   `session_id`. Only the hook payload carries one, which is precisely why

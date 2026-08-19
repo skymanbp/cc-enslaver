@@ -458,7 +458,7 @@ class TestTldrContextV026(unittest.TestCase):
 
     def test_twin_tldr_in_the_canonical_yaml_fence_does_satisfy(self) -> None:
         self.assertTrue(
-            sg._has_tldr("```yaml\ncc-enslaver:\n  tldr: fixed the parser\n```\n"))
+            sg._has_tldr("```yaml\ncc-enforcer:\n  tldr: fixed the parser\n```\n"))
 
     def test_twin_plain_tldr_line_satisfies(self) -> None:
         self.assertTrue(sg._has_tldr("tldr: fixed the parser\n"))
@@ -475,7 +475,7 @@ class TestTldrContextV026(unittest.TestCase):
         # Not countable for EITHER half -- no presence, nothing measured.
         self.assertFalse(sg._has_tldr(text_fence))
         self.assertIsNone(sg._find_overlong_tldr(text_fence))
-        yaml_fence = "```yaml\ncc-enslaver:\n  tldr: " + long_item + "\n```\n"
+        yaml_fence = "```yaml\ncc-enforcer:\n  tldr: " + long_item + "\n```\n"
         self.assertTrue(sg._has_tldr(yaml_fence))
         self.assertIsNotNone(sg._find_overlong_tldr(yaml_fence))
 

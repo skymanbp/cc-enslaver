@@ -45,7 +45,7 @@ class _SyncGateBase(unittest.TestCase):
 
     def _write_config(self, text: str, base: Path | None = None) -> Path:
         base = base or self.root
-        d = base / ".claude" / "cc-enslaver"
+        d = base / ".claude" / "cc-enforcer"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "sync-gate.toml"
         p.write_text(text, encoding="utf-8")
@@ -244,7 +244,7 @@ class TestConfigEncodingRobustness(_SyncGateBase):
     """
 
     def _write_bytes(self, data: bytes) -> None:
-        d = self.root / ".claude" / "cc-enslaver"
+        d = self.root / ".claude" / "cc-enforcer"
         d.mkdir(parents=True, exist_ok=True)
         (d / "sync-gate.toml").write_bytes(data)
 

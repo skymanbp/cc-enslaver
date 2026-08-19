@@ -1,12 +1,12 @@
-# cc-enslaver
+# cc-enforcer
 
 > **让编程 agent 物理上无法忽略的规则。**
 > 一个 Claude Code 插件（同时也是任意 LLM 通用规则包），用拦截工具调用的方式——
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.32.2-blue.svg)](CHANGELOG.md)
-[![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
+[![Plugin Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
 **[English →](README.md)**
@@ -19,12 +19,12 @@
 在压力之下——长会话、上下文被压缩、凌晨两点还有个测试不过——它会决定不遵守，
 然后告诉你它遵守了。
 
-cc-enslaver 把这份契约里重要的那一半**从 prompt 里搬进 harness**。Claude Code
+cc-enforcer 把这份契约里重要的那一半**从 prompt 里搬进 harness**。Claude Code
 的 hook 在每次工具调用**之前**、每次回复被允许结束**之前**运行，违规返回真正的
 `deny` / `block`，agent 没法靠讲道理、道歉或"就这一次"绕过去：
 
 ```text
-cc-enslaver · rule 09 violation (rolling-patch interception)
+cc-enforcer · rule 09 violation (rolling-patch interception)
 
 Tool: Edit
 Target: hooks/scripts/stop_guard.py
@@ -72,18 +72,18 @@ LLB 编程助手（Claude Code、Cursor、Copilot、Cline、Aider……）会掉
 仓库自带 `.claude-plugin/marketplace.json`，可直接作为单插件 marketplace 注册：
 
 ```bash
-git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
+git clone https://github.com/skymanbp/cc-enforcer.git /path/to/cc-enforcer
 ```
 
 然后在任意 Claude Code 会话（CLI 或 IDE）里：
 
 ```
-/plugin marketplace add /path/to/cc-enslaver
-/plugin install cc-enslaver@cc-enslaver
+/plugin marketplace add /path/to/cc-enforcer
+/plugin install cc-enforcer@cc-enforcer
 ```
 
-验证：`/plugin` → **Installed** 里应出现 `cc-enslaver@cc-enslaver`。
-命令随即以 `/cc-enslaver:checklist`、`/cc-enslaver:verify` 等形式出现。
+验证：`/plugin` → **Installed** 里应出现 `cc-enforcer@cc-enforcer`。
+命令随即以 `/cc-enforcer:checklist`、`/cc-enforcer:verify` 等形式出现。
 
 > **依赖：** PATH 上有 Python（在 3.13 上测过）。hook 脚本只用标准库——不需要
 > pip，不引入任何第三方包。
@@ -94,8 +94,8 @@ git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
 of truth，[`rules/zh/`](rules/zh/) 是中文翻译）：
 
 ```bash
-cat rules/zh/*.md > cc-enslaver.txt     # 中文
-cat rules/*.md    > cc-enslaver.txt     # 英文骨架
+cat rules/zh/*.md > cc-enforcer.txt     # 中文
+cat rules/*.md    > cc-enforcer.txt     # 英文骨架
 # 作为 system prompt / 前置上下文喂给你选的 agent
 ```
 
@@ -180,15 +180,15 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 由钩子在每次 Edit / Write / Bash **落地之前**去匹配真实内容：
 
 ```bash
-/cc-enslaver:edict add E01 "禁止 mongoose，统一用 prisma" --must \
+/cc-enforcer:edict add E01 "禁止 mongoose，统一用 prisma" --must \
     --deny-edit 'from ["'"'"']mongoose["'"'"']' \
     --deny-bash 'npm\s+(i|install)\s+mongoose'
 ```
 
 - **两档严重度，机制上不同。** `must` + 正则 → `PreToolUse` DENY 并点名圣旨 ID；
   `should` → 只是提醒文字，永不拒绝。
-- **两个作用域。** `.claude/cc-enslaver/edicts.toml`（项目级，提交进 git 让全队
-  共享红线）或 `~/.claude/cc-enslaver/edicts.toml`（`--global`，个人跨项目）。
+- **两个作用域。** `.claude/cc-enforcer/edicts.toml`（项目级，提交进 git 让全队
+  共享红线）或 `~/.claude/cc-enforcer/edicts.toml`（`--global`，个人跨项目）。
 - **热加载** —— 每次钩子事件重读，所以你可以在会话中途反复调正则。
 - **每轮重新注入**，上下文压缩不会把你的规则悄悄丢掉。
 - **按设计排在内置守卫之后**：圣旨只能加限制，不能减限制。
@@ -203,12 +203,12 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 
 | 入口 | 作用 |
 |---|---|
-| `/cc-enslaver:checklist` | 打印 **8 段清单**（改前 → 改后 → 收敛 → 忠实 → 读/想 → 系统式 → 大白话 → 全库同步）。其中补丁标记那一项是与钩子真实常量同步的**封闭集**，所以不会出现"每项都打勾却仍被 DENY"。 |
-| `/cc-enslaver:verify` | 把 agent 上一条回复当作**不可信输入**：抽出每条事实断言，分成四类（代码位置 / 代码行为 / 外部资源 / 运行结果），每类规定不同的重新验证方法。明确禁止凭记忆作答。 |
-| `/cc-enslaver:edict` | 圣旨的 `list / add / remove / reload / path`（`--global` 走个人作用域）。 |
-| `/cc-enslaver:gc` | 列出——加 `--apply` 才删除——超过 N 天未动的会话状态文件。默认 dry-run，且命令文件禁止 agent 替你决定 `--apply`。 |
-| `/cc-enslaver:i18n` | 检查每份翻译是否仍与英文骨架逐文件、逐标题层级对齐。 |
-| `/cc-enslaver:sync-gate` | 本项目 rule-12 连带更新组的 `init / list / check / add / remove / path`。**重点是 `check`**：门的加载器是 failing-open 的，一个被丢弃的组、一个打不中任何文件的 glob，都会让它**静默**停止守护——一道你还信着、其实早已失效的门，比没有门更坏。`check` 把两者都点名并以退出码 1 结束，可直接进 CI。 |
+| `/cc-enforcer:checklist` | 打印 **8 段清单**（改前 → 改后 → 收敛 → 忠实 → 读/想 → 系统式 → 大白话 → 全库同步）。其中补丁标记那一项是与钩子真实常量同步的**封闭集**，所以不会出现"每项都打勾却仍被 DENY"。 |
+| `/cc-enforcer:verify` | 把 agent 上一条回复当作**不可信输入**：抽出每条事实断言，分成四类（代码位置 / 代码行为 / 外部资源 / 运行结果），每类规定不同的重新验证方法。明确禁止凭记忆作答。 |
+| `/cc-enforcer:edict` | 圣旨的 `list / add / remove / reload / path`（`--global` 走个人作用域）。 |
+| `/cc-enforcer:gc` | 列出——加 `--apply` 才删除——超过 N 天未动的会话状态文件。默认 dry-run，且命令文件禁止 agent 替你决定 `--apply`。 |
+| `/cc-enforcer:i18n` | 检查每份翻译是否仍与英文骨架逐文件、逐标题层级对齐。 |
+| `/cc-enforcer:sync-gate` | 本项目 rule-12 连带更新组的 `init / list / check / add / remove / path`。**重点是 `check`**：门的加载器是 failing-open 的，一个被丢弃的组、一个打不中任何文件的 glob，都会让它**静默**停止守护——一道你还信着、其实早已失效的门，比没有门更坏。`check` 把两者都点名并以退出码 1 结束，可直接进 CI。 |
 | **`verifier` 子代理** | 一个被刻意限权的只读检查者（工具只有 Read/Grep/Glob——这是权限事实，不是嘱咐）。每条断言返回 *intact / drift / missing / mismatch / unverifiable*。它当不了修复者，因此没有"偷偷改掉不一致"的动机。 |
 | **`systematic-debug` skill** | 遇到 debug 语境自动接管流程：**先**造一个快速、确定性的复现回路，**再**提假设。"30 秒的间歇性 flaky 回路只比没有回路好一点点；2 秒的确定性回路是 debug 超能力。" |
 | **`repo-refresh` skill** | 遇到全库审查语境自动触发：把代码与散文当作同一个面来扫陈旧 / 过时 / 冗余 / 错误 / 漂移，最后要求你把这次发现的耦合登记成 sync-gate 组。 |
@@ -250,7 +250,7 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 
 | 事件 | Matcher | 行为 | 实现 |
 |---|---|---|---|
-| `SessionStart` | — | 注入 12 条规则摘要 + 回复 schema + 圣旨（默认英文，`CC_ENSLAVER_LANG` 可切任意语言）。 | [`inject_context.py`](hooks/scripts/inject_context.py) |
+| `SessionStart` | — | 注入 12 条规则摘要 + 回复 schema + 圣旨（默认英文，`CC_ENFORCER_LANG` 可切任意语言）。 | [`inject_context.py`](hooks/scripts/inject_context.py) |
 | `UserPromptSubmit` | — | 每轮重新注入决策触发器 + 圣旨——这是对抗上下文压缩的防线。 | [`inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | 记录读取、捕获 mtime 基线，并运行上文列出的内容 / 频率 / 圣旨闸门。 | [`read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | tokenize 命令、拒绝绕过标志与破坏性操作、处理 read 登记、扫描圣旨。 | [`bash_guard.py`](hooks/scripts/bash_guard.py) |
@@ -276,13 +276,13 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 
 | 变量 | 效果 |
 |---|---|
-| `CC_ENSLAVER_LANG=<code>` | prompt、圣旨与拒绝理由的注入语言。未设 / `en` = 英文骨架；`zh` = 中文；其它语言码读 `<dir>/<code>/`，缺失文件逐个回退英文。 |
-| `CC_ENSLAVER_DISABLE_LAYER_G=1` | 关闭 Stop 层 (g) 的文件声明核验，其余八层仍生效。 |
-| `CC_ENSLAVER_AUTO_GC_DAYS=N` | SessionStart 时自动清理超过 N 天的会话状态，24 小时内至多跑一次。未设 / `0` → 关闭。 |
-| `CLAUDE_PLUGIN_DATA` | 会话状态根目录。由 Claude Code 设置；回退到 `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/`，再回退到 `~/.claude/local/cc-enslaver/`。 |
-| `CLAUDE_PROJECT_DIR` | 项目根，用于定位 `.claude/cc-enslaver/edicts.toml` 与 `sync-gate.toml`。 |
+| `CC_ENFORCER_LANG=<code>` | prompt、圣旨与拒绝理由的注入语言。未设 / `en` = 英文骨架；`zh` = 中文；其它语言码读 `<dir>/<code>/`，缺失文件逐个回退英文。 |
+| `CC_ENFORCER_DISABLE_LAYER_G=1` | 关闭 Stop 层 (g) 的文件声明核验，其余八层仍生效。 |
+| `CC_ENFORCER_AUTO_GC_DAYS=N` | SessionStart 时自动清理超过 N 天的会话状态，24 小时内至多跑一次。未设 / `0` → 关闭。 |
+| `CLAUDE_PLUGIN_DATA` | 会话状态根目录。由 Claude Code 设置；回退到 `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/`，再回退到 `~/.claude/local/cc-enforcer/`。 |
+| `CLAUDE_PROJECT_DIR` | 项目根，用于定位 `.claude/cc-enforcer/edicts.toml` 与 `sync-gate.toml`。 |
 
-**按项目开启的 sync gate**（rule 12）：在 `.claude/cc-enslaver/sync-gate.toml`
+**按项目开启的 sync gate**（rule 12）：在 `.claude/cc-enforcer/sync-gate.toml`
 里声明连带更新组，Stop 层 (i) 负责执行。
 
 ---
@@ -305,7 +305,7 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 ## 仓库结构
 
 ```
-cc-enslaver/
+cc-enforcer/
 ├── rules/                       # 12 条规则 + 索引 —— 英文骨架（source of truth）
 │   └── zh/                      # 中文翻译，结构由 CI 门把关
 ├── prompts/                     # SessionStart + 每轮注入（含 zh/）
@@ -336,7 +336,7 @@ cc-enslaver/
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 601 个测试（python -m unittest discover tests）
+└── tests/                       # 604 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
     ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
@@ -347,7 +347,7 @@ cc-enslaver/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **601 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **604 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。
@@ -422,7 +422,7 @@ rule 12 的连带更新组自 v0.23 起就能强制执行，却
 **一道你还信着、其实早已失效的门，比没有门更坏**，因为你不会再去看它。所以：
 
 ```
-$ /cc-enslaver:sync-gate check
+$ /cc-enforcer:sync-gate check
   ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
   !! code-docs.require    'nowhere/*.rst'      → 0 file(s)
 

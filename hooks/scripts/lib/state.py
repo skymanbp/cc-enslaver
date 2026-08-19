@@ -1,4 +1,4 @@
-"""Per-session state for cc-enslaver read-before-edit guard.
+"""Per-session state for cc-enforcer read-before-edit guard.
 
 Each Claude Code session gets one JSON file recording every file the
 agent has Read or Written. The PreToolUse guard consults this file to
@@ -15,8 +15,8 @@ land on disk.
 
 Storage location resolution order:
     1. ${CLAUDE_PLUGIN_DATA}/sessions/   -- recommended for plugin hooks
-    2. ${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/
-    3. ~/.claude/local/cc-enslaver/sessions/
+    2. ${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/sessions/
+    3. ~/.claude/local/cc-enforcer/sessions/
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ if os.name == "nt":
 else:
     import fcntl
 
-_PLUGIN_NAME = "cc-enslaver"
+_PLUGIN_NAME = "cc-enforcer"
 
 # v0.24 — os.replace retry budget (see save()). The reader-collision
 # window is micro-to-milliseconds; 8 attempts with a growing backoff
@@ -181,7 +181,7 @@ def _quarantine_unparseable(f: Path, session_id: str) -> None:
         # so the error is reported and the caller still fails open.
         moved = f"<could not move aside: {exc}>"
     sys.stderr.write(
-        f"[cc-enslaver] state for {session_id!r} is unparseable after a "
+        f"[cc-enforcer] state for {session_id!r} is unparseable after a "
         f"retry; moved to {moved}. This session starts from an empty "
         f"record — earlier reads/baselines in it are gone.\n"
     )
@@ -229,7 +229,7 @@ def _load_for_mutation(session_id: str) -> dict | None:
             if attempt == 0:
                 time.sleep(0.01)
     sys.stderr.write(
-        f"[cc-enslaver] state for {session_id!r} unreadable after retry; "
+        f"[cc-enforcer] state for {session_id!r} unreadable after retry; "
         f"skipping this mutation (failing open)\n"
     )
     return None
@@ -304,7 +304,7 @@ def save(state: dict) -> bool:
         # save contract; swallowing here is deliberate.
         pass
     sys.stderr.write(
-        f"[cc-enslaver] state save abandoned after {_REPLACE_ATTEMPTS} "
+        f"[cc-enforcer] state save abandoned after {_REPLACE_ATTEMPTS} "
         f"os.replace attempts (concurrent reader held {f.name}); "
         f"this mutation is lost (failing open)\n"
     )
@@ -356,7 +356,7 @@ def _session_lock(session_id: str):
         except OSError as exc:
             # Failing open: proceed unlocked rather than block the hook.
             sys.stderr.write(
-                f"[cc-enslaver] state lock unavailable ({exc}); "
+                f"[cc-enforcer] state lock unavailable ({exc}); "
                 f"proceeding unlocked\n"
             )
         yield
@@ -371,7 +371,7 @@ def _session_lock(session_id: str):
                         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
                 except OSError as exc:
                     sys.stderr.write(
-                        f"[cc-enslaver] state unlock failed ({exc})\n"
+                        f"[cc-enforcer] state unlock failed ({exc})\n"
                     )
             fh.close()
 
@@ -676,7 +676,7 @@ def next_stop_turn(session_id: str) -> int:
 # `last_edit_turn` (above) only answers "did an edit happen this turn?";
 # the sync gate needs "WHICH files were edited this session?" so it can
 # match them against the project's co-update groups
-# (.claude/cc-enslaver/sync-gate.toml). read_guard appends to this set
+# (.claude/cc-enforcer/sync-gate.toml). read_guard appends to this set
 # on every ACCEPTED Edit / Write (same call sites as record_edit_turn —
 # a denied edit never landed, so it is not recorded). Paths are stored
 # normalized (realpath + normcase) like `read_files`.

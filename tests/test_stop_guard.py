@@ -548,7 +548,7 @@ class TestRule10FileClaimVerification(_StopBase):
       - file claim but no baseline for that file → pass (can't verify)
       - file claim AND baseline AND on-disk state shows actual change →
         pass (claim is true)
-      - CC_ENSLAVER_DISABLE_LAYER_G is set → pass (escape hatch)
+      - CC_ENFORCER_DISABLE_LAYER_G is set → pass (escape hatch)
 
     Fail (BLOCK) condition:
       - file claim with verb "edited" / "modified" AND baseline mtime
@@ -686,14 +686,14 @@ class TestRule10FileClaimVerification(_StopBase):
         self.assertIsNone(out)
 
     def test_escape_hatch_disables_layer(self) -> None:
-        # Set CC_ENSLAVER_DISABLE_LAYER_G; even a contradicted claim
+        # Set CC_ENFORCER_DISABLE_LAYER_G; even a contradicted claim
         # should pass.
         import os
         target = self._writable("x.py")
         baseline_mtime = os.path.getmtime(target)
         self._seed_edit_turn_and_baseline(5, {target: baseline_mtime})
         msg = self._full_compliance_message() + f"\nI edited {target}."
-        env = {**self.env, "CC_ENSLAVER_DISABLE_LAYER_G": "1"}
+        env = {**self.env, "CC_ENFORCER_DISABLE_LAYER_G": "1"}
         rc, out, _ = run_hook(
             [GUARD],
             {
@@ -843,7 +843,7 @@ class TestTldrLayerH(_StopBase):
         self.assertIsNone(out, msg="no done-claim → (h) must not fire")
 
     def test_block_reason_carries_plain_language_line(self) -> None:
-        # cc-enslaver's OWN block output also ends with a 大白话 line.
+        # cc-enforcer's OWN block output also ends with a 大白话 line.
         rc, out, _ = self._stop(self._compliant_non_edit(), turn_count=5)
         self.assertIn("大白话:", out["reason"])
 
@@ -962,7 +962,7 @@ class TestTldrLengthLayerH(_StopBase):
         # skip must NOT exempt it.
         msg = (
             self._compliant_non_edit()
-            + "\n```yaml\ncc-enslaver:\n  tldr: \"" + "超" * 200 + "\"\n```"
+            + "\n```yaml\ncc-enforcer:\n  tldr: \"" + "超" * 200 + "\"\n```"
         )
         rc, out, _ = self._stop(msg, turn_count=5)
         self.assertIsNotNone(out, msg="overlong tldr inside ```yaml must block")
@@ -1030,7 +1030,7 @@ class TestSyncGateLayerI(_StopBase):
     """v0.23 — layer (i): rule 12 repo-wide sync gate.
 
     Edit-turns only, per-project opt-in via
-    .claude/cc-enslaver/sync-gate.toml. Block condition: a group's `when`
+    .claude/cc-enforcer/sync-gate.toml. Block condition: a group's `when`
     glob matched an edited file, no edited file matched any `require`
     glob, and the reply carries no sync marker. Failing-open on missing /
     malformed config.
@@ -1051,7 +1051,7 @@ class TestSyncGateLayerI(_StopBase):
         self.env["CLAUDE_PROJECT_DIR"] = str(self.tmpdir)
 
     def _write_gate(self, toml_text: str) -> None:
-        gate_dir = self.tmpdir / ".claude" / "cc-enslaver"
+        gate_dir = self.tmpdir / ".claude" / "cc-enforcer"
         gate_dir.mkdir(parents=True, exist_ok=True)
         (gate_dir / "sync-gate.toml").write_text(toml_text, encoding="utf-8")
 
@@ -1511,7 +1511,7 @@ class TestCanonicalYamlSchema(_StopBase):
     CANONICAL = (
         "已修复。\n\n"
         "```yaml\n"
-        "cc-enslaver:\n"
+        "cc-enforcer:\n"
         "  改前:\n"
         "    架构定位: auth 链路第 3 步\n"
         "    根因: auth.py:142 缺锁\n"
@@ -1541,7 +1541,7 @@ class TestCanonicalYamlSchema(_StopBase):
     CANONICAL_EN = (
         "Fixed.\n\n"
         "```yaml\n"
-        "cc-enslaver:\n"
+        "cc-enforcer:\n"
         "  before:\n"
         "    architecture: auth chain step 3\n"
         "    root cause: auth.py:142 missing lock\n"
@@ -2141,7 +2141,7 @@ class TestNestedFenceTldrExtraction(unittest.TestCase):
         tick3 = "`" * 3
         reply = (
             "Done." + nl * 2 + tick3 + "yaml" + nl
-            + "cc-enslaver:" + nl
+            + "cc-enforcer:" + nl
             + '  tldr: "' + "B" * 300 + '"' + nl
             + tick3 + nl
         )
@@ -2286,7 +2286,7 @@ class TestGraceAckScopeV0251(_StopBase):
     """
 
     def _write_config(self) -> None:
-        cfg_dir = self.tmpdir / ".claude" / "cc-enslaver"
+        cfg_dir = self.tmpdir / ".claude" / "cc-enforcer"
         cfg_dir.mkdir(parents=True, exist_ok=True)
         (self.tmpdir / ".git").mkdir(exist_ok=True)
         (cfg_dir / "sync-gate.toml").write_text(
@@ -2398,7 +2398,7 @@ class TestSyncMarkerSubstanceV032(unittest.TestCase):
         self.assertFalse(self.sg._has_sync_marker("> sync-check: 别人说的"))
         # …but the canonical schema block IS the agent's own.
         self.assertTrue(self.sg._has_sync_marker(
-            "```yaml\ncc-enslaver:\n  sync-check: rules 已同步\n```"))
+            "```yaml\ncc-enforcer:\n  sync-check: rules 已同步\n```"))
 
     def test_the_documented_limit_is_still_the_limit(self) -> None:
         """Recorded honestly: vacuous PROSE is not detected, and is not claimed to be.

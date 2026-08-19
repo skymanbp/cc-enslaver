@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""cc-enslaver — sync-gate (rule 12) config CRUD + diagnostics.
+"""cc-enforcer — sync-gate (rule 12) config CRUD + diagnostics.
 
-Backs the `/cc-enslaver:sync-gate` slash command. Writes to
-``<project-root>/.claude/cc-enslaver/sync-gate.toml``, the per-project
+Backs the `/cc-enforcer:sync-gate` slash command. Writes to
+``<project-root>/.claude/cc-enforcer/sync-gate.toml``, the per-project
 opt-in config that drives Stop layer (i).
 
 Why this exists (v0.31)
@@ -54,7 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # because the sys.path bootstrap above must run before these lib imports
-from lib import projroot, sync_gate as sg  # noqa: E402
+from lib import sync_gate as sg  # noqa: E402
 # because of the same sys.path bootstrap, this import cannot sit at top
 from lib import tomlio  # noqa: E402
 
@@ -63,7 +63,7 @@ class SyncGateWriteError(RuntimeError):
     """Raised when a rewrite would produce an unusable config."""
 
 
-_HEADER = """# cc-enslaver — repo-wide sync gate (rule 12)
+_HEADER = """# cc-enforcer — repo-wide sync gate (rule 12)
 #
 # Co-update groups for THIS repo. Semantics of one group: if any file
 # edited during a session matches a `when` glob, then at least one edited
@@ -80,7 +80,7 @@ _HEADER = """# cc-enslaver — repo-wide sync gate (rule 12)
 #                             Use for lock-step invariants where one stale
 #                             sibling is the failure mode.
 #
-# Run `/cc-enslaver:sync-gate check` after editing: a glob that matches
+# Run `/cc-enforcer:sync-gate check` after editing: a glob that matches
 # nothing is silently inert, and this config is failing-open by design.
 #
 # [[groups]]
@@ -236,21 +236,25 @@ def cmd_init(_: argparse.Namespace) -> int:
     path.write_text(_HEADER, encoding="utf-8")
     print(f"created {path}")
     print("0 group(s) — Stop layer (i) stays inert until you add one.")
-    print("Next: /cc-enslaver:sync-gate add NAME --when GLOB --require GLOB")
+    print("Next: /cc-enforcer:sync-gate add NAME --when GLOB --require GLOB")
     return 0
 
 
 def cmd_path(_: argparse.Namespace) -> int:
+    # v0.33 — the would-be path goes through the same DETERMINISTIC
+    # resolver that `add` / `init` write through, instead of a hand-joined
+    # copy of the plugin-name literal: a path this command prints but the
+    # writers never touch would be a lie with a directory name in it.
     existing = sg.config_path()
     if existing is not None:
         print(existing)
         return 0
-    root = projroot.cwd_if_project_root()
-    if root is None:
+    target = sg.default_project_path()
+    if target is None:
         print("(no project root resolved; set CLAUDE_PROJECT_DIR)")
         return 1
     print("(file does not exist yet; would be created at:)")
-    print(root / ".claude" / "cc-enslaver" / "sync-gate.toml")
+    print(target)
     return 0
 
 
@@ -270,7 +274,7 @@ def cmd_list(_: argparse.Namespace) -> int:
     path = sg.config_path()
     if path is None:
         print("(no sync-gate.toml found — Stop layer (i) is inert here)")
-        print("To create one: /cc-enslaver:sync-gate init")
+        print("To create one: /cc-enforcer:sync-gate init")
         return 0
     groups = _load_groups(path)
     if not groups:
@@ -293,11 +297,11 @@ def cmd_check(_: argparse.Namespace) -> int:
     path = sg.config_path()
     if path is None:
         print("(no sync-gate.toml found — Stop layer (i) is inert here)")
-        print("To create one: /cc-enslaver:sync-gate init")
+        print("To create one: /cc-enforcer:sync-gate init")
         return 0
 
     raw = tomlio.parse_toml_file(
-        path, lambda m: sys.stderr.write(f"[cc-enslaver sync-gate] {m}\n"),
+        path, lambda m: sys.stderr.write(f"[cc-enforcer sync-gate] {m}\n"),
     )
     if raw is None:
         print(f"config: {path}")
@@ -371,7 +375,7 @@ def cmd_add(args: argparse.Namespace) -> int:
     print(f"added group {args.name!r} → {path}")
     print(f"  when    = {list(new.when)}")
     print(f"  require = {list(new.require)}   [mode={new.mode}]")
-    print("\nRun `/cc-enslaver:sync-gate check` to confirm both globs "
+    print("\nRun `/cc-enforcer:sync-gate check` to confirm both globs "
           "actually match files.")
     return 0
 
@@ -401,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description="cc-enslaver sync-gate (rule 12) config helper",
+        description="cc-enforcer sync-gate (rule 12) config helper",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

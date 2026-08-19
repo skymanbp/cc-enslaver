@@ -1,4 +1,4 @@
-# cc-enslaver — repo-wide sync gate config (rule 12, v0.23)
+# cc-enforcer — repo-wide sync gate config (rule 12, v0.23)
 #
 # Co-update groups for THIS repo (dogfood: the plugin's own development is
 # governed by its own gate). Semantics per group: if any file edited this

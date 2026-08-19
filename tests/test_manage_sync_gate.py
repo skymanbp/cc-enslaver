@@ -78,7 +78,7 @@ class _RepoBase(unittest.TestCase):
         return root
 
     def _cfg(self, root: Path) -> Path:
-        return root / ".claude" / "cc-enslaver" / "sync-gate.toml"
+        return root / ".claude" / "cc-enforcer" / "sync-gate.toml"
 
     def _seed(self, root: Path, name="seeded", when="src/*.py",
               require="docs/*.md") -> Path:
@@ -310,7 +310,7 @@ class TestModeAllRoundTrips(_RepoBase):
 
 
 class TestThisRepoConfigIsHealthy(unittest.TestCase):
-    """v0.32 — cc-enslaver's OWN sync-gate config is checked in CI.
+    """v0.32 — cc-enforcer's OWN sync-gate config is checked in CI.
 
     v0.31.0 shipped `check` on the argument that an unenforced gate you
     still trust is worse than none, and exited 1 specifically so it could
@@ -328,7 +328,7 @@ class TestThisRepoConfigIsHealthy(unittest.TestCase):
         rc, out, err = _run(["check"], cwd=REPO_ROOT, project_dir=REPO_ROOT)
         self.assertEqual(
             rc, 0,
-            f"this repo's own .claude/cc-enslaver/sync-gate.toml has a "
+            f"this repo's own .claude/cc-enforcer/sync-gate.toml has a "
             f"problem — a dropped group or a glob matching no file means "
             f"Stop layer (i) is silently not guarding what the config "
             f"claims.\n\nstdout:\n{out}\nstderr:\n{err}",
@@ -342,7 +342,7 @@ class TestThisRepoConfigIsHealthy(unittest.TestCase):
         that `test_doc_sync` calls a vacuous green.
         """
         groups = sg.load_file(
-            REPO_ROOT / ".claude" / "cc-enslaver" / "sync-gate.toml")
+            REPO_ROOT / ".claude" / "cc-enforcer" / "sync-gate.toml")
         self.assertTrue(groups, "this repo dogfoods rule 12; groups vanished")
         _, out, _ = _run(["check"], cwd=REPO_ROOT, project_dir=REPO_ROOT)
         self.assertIn(f"{len(groups)} group(s) loaded", out)
@@ -367,6 +367,29 @@ class TestSharedPrimitives(unittest.TestCase):
     def test_dumps_check_accepts_valid_and_names_invalid(self) -> None:
         self.assertIsNone(tomlio.dumps_check('a = "b"\n'))
         self.assertIsNotNone(tomlio.dumps_check("a = \n"))
+
+
+class TestPathPrintsTheWriteTarget(_RepoBase):
+    """v0.33 — `path` must print where `add` would WRITE, not the cwd.
+
+    The old `cmd_path` derived its would-be path from the process cwd with
+    a hand-joined copy of the plugin-name literal, while `add` / `init`
+    write through `sg.default_project_path()` — which honours
+    CLAUDE_PROJECT_DIR first. With the env naming repo `a` and the shell
+    sitting in repo `b`, `path` printed a location in `b` that no write
+    would ever touch: the same print-vs-write divergence class as the
+    v0.31 birth defect this file's star test pins. Found during the
+    cc-enslaver → cc-enforcer rename.
+    """
+
+    def test_path_with_no_config_prints_the_named_projects_target(self) -> None:
+        rc, out, err = _run(["path"], cwd=self.b, project_dir=self.a)
+        self.assertEqual(rc, 0, msg=f"stdout={out!r} stderr={err!r}")
+        self.assertIn(str(self._cfg(self.a)), out,
+                      "path must print the deterministic write target")
+        self.assertNotIn(str(self._cfg(self.b)), out,
+                         "path printed a location in the repo the shell "
+                         "happened to be in — no write would land there")
 
 
 if __name__ == "__main__":

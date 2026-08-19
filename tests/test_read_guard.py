@@ -832,7 +832,7 @@ class TestRollingPatchInterception(_GuardTestBase):
 
     def test_state_persists_edits_per_file_field(self) -> None:
         # Quick sanity check that the JSON field name is what other tools
-        # (e.g. /cc-enslaver:gc, future tooling) can rely on.
+        # (e.g. /cc-enforcer:gc, future tooling) can rely on.
         target = self._writable_target()
         self._pre("Read", target)
         self._do_small_edit(target)

@@ -51,7 +51,7 @@ class _EdictsBase(unittest.TestCase):
             "HOME": str(self.proj),
             "USERPROFILE": str(self.proj),
         }
-        self.edicts_path = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        self.edicts_path = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
 
     def tearDown(self) -> None:
         shutil.rmtree(self.proj, ignore_errors=True)
@@ -488,7 +488,7 @@ class TestMultipleEdicts(_EdictsBase):
 # --------------------------------------------------------------------------- #
 # manage_edicts.py CLI subprocess tests (v0.14).
 #
-# Tests the actual subprocess invocation surface that /cc-enslaver:edict
+# Tests the actual subprocess invocation surface that /cc-enforcer:edict
 # and shell users hit. Catches integration bugs (argparse drift, file
 # layout, write-then-read round-trip) that the lib-level tests miss.
 # --------------------------------------------------------------------------- #
@@ -545,7 +545,7 @@ class TestManageCLI(_ManageCLIBase):
         )
         self.assertEqual(rc, 0, msg=f"add failed: {err}")
         # File written into project-level location.
-        f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        f = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
         self.assertTrue(f.is_file())
         # list reflects the new edict.
         rc, out, _ = self._run("list")
@@ -578,12 +578,12 @@ class TestManageCLI(_ManageCLIBase):
         rc, out, _ = self._run("list")
         self.assertIn("should", out)
         # And the file actually says severity = "should".
-        f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        f = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
         self.assertIn('severity = "should"', f.read_text(encoding="utf-8"))
 
 
 class TestManageCLIGlobalFlag(_ManageCLIBase):
-    """v0.14 --global writes to ~/.claude/cc-enslaver/edicts.toml."""
+    """v0.14 --global writes to ~/.claude/cc-enforcer/edicts.toml."""
 
     def test_global_add_writes_to_home(self) -> None:
         rc, out, err = self._run(
@@ -592,8 +592,8 @@ class TestManageCLIGlobalFlag(_ManageCLIBase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("global", out.lower())
         # File goes under HOME, not under CLAUDE_PROJECT_DIR.
-        global_f = self.home / ".claude" / "cc-enslaver" / "edicts.toml"
-        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        global_f = self.home / ".claude" / "cc-enforcer" / "edicts.toml"
+        proj_f = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
         self.assertTrue(global_f.is_file())
         self.assertFalse(proj_f.is_file())
 
@@ -631,9 +631,9 @@ class TestManageCLIGlobalFlag(_ManageCLIBase):
 
 class TestBilingualRendering(_EdictsBase):
     """v0.17 / v0.21 — edict UI chrome (injection banner + deny reason)
-    follows CC_ENSLAVER_LANG. v0.21 inverted the default: **English is
+    follows CC_ENFORCER_LANG. v0.21 inverted the default: **English is
     the skeleton / runtime default**; Chinese is a first-class
-    translation reached via CC_ENSLAVER_LANG=zh.
+    translation reached via CC_ENFORCER_LANG=zh.
 
     Tests cover:
       - Default (no env) → English "Imperial Edicts" banner + deny reason
@@ -653,7 +653,7 @@ class TestBilingualRendering(_EdictsBase):
         rc, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
-            env_overrides=self.env,  # no CC_ENSLAVER_LANG → English skeleton
+            env_overrides=self.env,  # no CC_ENFORCER_LANG → English skeleton
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Imperial Edicts", ctx)
@@ -670,7 +670,7 @@ class TestBilingualRendering(_EdictsBase):
             severity = "must"
             deny_bash = ["x"]
         """)
-        env_zh = {**self.env, "CC_ENSLAVER_LANG": "zh"}
+        env_zh = {**self.env, "CC_ENFORCER_LANG": "zh"}
         rc, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
@@ -691,7 +691,7 @@ class TestBilingualRendering(_EdictsBase):
             severity = "must"
             deny_bash = ["x"]
         """)
-        env_en = {**self.env, "CC_ENSLAVER_LANG": "en"}
+        env_en = {**self.env, "CC_ENFORCER_LANG": "en"}
         rc, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
@@ -714,7 +714,7 @@ class TestBilingualRendering(_EdictsBase):
             id = "E01"
             text = "test"
         """)
-        env_fr = {**self.env, "CC_ENSLAVER_LANG": "fr"}
+        env_fr = {**self.env, "CC_ENFORCER_LANG": "fr"}
         rc, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
@@ -740,7 +740,7 @@ class TestBilingualRendering(_EdictsBase):
                 "tool_name": "Bash",
                 "tool_input": {"command": "npm install mongoose"},
             },
-            env_overrides=self.env,  # no CC_ENSLAVER_LANG → English skeleton
+            env_overrides=self.env,  # no CC_ENFORCER_LANG → English skeleton
         )
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         # English headline in default mode.
@@ -756,7 +756,7 @@ class TestBilingualRendering(_EdictsBase):
             severity = "must"
             deny_bash = ['''npm\s+install\s+mongoose''']
         """)
-        env_zh = {**self.env, "CC_ENSLAVER_LANG": "zh"}
+        env_zh = {**self.env, "CC_ENFORCER_LANG": "zh"}
         rc, out, _ = run_hook(
             [BASH_GUARD],
             stdin_payload={
@@ -779,7 +779,7 @@ class TestBilingualRendering(_EdictsBase):
             severity = "must"
             deny_bash = ['''npm\s+install\s+mongoose''']
         """)
-        env_en = {**self.env, "CC_ENSLAVER_LANG": "en"}
+        env_en = {**self.env, "CC_ENFORCER_LANG": "en"}
         rc, out, _ = run_hook(
             [BASH_GUARD],
             stdin_payload={
@@ -842,7 +842,7 @@ class TestCwdFallback(unittest.TestCase):
             (self.proj / ".claude").mkdir(exist_ok=True)
 
     def _write_edicts_in(self, root: Path, body: str) -> Path:
-        p = root / ".claude" / "cc-enslaver" / "edicts.toml"
+        p = root / ".claude" / "cc-enforcer" / "edicts.toml"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(textwrap.dedent(body), encoding="utf-8")
         return p
@@ -907,7 +907,7 @@ class TestCwdFallback(unittest.TestCase):
         # The act of writing edicts.toml under .claude/ creates the
         # .claude/ directory, which is itself a valid project-root
         # marker. This is intentional: a project that has a
-        # cc-enslaver config dir is by definition a project Claude
+        # cc-enforcer config dir is by definition a project Claude
         # Code has touched, so cwd is a safe fallback even without .git.
         wanted = self._write_edicts_in(self.proj, """
             [[edicts]]
@@ -969,7 +969,7 @@ class TestCwdFallback(unittest.TestCase):
 
     def test_writer_uses_cwd_when_env_unset_and_marker_present(self) -> None:
         self._mark_project_root("claude")
-        wanted = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        wanted = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
         got = self._with_env_and_cwd(
             edicts_lib.default_project_path, cwd=self.proj,
         )
@@ -995,7 +995,7 @@ class TestCwdFallback(unittest.TestCase):
             )
             self.assertEqual(
                 got,
-                env_proj / ".claude" / "cc-enslaver" / "edicts.toml",
+                env_proj / ".claude" / "cc-enforcer" / "edicts.toml",
             )
         finally:
             shutil.rmtree(env_proj, ignore_errors=True)
@@ -1005,7 +1005,7 @@ class TestManageCLICwdFallback(unittest.TestCase):
     """v0.19.0 — manage_edicts.py CLI honours cwd fallback when
     `CLAUDE_PROJECT_DIR` is absent from the subprocess environment.
 
-    The CLI is the surface users hit via /cc-enslaver:edict or
+    The CLI is the surface users hit via /cc-enforcer:edict or
     direct invocation; the loader-level unit tests above pin the
     library semantics, but only an actual subprocess exercise
     catches argparse / env-propagation drift between the writer
@@ -1063,8 +1063,8 @@ class TestManageCLICwdFallback(unittest.TestCase):
         )
         self.assertEqual(rc, 0, msg=f"stdout={out!r} stderr={err!r}")
         # File materialised under cwd, not under HOME.
-        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
-        home_f = self.fake_home / ".claude" / "cc-enslaver" / "edicts.toml"
+        proj_f = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
+        home_f = self.fake_home / ".claude" / "cc-enforcer" / "edicts.toml"
         self.assertTrue(proj_f.is_file(), msg="expected write at cwd path")
         self.assertFalse(home_f.is_file(), msg="must not have leaked to HOME")
         self.assertIn("E01", proj_f.read_text(encoding="utf-8"))
@@ -1099,7 +1099,7 @@ class TestManageCLICwdFallback(unittest.TestCase):
             with_env_var=True,
         )
         self.assertEqual(rc, 0, msg=f"stdout={out!r} stderr={err!r}")
-        proj_f = self.proj / ".claude" / "cc-enslaver" / "edicts.toml"
+        proj_f = self.proj / ".claude" / "cc-enforcer" / "edicts.toml"
         self.assertTrue(proj_f.is_file())
 
     def test_list_via_cwd_after_cwd_add(self) -> None:
@@ -1138,7 +1138,7 @@ class TestEdictsFileEncoding(_EdictsBase):
 
     A UTF-8 BOM (PowerShell `>` / `Out-File` default here) was a quieter
     variant: the file parsed as invalid TOML, so every `must` edict went
-    unenforced while `/cc-enslaver:edict list` reported an empty file.
+    unenforced while `/cc-enforcer:edict list` reported an empty file.
     """
 
     def _body(self) -> str:
@@ -1268,6 +1268,36 @@ class TestManageEdictsRoundTrip(_EdictsBase):
         )
         self.assertIsNotNone(out, msg="E01 stopped being enforced")
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+# --------------------------------------------------------------------------- #
+# v0.33 — the home-level path has exactly ONE definition (rename regression).
+# --------------------------------------------------------------------------- #
+class TestGlobalPathSingleDefinition(unittest.TestCase):
+    """`--global` writes and the loader's home fallback must be one path.
+
+    Before v0.33, `manage_edicts._global_path()` built the path from its
+    own copy of the plugin-name literal instead of the loader's
+    `_PLUGIN_NAME` constant — so a plugin rename that updated the constant
+    would leave `--global` WRITING to the old directory while `load()`
+    READS the new one, silently (both sides are failing-open). Found
+    during the cc-enslaver → cc-enforcer rename, fixed by giving the lib a
+    public `global_path()` and making the CLI delegate to it.
+    """
+
+    def test_cli_global_target_is_the_lib_definition(self) -> None:
+        import manage_edicts
+        self.assertEqual(
+            manage_edicts._global_path(), edicts_lib.global_path(),
+            msg="the CLI's --global write target drifted from the path the "
+                "loader reads — a rename would silently split write/read",
+        )
+
+    def test_lib_global_path_derives_from_the_plugin_name_constant(self) -> None:
+        # The twin direction: equality alone would still pass if BOTH sides
+        # re-inlined the same literal. The definition must contain the
+        # constant, so changing _PLUGIN_NAME moves read and write together.
+        self.assertIn(edicts_lib._PLUGIN_NAME, edicts_lib.global_path().parts)
 
 
 if __name__ == "__main__":

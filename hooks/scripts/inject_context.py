@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cc-enslaver — context injection hook.
+cc-enforcer — context injection hook.
 
 Single entry-point for every Claude Code hook this plugin subscribes to.
 Reads the matching prompt file from `../../prompts/` and emits the JSON
@@ -47,7 +47,7 @@ from lib import state as state_lib  # noqa: E402 — sys.path mutated above
 # v0.18: lazy import only when auto-GC actually triggers (kept None
 # until first use). Reason: SessionStart latency matters; the import
 # tree pulls in `time` which is cheap, but the lookup itself only
-# pays for users who opted into CC_ENSLAVER_AUTO_GC_DAYS.
+# pays for users who opted into CC_ENFORCER_AUTO_GC_DAYS.
 _gc_state_mod = None
 
 # --------------------------------------------------------------------------- #
@@ -69,8 +69,8 @@ PROMPTS_DIR = PLUGIN_ROOT / "prompts"
 # Language switch (v0.15; skeleton-flipped v0.21).
 #
 # English is the DEFAULT and the "skeleton" (source-of-truth) language:
-# the root prompts/*.md files are English. Set CC_ENSLAVER_LANG=<code>
-# to inject a translation from prompts/<code>/ (e.g. CC_ENSLAVER_LANG=zh
+# the root prompts/*.md files are English. Set CC_ENFORCER_LANG=<code>
+# to inject a translation from prompts/<code>/ (e.g. CC_ENFORCER_LANG=zh
 # → prompts/zh/). ANY code is accepted — a new language ships by adding
 # its prompts/<code>/ + rules/<code>/ dirs, no code change here. If the
 # translation file is missing, load_prompt() falls back to the English
@@ -84,21 +84,21 @@ def _resolved_lang() -> str:
     """Return the active language code.
 
     Defaults to the English skeleton (DEFAULT_LANG); any non-empty
-    CC_ENSLAVER_LANG value passes through verbatim (lower-cased). No
+    CC_ENFORCER_LANG value passes through verbatim (lower-cased). No
     membership gate — resolution + fallback happen in load_prompt() /
     edicts, so an unregistered code degrades gracefully to English.
     """
-    return (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower() or DEFAULT_LANG
+    return (os.environ.get("CC_ENFORCER_LANG") or "").strip().lower() or DEFAULT_LANG
 
 
 def load_prompt(filename: str) -> str:
     """Read prompt content for the active language. Fail loudly on missing file.
 
-    Failing loudly (rather than returning '') is itself a cc-enslaver
+    Failing loudly (rather than returning '') is itself a cc-enforcer
     measure: a silent empty injection would mask broken configuration.
 
     Skeleton-flipped (v0.21): the English skeleton lives at
-    prompts/<filename> (root). When CC_ENSLAVER_LANG names a non-default
+    prompts/<filename> (root). When CC_ENFORCER_LANG names a non-default
     language, read prompts/<lang>/<filename> first; if that translation
     is missing, fall back to the root English skeleton with a stderr
     warning. The fallback prevents a missing / partial translation from
@@ -110,7 +110,7 @@ def load_prompt(filename: str) -> str:
         if translated.is_file():
             return translated.read_text(encoding="utf-8")
         sys.stderr.write(
-            f"[cc-enslaver] CC_ENSLAVER_LANG={lang} but missing {translated}; "
+            f"[cc-enforcer] CC_ENFORCER_LANG={lang} but missing {translated}; "
             f"falling back to English skeleton.\n"
         )
     path = PROMPTS_DIR / filename
@@ -119,7 +119,7 @@ def load_prompt(filename: str) -> str:
         # We still exit 0 with an empty additionalContext so the hook
         # does not block the user; but the diagnostic goes to stderr.
         sys.stderr.write(
-            f"[cc-enslaver] missing prompt file: {path}\n"
+            f"[cc-enforcer] missing prompt file: {path}\n"
             f"  expected one of: {sorted(EVENT_TO_PROMPT.values())}\n"
         )
         return ""
@@ -145,7 +145,7 @@ def load_prompt(filename: str) -> str:
 # full contract instead of working from a fragment.
 # --------------------------------------------------------------------------- #
 _HEADER = (
-    "<!-- cc-enslaver root: {root} -->\n"
+    "<!-- cc-enforcer root: {root} -->\n"
     "Truncated (a `<persisted-output>` preview)? Read "
     "`{root}/prompts/{fname}` in full before replying.\n\n"
 )
@@ -160,8 +160,8 @@ OUTPUT_CAP = 10000
 
 _EDICTS_ELIDED = (
     "\n\n<!-- {n} edict(s) elided to stay under the {cap}-char hook cap; "
-    "run `/cc-enslaver:edict list` or read the project's "
-    "`.claude/cc-enslaver/edicts.toml` for the full text. -->\n"
+    "run `/cc-enforcer:edict list` or read the project's "
+    "`.claude/cc-enforcer/edicts.toml` for the full text. -->\n"
 )
 
 
@@ -246,7 +246,7 @@ def emit(event_name: str, additional_context: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="cc-enslaver context injection hook",
+        description="cc-enforcer context injection hook",
     )
     parser.add_argument(
         "--event",
@@ -280,7 +280,7 @@ def main() -> int:
     # that motivated v0.12's prompt thinning + edict system).
     #
     # v0.17: pass the already-resolved language so the edict block and
-    # the base prompt always speak the same language (CC_ENSLAVER_LANG
+    # the base prompt always speak the same language (CC_ENFORCER_LANG
     # is the single switch the user toggles — the base prompt (English
     # skeleton at prompts/*.md, or a translation at prompts/<lang>/*.md)
     # and the edict block flip together).
@@ -298,9 +298,9 @@ def main() -> int:
             additional_context = additional_context.rstrip()
     except Exception as e:
         # Never let an edicts bug brick the injection.
-        sys.stderr.write(f"[cc-enslaver] edicts injection failed: {e}\n")
+        sys.stderr.write(f"[cc-enforcer] edicts injection failed: {e}\n")
 
-    # v0.18 auto-GC on SessionStart (opt-in via CC_ENSLAVER_AUTO_GC_DAYS).
+    # v0.18 auto-GC on SessionStart (opt-in via CC_ENFORCER_AUTO_GC_DAYS).
     # Runs after the main injection so even if GC blows up, the prompt
     # injection already landed. Rate-limited by a marker file so we don't
     # re-scan on every rapid session restart.
@@ -335,7 +335,7 @@ def _session_id_from(raw: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # v0.18 — opt-in auto-GC on SessionStart.
 #
-# Trigger: env var CC_ENSLAVER_AUTO_GC_DAYS=N (positive int, default
+# Trigger: env var CC_ENFORCER_AUTO_GC_DAYS=N (positive int, default
 # disabled). When set, on every SessionStart we prune session-state
 # files older than N days. Rate-limited via a marker file at
 # state_dir / _auto_gc.json so we run at most once per 24h regardless
@@ -354,7 +354,7 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
 
     `session_id` (v0.25.1) is the live session, excluded from pruning.
     """
-    raw = os.environ.get("CC_ENSLAVER_AUTO_GC_DAYS", "").strip()
+    raw = os.environ.get("CC_ENFORCER_AUTO_GC_DAYS", "").strip()
     if not raw:
         return  # default off
 
@@ -362,7 +362,7 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
         threshold_days = int(raw)
     except ValueError:
         sys.stderr.write(
-            f"[cc-enslaver] CC_ENSLAVER_AUTO_GC_DAYS={raw!r} is not an "
+            f"[cc-enforcer] CC_ENFORCER_AUTO_GC_DAYS={raw!r} is not an "
             f"integer; auto-GC skipped.\n"
         )
         return
@@ -377,7 +377,7 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
         marker_path = state_lib.state_dir() / _AUTO_GC_MARKER
     except Exception as exc:
         sys.stderr.write(
-            f"[cc-enslaver] auto-GC could not resolve state_dir: {exc}\n"
+            f"[cc-enforcer] auto-GC could not resolve state_dir: {exc}\n"
         )
         return
 
@@ -412,7 +412,7 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
                 import gc_state as _gc  # because we sys.path.inserted scripts dir
             except Exception as exc:
                 sys.stderr.write(
-                    f"[cc-enslaver] auto-GC could not import gc_state: {exc}\n"
+                    f"[cc-enforcer] auto-GC could not import gc_state: {exc}\n"
                 )
                 return
         _gc_state_mod = _gc
@@ -431,7 +431,7 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
             exclude_session=session_id,
         )
     except Exception as exc:
-        sys.stderr.write(f"[cc-enslaver] auto-GC failed: {exc}\n")
+        sys.stderr.write(f"[cc-enforcer] auto-GC failed: {exc}\n")
         return
 
     # Always update the marker after a real attempt — even if 0 files
@@ -443,12 +443,12 @@ def _maybe_auto_gc(session_id: str | None = None) -> None:
         )
     except Exception as exc:
         sys.stderr.write(
-            f"[cc-enslaver] auto-GC could not update marker: {exc}\n"
+            f"[cc-enforcer] auto-GC could not update marker: {exc}\n"
         )
 
     if summary["deleted"] > 0 or summary["failures"]:
         sys.stderr.write(
-            f"[cc-enslaver] auto-GC: deleted {summary['deleted']} "
+            f"[cc-enforcer] auto-GC: deleted {summary['deleted']} "
             f"session(s) older than {threshold_days}d "
             f"({summary['bytes_freed']} bytes freed)"
             f"{'; failures: ' + str(summary['failures']) if summary['failures'] else ''}\n"

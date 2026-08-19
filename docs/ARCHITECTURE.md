@@ -162,7 +162,7 @@ script exits 0 silently with state written to disk.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "cc-enslaver · rule 04 violation ..."
+    "permissionDecisionReason": "cc-enforcer · rule 04 violation ..."
   }
 }
 ```
@@ -176,9 +176,9 @@ location resolves in this order:
 
 1. `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json` — preferred, set by Claude Code
    for plugin hooks.
-2. `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/<sid>.json` —
+2. `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/sessions/<sid>.json` —
    per-project fallback.
-3. `~/.claude/local/cc-enslaver/sessions/<sid>.json` — final fallback.
+3. `~/.claude/local/cc-enforcer/sessions/<sid>.json` — final fallback.
 
 State files are git-ignored (`.gitignore` line 26). Paths within state are
 canonicalised via `os.path.realpath` + `os.path.normcase` so case-insensitive
@@ -233,10 +233,10 @@ the last assistant entry in `payload.transcript_path`).
 | 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
 | 6 | edit turn (`edited_since_last_stop` flag, or `last_edit_turn == turn_count` when supplied) AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**; edit signal fixed for production in **v0.23**) | **Block** (layer (e)) |
 | 7 | edit turn AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
-| 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENSLAVER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
+| 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENFORCER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
 | 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
 | 10 | A tldr item longer than `TLDR_MAX_ITEM_CHARS` (160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
-| 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enslaver/sync-gate.toml` — no config, never fires). A marker escape records the acknowledged groups for the session, so one explicit answer per group suffices. **v0.27**: the marker settles only groups the session has actually been SHOWN (`last_blocked_groups`) — the primary path used to ack every pending group while the grace path acked only the presented set, and that inconsistency was itself the bypass (outlast the grace window, reach the looser path). A group is therefore named by one block, then settled by the next reply's marker: one *informed* answer per group. | **Block** (layer (i)) |
+| 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enforcer/sync-gate.toml` — no config, never fires). A marker escape records the acknowledged groups for the session, so one explicit answer per group suffices. **v0.27**: the marker settles only groups the session has actually been SHOWN (`last_blocked_groups`) — the primary path used to ack every pending group while the grace path acked only the presented set, and that inconsistency was itself the bypass (outlast the grace window, reach the looser path). A group is therefore named by one block, then settled by the next reply's marker: one *informed* answer per group. | **Block** (layer (i)) |
 | 12 | All gates passed | Allow |
 
 **Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
@@ -361,7 +361,7 @@ which is the worse error.
 
 **v0.20.0 block-reason 大白话 line**: every block reason now appends a
 one-line plain-language takeaway (`大白话: ...`) before the one-shot
-footer, so cc-enslaver's own output is symmetric with the layer-(h)
+footer, so cc-enforcer's own output is symmetric with the layer-(h)
 requirement it imposes on the agent.
 
 **v0.23.0 layer (h) length cap**: beyond mere presence, each tldr item
@@ -396,7 +396,7 @@ user pasting a genuine transcript was told they had produced none.
 **v0.23.0 layer (i) — rule 12 repo-wide sync gate**: `read_guard.py`
 records every ACCEPTED Edit / Write path into the session's
 `edited_files` set; at Stop, `lib/sync_gate.py` loads the project's
-`.claude/cc-enslaver/sync-gate.toml` (resolution: payload cwd →
+`.claude/cc-enforcer/sync-gate.toml` (resolution: payload cwd →
 `CLAUDE_PROJECT_DIR` → process cwd with a project-root marker; no
 home-level fallback — groups are inherently per-repo) and evaluates each
 `[[groups]]` entry: `when` globs matched by an edited project-relative
@@ -737,18 +737,18 @@ because only the hook payload exposes `session_id`.
 **Wired in:** [`../commands/`](../commands/).
 
 Six user-invokable surfaces. (This section said "two" from v0.12, when
-`/cc-enslaver:edict` shipped, until v0.30 — three commands existed and were
+`/cc-enforcer:edict` shipped, until v0.30 — three commands existed and were
 documented everywhere except the architecture doc that claims to enumerate the
 layer.)
 
 | Command | Source | Use case |
 |---|---|---|
-| `/cc-enslaver:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the eight-section pre-action / pre-finish discipline checklist. |
-| `/cc-enslaver:verify`    | [`../commands/verify.md`](../commands/verify.md)    | Trigger a re-verification pass on the agent's recent claims. |
-| `/cc-enslaver:edict`     | [`../commands/edict.md`](../commands/edict.md)      | `list / add / remove / reload / path` for Imperial Edicts (v0.12). Backed by [`../hooks/scripts/manage_edicts.py`](../hooks/scripts/manage_edicts.py). |
-| `/cc-enslaver:gc`        | [`../commands/gc.md`](../commands/gc.md)            | List — or with `--apply`, delete — session-state files older than N days (v0.6.1). Backed by [`../hooks/scripts/gc_state.py`](../hooks/scripts/gc_state.py). |
-| `/cc-enslaver:i18n`      | [`../commands/i18n.md`](../commands/i18n.md)        | Report structural drift between every translation and the English skeleton (v0.21). Backed by [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py). |
-| `/cc-enslaver:sync-gate` | [`../commands/sync-gate.md`](../commands/sync-gate.md) | `init / list / check / add / remove / path` for this project's rule-12 co-update groups (v0.31). Backed by [`../hooks/scripts/manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py). **`check` is the reason it exists**: `sync_gate.load()` is failing-open, so a dropped group or a glob matching no file stops guarding *silently*. `check` names both and exits 1. Writes are validated twice — parses back, **and** every group survives a real `load_file()` round-trip, because a `require = []` entry is legal TOML the loader then discards. |
+| `/cc-enforcer:checklist` | [`../commands/checklist.md`](../commands/checklist.md) | Print the eight-section pre-action / pre-finish discipline checklist. |
+| `/cc-enforcer:verify`    | [`../commands/verify.md`](../commands/verify.md)    | Trigger a re-verification pass on the agent's recent claims. |
+| `/cc-enforcer:edict`     | [`../commands/edict.md`](../commands/edict.md)      | `list / add / remove / reload / path` for Imperial Edicts (v0.12). Backed by [`../hooks/scripts/manage_edicts.py`](../hooks/scripts/manage_edicts.py). |
+| `/cc-enforcer:gc`        | [`../commands/gc.md`](../commands/gc.md)            | List — or with `--apply`, delete — session-state files older than N days (v0.6.1). Backed by [`../hooks/scripts/gc_state.py`](../hooks/scripts/gc_state.py). |
+| `/cc-enforcer:i18n`      | [`../commands/i18n.md`](../commands/i18n.md)        | Report structural drift between every translation and the English skeleton (v0.21). Backed by [`../hooks/scripts/i18n_check.py`](../hooks/scripts/i18n_check.py). |
+| `/cc-enforcer:sync-gate` | [`../commands/sync-gate.md`](../commands/sync-gate.md) | `init / list / check / add / remove / path` for this project's rule-12 co-update groups (v0.31). Backed by [`../hooks/scripts/manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py). **`check` is the reason it exists**: `sync_gate.load()` is failing-open, so a dropped group or a glob matching no file stops guarding *silently*. `check` names both and exits 1. Writes are validated twice — parses back, **and** every group survives a real `load_file()` round-trip, because a `require = []` entry is legal TOML the loader then discards. |
 
 Slash commands in Claude Code are flat Markdown files in `commands/`. Their YAML
 frontmatter declares the command's behaviour; the body is the prompt the agent
@@ -823,10 +823,10 @@ directly:
 
 ```bash
 # OpenAI / generic — English skeleton (default):
-cat rules/*.md > /tmp/cc-enslaver-system-prompt.txt
+cat rules/*.md > /tmp/cc-enforcer-system-prompt.txt
 
 # OpenAI / generic — 中文 translation:
-cat rules/zh/*.md > /tmp/cc-enslaver-system-prompt.txt
+cat rules/zh/*.md > /tmp/cc-enforcer-system-prompt.txt
 
 # Cursor / Cline / Aider — symlink rules/ or rules/zh/ into the project's
 # rule directory or copy the index.
@@ -900,7 +900,7 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
     │        no match / missing file / bad args → DENY
     └─ no bypass pattern matched                         → ALLOW (silent exit 0)
 
-   ─── if user/agent invokes /cc-enslaver:verify ───
+   ─── if user/agent invokes /cc-enforcer:verify ───
                        │
                        ▼
             verifier subagent runs
@@ -931,7 +931,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |
 | `hooks/scripts/lib/state.py` | `hooks/scripts/read_guard.py` (consumer of `record_edit_turn` + `record_edited_file`), `hooks/scripts/stop_guard.py` (consumer of `did_edit_this_turn` + `get_edited_files`), `.gitignore` (state dir must stay ignored), this doc §2 (storage location), `tests/test_read_guard.py` + `tests/test_stop_guard.py` |
-| `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enslaver/sync-gate.toml` (this repo's own dogfood config), `hooks/scripts/lib/tomlio.py` (config reader), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` + `tests/test_sync_gate.py` (sync-gate cases) |
+| `hooks/scripts/lib/sync_gate.py` | `hooks/scripts/stop_guard.py` (layer (i) consumer), `rules/12-repo-wide-sync.md` + `rules/zh/12-repo-wide-sync.md` (the rule it enforces), `.claude/cc-enforcer/sync-gate.toml` (this repo's own dogfood config), `hooks/scripts/lib/tomlio.py` (config reader), this doc §2 ("layer (i)" note), `tests/test_stop_guard.py` + `tests/test_sync_gate.py` (sync-gate cases) |
 | `hooks/scripts/lib/srclex.py` (v0.26) | `hooks/scripts/read_guard.py` (every rule 09/10/11 content detector + the rationale hatch), this doc §2 (shared-models list), `tests/test_audit_v026_models.py` (`TestSrclex` + the rule-09/10/11 regression classes). Changing what counts as a comment / docstring / literal changes what the rationale hatch accepts, so the twin assertions in `TestRationaleHatchV026` must be re-checked in BOTH directions. |
 | `hooks/scripts/lib/mdctx.py` (v0.26) | `hooks/scripts/stop_guard.py` — **both** halves of layer (h) (`_has_tldr` presence + `_tldr_items` length). They must stay on one model; the defect this replaced was exactly the two disagreeing. Also this doc §2, `tests/test_audit_v026_models.py` (`TestMdctx`, `TestTldrContextV026`) + `tests/test_stop_guard.py` (`TestTldrLayerH`, `TestTldrLengthLayerH`). |
 | `hooks/scripts/lib/shellcmd.py` (v0.26) | `hooks/scripts/bash_guard.py` — **both** the force-push detector and `_parse_register_invocation`. It exists so those two stop being independent text heuristics that drift; a change here needs both directions re-checked (real bypasses still denied, innocent commands still allowed). Also this doc §2, `tests/test_audit_v026_models.py` (`TestShellcmd`, `TestForcePushCommandModelV026`, `TestRegisterCommandModelV026`) + `tests/test_bash_guard.py`. |
@@ -940,11 +940,11 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/lib/tomlio.py` — writer half (v0.31) | **Both** config CLIs — `manage_edicts.py` and `manage_sync_gate.py` alias `basic_string`. Its escaping rules were each learned from a config that the CLI reported as written and tomllib then refused (a raw newline; DEL passing a `>= " "` guard), so a change here can silently unenforce every rule in a project's config. `tests/test_manage_sync_gate.py::TestSharedPrimitives` pins the sharing itself, not just the behaviour. |
 | `hooks/scripts/lib/projroot.py` (v0.30) | **Both** config loaders again — `lib/edicts.py` and `lib/sync_gate.py` alias it. Widening what counts as a project root widens where *both* configs may be picked up, which is a security-shaped change, not a convenience one: a false positive makes another project's `must` edicts apply to this session. Re-check `tests/test_edicts.py` (`TestCwdFallback`, `TestManageCLICwdFallback`) and `tests/test_sync_gate.py` (`TestConfigPath`). |
 | `hooks/scripts/lib/mdctx.py` — fence helper (v0.30) | `mdctx.fence_marker` now has THREE consumers: `stop_guard._is_fence`, `stop_guard`'s layer-(h) context model, and `i18n_check._fence_run`. It used to be copied into all three, each with its own comment claiming they "must agree". Changing fence geometry changes which headings `i18n_check` sees AND which tldr lines layer (h) measures — re-run `python hooks/scripts/i18n_check.py` as well as the stop-guard suite. |
-| `.claude/cc-enslaver/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
+| `.claude/cc-enforcer/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
 | `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5, **and `commands/sync-gate.md` + `hooks/scripts/manage_sync_gate.py` (v0.32.2)** — Step 6 tells the agent to register findings as sync-gate groups, so it must name the CLI that does it and the `check` that verifies it. This pair drifted for two releases in one direction only: `commands/sync-gate.md` asserted the skill would call it while the skill still said hand-edit the TOML. A cross-document claim is a coupling; verify it from **both** ends. |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
 | `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers + `did_edit_this_turn`), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases; rule 08 / rule 09 layer (e)+(f) cases) |
-| `hooks/scripts/gc_state.py` | `commands/gc.md` (`/cc-enslaver:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |
+| `hooks/scripts/gc_state.py` | `commands/gc.md` (`/cc-enforcer:gc` slash command), `hooks/scripts/lib/state.py` (consumes `state_dir()` to scope the GC), `tests/test_gc_state.py` (arg validation + dry-run + apply + threshold semantics) |
 | `hooks/scripts/register_read.py` | `hooks/scripts/bash_guard.py` (the actual register handling lives there), this doc §2 "Read-cache escape hatch", `tests/test_register_read.py` |
 | `hooks/hooks.json` | `.claude-plugin/plugin.json` (hooks pointer), this doc §2 (event table) |
 | `.claude-plugin/plugin.json` | `README.md` (install steps), `CHANGELOG.md`, `.claude-plugin/marketplace.json` (version sync), version-bump must match an actual change. **Do not** re-add the `commands` / `agents` / `skills` / `hooks` path fields for standard locations: they cause `claude plugin install` to fail with `Duplicate hooks file detected` or `agents: Invalid input` because Claude Code auto-discovers `./commands/`, `./agents/`, `./skills/`, and `./hooks/hooks.json`. Those manifest fields are only for *non-standard* layouts. |

@@ -1,10 +1,10 @@
-"""cc-enslaver — repo-wide sync gate (rule 12, v0.23).
+"""cc-enforcer — repo-wide sync gate (rule 12, v0.23).
 
 Passive physical enforcement of rule 12 ("repo-wide sync — co-update
 every reference, not just the target file"). A project opts in by
 committing a TOML config at
 
-    <project-root>/.claude/cc-enslaver/sync-gate.toml
+    <project-root>/.claude/cc-enforcer/sync-gate.toml
 
 declaring co-update groups. Semantics of one group:
 
@@ -76,7 +76,7 @@ except ModuleNotFoundError:
 
 from . import projroot, tomlio
 
-_PLUGIN_NAME = "cc-enslaver"
+_PLUGIN_NAME = "cc-enforcer"
 _CONFIG_FILENAME = "sync-gate.toml"
 
 
@@ -101,7 +101,7 @@ class Violation:
 
 
 def _warn(msg: str) -> None:
-    sys.stderr.write(f"[cc-enslaver sync-gate] {msg}\n")
+    sys.stderr.write(f"[cc-enforcer sync-gate] {msg}\n")
 
 
 # v0.30 — this was a verbatim copy of the edicts predicate, introduced
@@ -115,10 +115,10 @@ def config_path(cwd: str | None = None) -> Path | None:
     """Resolve the sync-gate.toml to read, or None when the project has none.
 
     Resolution order (first existing file wins):
-      1. ``<cwd>/.claude/cc-enslaver/sync-gate.toml`` — the Stop payload's
+      1. ``<cwd>/.claude/cc-enforcer/sync-gate.toml`` — the Stop payload's
          cwd is the session's project directory, the most reliable signal.
-      2. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/sync-gate.toml``.
-      3. ``$(process cwd)/.claude/cc-enslaver/sync-gate.toml`` — only when
+      2. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/sync-gate.toml``.
+      3. ``$(process cwd)/.claude/cc-enforcer/sync-gate.toml`` — only when
          the process cwd carries a project-root marker (the v0.19 edicts
          fallback, for Windows subprocesses that drop the env var).
 
@@ -315,7 +315,7 @@ def matches_any(rel_path: str, patterns: tuple[str, ...]) -> bool:
 
 
 def project_root(config: Path) -> Path:
-    """Repo root implied by a config at `.claude/cc-enslaver/sync-gate.toml`.
+    """Repo root implied by a config at `.claude/cc-enforcer/sync-gate.toml`.
 
     Three levels up. Extracted so `evaluate()` and the CLI derive it the
     same way rather than each counting `.parents[2]` for themselves.

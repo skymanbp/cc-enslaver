@@ -1,6 +1,6 @@
 # Tests — index
 
-**601 tests, 16 files, zero dependencies.** This file is the index: every
+**604 tests, 16 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -54,11 +54,11 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
-| [`test_edicts.py`](test_edicts.py) | 62 | [`lib/edicts.py`](../hooks/scripts/lib/edicts.py) loading / injection / DENY / severity gating **and** the [`manage_edicts.py`](../hooks/scripts/manage_edicts.py) CLI, including its TOML round-trip and cwd fallback. |
+| [`test_edicts.py`](test_edicts.py) | 64 | [`lib/edicts.py`](../hooks/scripts/lib/edicts.py) loading / injection / DENY / severity gating **and** the [`manage_edicts.py`](../hooks/scripts/manage_edicts.py) CLI, including its TOML round-trip, cwd fallback, and the v0.33 single-definition pin on the `--global` path (write target must be the loader's `global_path()`, which must derive from `_PLUGIN_NAME`). |
 | [`test_sync_gate.py`](test_sync_gate.py) | 19 | [`lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) — config resolution order, TOML tolerance, any-vs-all mode, `./` glob normalisation, project-relative boundaries. |
 | [`test_gc_state.py`](test_gc_state.py) | 19 | [`gc_state.py`](../hooks/scripts/gc_state.py) — argument validation, dry-run vs apply, threshold semantics, and auto-GC on SessionStart. |
 | [`test_register_read.py`](test_register_read.py) | 5 | [`register_read.py`](../hooks/scripts/register_read.py) — the user-facing stub's own hash verification and exit codes. (The authoritative check lives in `bash_guard`, so it is tested there.) |
-| [`test_manage_sync_gate.py`](test_manage_sync_gate.py) | 27 | [`manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) — the rule-12 config CLI, plus the shared primitives it forced out of hiding (`sync_gate.default_project_path` / `load_file` / `matches_any`, `tomlio.basic_string` / `dumps_check`). Its star test is a **regression**: the CLI's first draft picked its write target with the READ resolver and wrote two groups into this repository's own config. Both directions are pinned — a write lands in the named project, and the read resolver keeps the fallback the hook path depends on. |
+| [`test_manage_sync_gate.py`](test_manage_sync_gate.py) | 28 | [`manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) — the rule-12 config CLI, plus the shared primitives it forced out of hiding (`sync_gate.default_project_path` / `load_file` / `matches_any`, `tomlio.basic_string` / `dumps_check`). Its star test is a **regression**: the CLI's first draft picked its write target with the READ resolver and wrote two groups into this repository's own config. Both directions are pinned — a write lands in the named project, and the read resolver keeps the fallback the hook path depends on. v0.33 adds the sibling pin: `path` prints through the same deterministic write resolver, never a cwd-derived hand-join. |
 
 ### CI drift gates
 

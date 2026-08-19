@@ -10,7 +10,7 @@ hookSpecificOutput.additionalContext). These tests verify:
 
 v0.21 — language architecture inverted: **English is the skeleton
 (source of truth) and the runtime default**; Chinese is a first-class
-translation reached via ``CC_ENSLAVER_LANG=zh`` (``prompts/zh/*.md``).
+translation reached via ``CC_ENFORCER_LANG=zh`` (``prompts/zh/*.md``).
 The tests are organised by language path:
   - ``TestInjectContextDefault``  — no env var → English skeleton.
   - ``TestInjectContextEnglish``  — explicit ``en`` + unknown-lang fallback.
@@ -43,7 +43,7 @@ import inject_context as ic  # noqa: E402 -- see path-bootstrap note
 
 
 class TestInjectContextDefault(unittest.TestCase):
-    """No CC_ENSLAVER_LANG → the English skeleton (``prompts/*.md``).
+    """No CC_ENFORCER_LANG → the English skeleton (``prompts/*.md``).
 
     English is the source-of-truth 'skeleton' language (v0.21). These
     cover the JSON hook shape, the language-neutral 01-11 structural
@@ -79,13 +79,13 @@ class TestInjectContextDefault(unittest.TestCase):
             self.assertIn(label, ctx, msg=f"context missing {label!r}")
 
     def test_no_lang_env_var_uses_english(self) -> None:
-        # v0.21 — with no CC_ENSLAVER_LANG the default is now the English
+        # v0.21 — with no CC_ENFORCER_LANG the default is now the English
         # skeleton (was Chinese pre-v0.21). Assert English content is
         # present and the Chinese-canonical headers do NOT bleed in.
         _, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
-            # No CC_ENSLAVER_LANG in env.
+            # No CC_ENFORCER_LANG in env.
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Session Discipline Contract", ctx)
@@ -95,7 +95,7 @@ class TestInjectContextDefault(unittest.TestCase):
 
 
 class TestInjectContextEnglish(unittest.TestCase):
-    """Explicit ``CC_ENSLAVER_LANG=en`` + unknown-lang fallback.
+    """Explicit ``CC_ENFORCER_LANG=en`` + unknown-lang fallback.
 
     ``en`` reads the root skeleton (same files the default resolves to);
     an unrecognised code falls back to that same English skeleton.
@@ -105,7 +105,7 @@ class TestInjectContextEnglish(unittest.TestCase):
         _, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
-            env_overrides={"CC_ENSLAVER_LANG": "en"},
+            env_overrides={"CC_ENFORCER_LANG": "en"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         # English skeleton keyword contract — must include the rule
@@ -126,7 +126,7 @@ class TestInjectContextEnglish(unittest.TestCase):
             "layer (e)",
             "layer (f)",
             # v0.20 — YAML schema + tldr / layer (h) must surface too.
-            "cc-enslaver:",
+            "cc-enforcer:",
             "tldr",
             "layer (h)",
         ):
@@ -140,7 +140,7 @@ class TestInjectContextEnglish(unittest.TestCase):
         _, out, _ = run_hook(
             [INJECT, "--event", "UserPromptSubmit"],
             stdin_payload={"session_id": "t", "hook_event_name": "UserPromptSubmit"},
-            env_overrides={"CC_ENSLAVER_LANG": "en"},
+            env_overrides={"CC_ENFORCER_LANG": "en"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         for needle in (
@@ -160,7 +160,7 @@ class TestInjectContextEnglish(unittest.TestCase):
         _, out, _ = run_hook(
             [INJECT, "--event", "SessionStart"],
             stdin_payload={"session_id": "t", "hook_event_name": "SessionStart"},
-            env_overrides={"CC_ENSLAVER_LANG": "fr"},
+            env_overrides={"CC_ENFORCER_LANG": "fr"},
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Session Discipline Contract", ctx)
@@ -168,7 +168,7 @@ class TestInjectContextEnglish(unittest.TestCase):
 
 
 class TestInjectContextChinese(unittest.TestCase):
-    """``CC_ENSLAVER_LANG=zh`` → ``prompts/zh/*.md`` (Chinese translation).
+    """``CC_ENFORCER_LANG=zh`` → ``prompts/zh/*.md`` (Chinese translation).
 
     v0.21 — Chinese is now a first-class *translation* (was canonical).
     Every rule's Chinese content must still be present in the zh
@@ -176,7 +176,7 @@ class TestInjectContextChinese(unittest.TestCase):
     zh path so the flip does not silently degrade Chinese support.
     """
 
-    ZH = {"CC_ENSLAVER_LANG": "zh"}
+    ZH = {"CC_ENFORCER_LANG": "zh"}
 
     def test_content_references_rule_06_convergence(self) -> None:
         # Rule 06 is the post-fix verify-and-converge rule (v0.5.0). The
@@ -302,7 +302,7 @@ class TestInjectContextChinese(unittest.TestCase):
         )
         ctx = out["hookSpecificOutput"]["additionalContext"]
         for needle in (
-            "cc-enslaver:",   # the YAML block root key
+            "cc-enforcer:",   # the YAML block root key
             "tldr",
             "大白话",
             "layer (h)",
@@ -392,7 +392,7 @@ class TestOutputCap(unittest.TestCase):
         # Defense in depth: if the cap is ever breached anyway, the
         # surviving preview must still say where the full text lives.
         head = self._ctx("SessionStart")[:200]
-        self.assertIn("cc-enslaver root:", head)
+        self.assertIn("cc-enforcer root:", head)
         self.assertIn("prompts/session-start.md", head)
 
     def test_edicts_yield_before_the_contract(self) -> None:
@@ -489,7 +489,7 @@ class TestSyncCheckIsASchemaField(unittest.TestCase):
                         [INJECT, "--event", event],
                         stdin_payload={"session_id": "t",
                                        "hook_event_name": event},
-                        env_overrides={"CC_ENSLAVER_LANG": lang or "en"},
+                        env_overrides={"CC_ENFORCER_LANG": lang or "en"},
                     )
                     ctx = out["hookSpecificOutput"]["additionalContext"]
                     self.assertLessEqual(len(ctx), ic.OUTPUT_CAP)

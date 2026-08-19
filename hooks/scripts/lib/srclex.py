@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — tolerant source lexer (comments / strings / block shape).
+"""cc-enforcer — tolerant source lexer (comments / strings / block shape).
 
 Root cause this module exists to kill (v0.26.0 audit, root cause α):
 every content detector in this plugin used *text* as a proxy for a

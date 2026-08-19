@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — session-state garbage collection (v0.6.1 + v0.18 auto).
+"""cc-enforcer — session-state garbage collection (v0.6.1 + v0.18 auto).
 
 Each Claude Code session creates one JSON state file in
 `${CLAUDE_PLUGIN_DATA}/sessions/<sid>.json`. Sessions are not
@@ -17,12 +17,12 @@ restarted many times since).
 # Two entry points (v0.6.1 manual + v0.18 auto)
 
   - Manual:    `python gc_state.py --dry-run` or `--apply`. Used by
-               the `/cc-enslaver:gc` slash command. Prints a verbose
+               the `/cc-enforcer:gc` slash command. Prints a verbose
                summary to stdout.
   - Auto:      `prune_old_sessions(threshold_days, dry_run=False,
                exclude_session=None) -> dict`. Imported by
                `inject_context.py` SessionStart hook when the user has
-               opted in via `CC_ENSLAVER_AUTO_GC_DAYS=N`. Returns a
+               opted in via `CC_ENFORCER_AUTO_GC_DAYS=N`. Returns a
                summary dict; logs nothing on its own (the caller
                decides where to surface results — stderr in the
                injection path so stdout stays reserved for the JSON
@@ -43,7 +43,7 @@ Always prints a summary:
 # Safety
 
   * `--dry-run` (default off) shows what would be deleted without
-    touching anything. The slash command `/cc-enslaver:gc` invokes
+    touching anything. The slash command `/cc-enforcer:gc` invokes
     `--dry-run` by default; the user must explicitly request
     `--apply` to actually delete.
   * `--older-than DAYS` defaults to 30 (configurable). Files newer
@@ -188,7 +188,7 @@ def prune_old_sessions(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prune cc-enslaver session state files older than a threshold.",
+        description="Prune cc-enforcer session state files older than a threshold.",
     )
     parser.add_argument(
         "--older-than",

@@ -1,4 +1,4 @@
-"""cc-enslaver — 圣旨 (Imperial Edicts) system.
+"""cc-enforcer — 圣旨 (Imperial Edicts) system.
 
 User-defined per-project hard rules that ride on top of the built-in 12
 rules. Loaded from a TOML file (project-level by default), injected into
@@ -7,15 +7,15 @@ PreToolUse DENY when a regex matches Edit / Write content or Bash
 commands.
 
 Why TOML and not YAML:
-  Python stdlib ships `tomllib` (3.11+) but no YAML parser. cc-enslaver
+  Python stdlib ships `tomllib` (3.11+) but no YAML parser. cc-enforcer
   has a strict no-third-party-deps contract (see README + CLAUDE.md), and
   rolling a custom YAML subset is fragile. TOML's array-of-tables shape
   is verbose but unambiguous, which suits a config file users hand-edit.
 
 File location resolution (first hit wins):
-  1. ${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml — project,
+  1. ${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml — project,
      team-shareable, recommended
-  2. ${HOME}/.claude/cc-enslaver/edicts.toml — personal global fallback
+  2. ${HOME}/.claude/cc-enforcer/edicts.toml — personal global fallback
 
 Schema:
 
@@ -54,7 +54,7 @@ except ModuleNotFoundError:
 
 from . import projroot, tomlio
 
-_PLUGIN_NAME = "cc-enslaver"
+_PLUGIN_NAME = "cc-enforcer"
 _EDICTS_FILENAME = "edicts.toml"
 _VALID_SEVERITIES = {"must", "should"}
 
@@ -98,11 +98,11 @@ def edicts_path() -> Path | None:
     """Resolve the edicts.toml location to READ, or None if not found.
 
     Resolution order (first existing file wins):
-      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml``
-      2. ``$(cwd)/.claude/cc-enslaver/edicts.toml`` — only when cwd has
+      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml``
+      2. ``$(cwd)/.claude/cc-enforcer/edicts.toml`` — only when cwd has
          a project-root marker (``.git`` / ``.claude``). v0.18.1 added
          this step.
-      3. ``${HOME}/.claude/cc-enslaver/edicts.toml`` — personal global.
+      3. ``${HOME}/.claude/cc-enforcer/edicts.toml`` — personal global.
 
     Rationale for the cwd fallback (v0.18.1): Claude Code's Bash tool
     does not reliably propagate ``CLAUDE_PROJECT_DIR`` to subprocesses
@@ -122,19 +122,32 @@ def edicts_path() -> Path | None:
         # Avoid duplicating step 1 if env var already pointed at cwd.
         if not candidates or candidates[0] != cwd_candidate:
             candidates.append(cwd_candidate)
-    candidates.append(Path.home() / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME)
+    candidates.append(global_path())
     for c in candidates:
         if c.is_file():
             return c
     return None
 
 
+def global_path() -> Path:
+    """Personal-global edicts.toml under the user's home — single definition.
+
+    `edicts_path()` reads it as its last candidate and `manage_edicts.py
+    --global` writes to it. Before v0.33 the CLI carried its own
+    `Path.home() / ".claude" / "<name>" / ...` literal with the plugin name
+    inlined, so a plugin rename that updated `_PLUGIN_NAME` would have left
+    `--global` WRITING to the old directory while this loader READS the new
+    one — silently, both sides being failing-open.
+    """
+    return Path.home() / ".claude" / _PLUGIN_NAME / _EDICTS_FILENAME
+
+
 def default_project_path() -> Path | None:
     """The recommended location to WRITE a new project edict file.
 
     Resolution order:
-      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml``
-      2. ``$(cwd)/.claude/cc-enslaver/edicts.toml`` — only when cwd
+      1. ``${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml``
+      2. ``$(cwd)/.claude/cc-enforcer/edicts.toml`` — only when cwd
          looks like a project root (v0.18.1).
       3. ``None`` — caller must surface an error (e.g. require
          ``--global`` or set the env var). ``manage_edicts.py``
@@ -152,7 +165,7 @@ def default_project_path() -> Path | None:
 
 
 def _warn(msg: str) -> None:
-    sys.stderr.write(f"[cc-enslaver edicts] {msg}\n")
+    sys.stderr.write(f"[cc-enforcer edicts] {msg}\n")
 
 
 def _compile_patterns(
@@ -244,7 +257,7 @@ def load() -> list[Edict]:
         圣旨)
       • the file is empty / has no `[[edicts]]` tables
       • tomllib unavailable (Python < 3.11 — should never happen given
-        cc-enslaver's stated Python 3.13 baseline)
+        cc-enforcer's stated Python 3.13 baseline)
 
     Never raises: any parse / IO error is logged to stderr and an empty
     list returned, so the surrounding hooks fall through to their usual
@@ -289,7 +302,7 @@ def load() -> list[Edict]:
 #
 # Both the soft-layer injection block and the PreToolUse deny reason are
 # user-visible strings. English is the DEFAULT and skeleton language
-# (matches inject_context.py). CC_ENSLAVER_LANG=<code> selects a
+# (matches inject_context.py). CC_ENFORCER_LANG=<code> selects a
 # translation of the UI chrome (headers / footer / deny template); any
 # code is accepted and passes through verbatim. If a code has no chrome
 # translation registered below, render_injection / deny_reason fall back
@@ -309,7 +322,7 @@ def _resolved_lang(explicit: str | None = None) -> str:
     if explicit is not None:
         lang = explicit.strip().lower()
     else:
-        lang = (os.environ.get("CC_ENSLAVER_LANG") or "").strip().lower()
+        lang = (os.environ.get("CC_ENFORCER_LANG") or "").strip().lower()
     return lang or DEFAULT_LANG
 
 
@@ -371,7 +384,7 @@ def render_injection(
     Returns an empty string when there are no edicts so injection hooks
     can simply concatenate this onto their base prompt.
 
-    `lang` defaults to whatever `CC_ENSLAVER_LANG` resolves to (English
+    `lang` defaults to whatever `CC_ENFORCER_LANG` resolves to (English
     skeleton by default; any code accepted). Pass an explicit value when
     the caller has already resolved its own language (e.g.
     inject_context.py reuses its `_resolved_lang()` result for
@@ -476,7 +489,7 @@ _DENY_REASON_TEMPLATES = {
     # names that get programmatic treatment). Unregistered codes fall
     # back to "en" at the call site (`.get(lang, ...["en"])`).
     "en": (
-        "cc-enslaver · Imperial Edict {id} violation (user-defined hard rule)\n\n"
+        "cc-enforcer · Imperial Edict {id} violation (user-defined hard rule)\n\n"
         "Edict: {text}\n"
         "{note_line}"
         "Tool: {kind}\n"
@@ -484,7 +497,7 @@ _DENY_REASON_TEMPLATES = {
         "Matched pattern: {pattern!r}\n\n"
         "Snippet:\n{snippet}\n\n"
         "This is a project-level edict defined in "
-        ".claude/cc-enslaver/edicts.toml. It has severity = 'must',\n"
+        ".claude/cc-enforcer/edicts.toml. It has severity = 'must',\n"
         "so the violation is physically blocked (not a soft reminder).\n\n"
         "To proceed:\n"
         "  • Comply with the edict (recommended), or\n"
@@ -493,7 +506,7 @@ _DENY_REASON_TEMPLATES = {
         "  • Do NOT silently rewrite the edict or rationalize a bypass.\n"
     ),
     "zh": (
-        "cc-enslaver · 圣旨 {id} violation (user-defined hard edict)\n\n"
+        "cc-enforcer · 圣旨 {id} violation (user-defined hard edict)\n\n"
         "Edict: {text}\n"
         "{note_line}"
         "Tool: {kind}\n"
@@ -501,7 +514,7 @@ _DENY_REASON_TEMPLATES = {
         "Matched pattern: {pattern!r}\n\n"
         "Snippet:\n{snippet}\n\n"
         "This is a project-level edict defined in "
-        ".claude/cc-enslaver/edicts.toml. It has severity = 'must',\n"
+        ".claude/cc-enforcer/edicts.toml. It has severity = 'must',\n"
         "which means the violation is physically blocked (not a soft\n"
         "reminder).\n\n"
         "To proceed:\n"
@@ -516,11 +529,11 @@ _DENY_REASON_TEMPLATES = {
 def deny_reason(
     hit: EdictHit, *, kind: str, tool_or_cmd: str, lang: str | None = None,
 ) -> str:
-    """Build the cc-enslaver-style deny reason for an edict hit.
+    """Build the cc-enforcer-style deny reason for an edict hit.
 
     kind: "Edit" / "Write" / "Bash" — used in the headline.
     tool_or_cmd: file_path for Edit/Write, command for Bash.
-    lang: optional override; defaults to CC_ENSLAVER_LANG env var
+    lang: optional override; defaults to CC_ENFORCER_LANG env var
     (English skeleton by default; any code accepted, unregistered codes
     fall back to English). v0.17 — Chinese still says "圣旨" in the
     headline (the canonical Chinese term, preserves keyword-contract

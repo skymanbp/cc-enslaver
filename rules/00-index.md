@@ -4,7 +4,7 @@ title: "Rule index"
 severity: info
 ---
 
-# cc-enslaver rule index (English skeleton)
+# cc-enforcer rule index (English skeleton)
 
 > This is the **English skeleton** — the **source of truth** for every
 > rule. Translations live under `rules/<lang>/` (e.g. [`zh/`](zh/) for
@@ -18,7 +18,7 @@ severity: info
 > local llama.cpp, etc.), concatenate the rule files:
 >
 > ```bash
-> cat rules/*.md > /tmp/cc-enslaver.txt
+> cat rules/*.md > /tmp/cc-enforcer.txt
 > ```
 >
 > then prepend that file to your agent's system prompt.
@@ -82,7 +82,7 @@ severity: info
   edit is only done when every repo-wide reference of the changed
   content is co-updated or explicitly cleared. Passive half = per-edit
   co-update discipline + the per-project sync gate
-  (`.claude/cc-enslaver/sync-gate.toml`, Stop layer (i)); active half =
+  (`.claude/cc-enforcer/sync-gate.toml`, Stop layer (i)); active half =
   the `repo-refresh` whole-repo stale/outdated/redundant/wrong/drift
   sweep skill. Complements 06 (converge the part) and 07 (cover the
   request) with "carry the rest of the repo along".

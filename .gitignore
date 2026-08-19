@@ -31,7 +31,7 @@ desktop.ini
 
 # --- Other Claude Code plugins' project-local state ---
 # cc-memory plugin keeps memory.db + recent activity here; it is per-clone
-# state, not team-shareable like .claude/cc-enslaver/edicts.toml.
+# state, not team-shareable like .claude/cc-enforcer/edicts.toml.
 memory/
 
 # --- Build / dist artifacts ---

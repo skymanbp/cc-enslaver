@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to **cc-enslaver** are documented here.
+All notable changes to **cc-enforcer** (named **cc-enslaver** through v0.32.2,
+**anti-laziness** through v0.2.x — entries below keep the name the project
+shipped under) are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,6 +13,98 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 Nothing planned. The roadmap is empty by decision, not by neglect — see
 v0.32.1 for why its last two entries were retired rather than carried.
+
+---
+
+## [0.33.0] — 2026-08-18
+
+**Project rename: `cc-enslaver` → `cc-enforcer`** (user decision, 2026-08-18).
+Same twelve rules, same hooks. The old name had become a liability everywhere
+the project was cited — the resume vault carries a standing ruling that the
+string "enslaver" never renders on paper — and `cc-enforcer` both says what
+the plugin does and preserves the established `cce` abbreviation.
+
+### What moved (everything derived from the name)
+
+- **Plugin identity**: `plugin.json` / `marketplace.json` `name` fields → the
+  slash namespace `/cc-enforcer:*` follows automatically (no `commands/*.md`
+  carries a `name:` frontmatter), and the install coordinate becomes
+  `cc-enforcer@cc-enforcer`.
+- **Environment variables**: `CC_ENSLAVER_LANG` / `CC_ENSLAVER_DISABLE_LAYER_G`
+  / `CC_ENSLAVER_AUTO_GC_DAYS` → `CC_ENFORCER_*`.
+- **Per-project config dir**: `.claude/cc-enslaver/{edicts,sync-gate}.toml` →
+  `.claude/cc-enforcer/…` (`_PLUGIN_NAME` constants in `lib/edicts.py`,
+  `lib/sync_gate.py`, `lib/state.py`; this repo's own config `git mv`'d in the
+  same commit so the dogfooded layer (i) never lapses).
+- **GitHub**: repository renamed to `skymanbp/cc-enforcer`; GitHub serves
+  permanent redirects for the old clone/web URLs.
+
+Mechanics, per the rule 09 bulk-edit discipline: a 4-agent survey first
+(492 case-insensitive matching lines across 53 tracked files, categorized
+functional vs cosmetic), then a byte-level codemod (`cc-enslaver` →
+`cc-enforcer`, `CC_ENSLAVER` → `CC_ENFORCER`) — **412 replacements across 52
+files, residual `(?i)enslaver` count 0** outside the one deliberate exclusion.
+
+### BREAKING — and the failure mode is silent, so migrate loudly
+
+Both config loaders are failing-open: an unmigrated `.claude/cc-enslaver/`
+directory does not error, it just **stops enforcing** (edicts vanish from
+injection, Stop layer (i) goes inert). There is deliberately no compat shim
+reading the old directory — a quiet fallback would leave two truth locations
+forever, and this is the "unenforced gate you still trust" failure v0.31.0
+exists to prevent. Migration for a consuming project is one rename:
+
+    mv .claude/cc-enslaver .claude/cc-enforcer
+
+plus re-adding the marketplace under its new name and re-exporting any
+`CC_ENSLAVER_*` env vars as `CC_ENFORCER_*` (this machine had none set —
+verified against both process and persisted User scope).
+
+### The unified fix the rename flushed out (601 → 604 tests)
+
+Two CLI sites composed the config path from **their own copy of the
+plugin-name literal** instead of the shared `_PLUGIN_NAME` constant — the
+exact class that turns a rename into a silent read/write split:
+
+- `manage_edicts.py:_global_path()` hand-built
+  `~/.claude/cc-enslaver/edicts.toml`, so a constants-only rename would have
+  left `--global` **writing** to the old directory while `lib/edicts.load()`
+  **reads** the new one. Fix at the mechanism: `lib/edicts.py` gained a public
+  `global_path()` (single definition, used by both the loader's home fallback
+  and the CLI).
+- `manage_sync_gate.py:cmd_path()` printed a would-be path hand-joined from
+  the **process cwd**, while `add` / `init` write through
+  `sg.default_project_path()` (which honours `CLAUDE_PROJECT_DIR` first). With
+  the env naming repo A and the shell sitting in repo B, `path` printed a
+  location in B that no write would ever touch — the same print-vs-write
+  divergence class as v0.31's birth defect, one command over. `cmd_path` now
+  prints through the deterministic write resolver, and the dead `projroot`
+  import is gone.
+
+Each fix is pinned by a regression test plus its twin
+(`test_edicts.TestGlobalPathSingleDefinition` — equality alone would still
+pass if both sides re-inlined the same literal, so the second assertion
+requires the constant in the path;
+`test_manage_sync_gate.TestPathPrintsTheWriteTarget`).
+
+### What was deliberately NOT rewritten
+
+- **This file's past entries.** They keep `cc-enslaver` (and `anti-laziness`
+  for v0.1–v0.2.x): a dated record claiming `/cc-enforcer:gc` shipped in
+  v0.6.1 would be a lie with a version number on it. The header note carries
+  the name lineage instead. Same reasoning as the v0.2.x rename record.
+- **Frozen artifacts elsewhere on this machine** (software-copyright deposits,
+  pre-single-SoT legacy snapshots, dated audit logs) — surveyed, classified,
+  left alone.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **604 tests, OK** (601 + 3: the
+  two unified-fix pins and their twin).
+- `hooks/scripts/i18n_check.py` → clean (codemod touched en + zh skeletons
+  symmetrically).
+- `test_version_sync` green after the manifest/badge sweep;
+  `test_manage_sync_gate` re-runs `check` against this repo's renamed config.
 
 ---
 
@@ -1690,7 +1784,7 @@ docs, tests, translations), so stale siblings kept shipping.
     deliberately NOT a marker — it is the config file's name, not a claim.
     No config → the layer never fires (opt-in); loader/evaluator
     failing-open. This repo dogfoods its own gate:
-    [`.claude/cc-enslaver/sync-gate.toml`](.claude/cc-enslaver/sync-gate.toml)
+    [`.claude/cc-enslaver/sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml)
     (rules→prompts/docs/checklist, hooks→tests, plugin.json→marketplace+CHANGELOG
     with `mode = "all"`).
   - **Active — `repo-refresh` skill**

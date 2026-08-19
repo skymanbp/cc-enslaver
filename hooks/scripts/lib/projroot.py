@@ -1,11 +1,11 @@
-"""cc-enslaver — "is this directory a project root?", in one place.
+"""cc-enforcer — "is this directory a project root?", in one place.
 
 Both hand-edited configs this plugin reads are resolved relative to a
 project root that has to be *guessed* when the environment does not name
 it:
 
-    .claude/cc-enslaver/edicts.toml      → lib/edicts.py
-    .claude/cc-enslaver/sync-gate.toml   → lib/sync_gate.py
+    .claude/cc-enforcer/edicts.toml      → lib/edicts.py
+    .claude/cc-enforcer/sync-gate.toml   → lib/sync_gate.py
 
 The guess exists because `CLAUDE_PROJECT_DIR` is not reliably propagated
 to hook subprocesses on Windows (the v0.18.1 finding), so both loaders

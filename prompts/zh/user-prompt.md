@@ -1,4 +1,4 @@
-# cc-enslaver — 决策时触发器（每轮注入）
+# cc-enforcer — 决策时触发器（每轮注入）
 
 > 回应前自检：以下任一**命中**就停下，先验证 / 补步骤再继续。
 > 🚨 物理强制层在你试图省略时会 DENY 工具调用 / BLOCK Stop。
@@ -30,16 +30,16 @@
 | 声明"I edited X.py / 我修改了 Y.md"但磁盘 mtime 未变 / 声明"created Z"但 Z 不存在 | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | 含 done-claim 的回复末尾缺 `tldr` / 大白话总结 | v0.20 回复 schema | **Stop layer (h) v0.20 BLOCK** |
 | tldr 单条超一句话 / 160 字符（段落不是 TL;DR；多条内容 → 逐条一行短句）| v0.23 tldr 长度约定 | **Stop layer (h) v0.23 BLOCK** |
-| 改完收尾没做全库引用清扫（文档 / 下游 / 测试 / 翻译），sync-gate 某组 `when` 命中而无 `require` 编辑、又没写 `同步核对` / `sync-check` 行 | rule 12 全库同步 | **Stop layer (i) v0.23 BLOCK**（有 `.claude/cc-enslaver/sync-gate.toml` 的项目）|
+| 改完收尾没做全库引用清扫（文档 / 下游 / 测试 / 翻译），sync-gate 某组 `when` 命中而无 `require` 编辑、又没写 `同步核对` / `sync-check` 行 | rule 12 全库同步 | **Stop layer (i) v0.23 BLOCK**（有 `.claude/cc-enforcer/sync-gate.toml` 的项目）|
 | 留 TODO / FIXME 但说"完成" / 做了用户没要求的重构 | rule 07 忠实性 | Stop layer (d) BLOCK |
 
 ## 收尾骨架（YAML schema · 必走）
 
-回复末尾输出一个 ```yaml `cc-enslaver:` 块。字段名就是 Stop hook 的检测 marker，别改名。
+回复末尾输出一个 ```yaml `cc-enforcer:` 块。字段名就是 Stop hook 的检测 marker，别改名。
 修改类用全量，非修改类（答疑 / 查询）用精简形（收敛 / 忠实 / tldr）：
 
 ```yaml
-cc-enslaver:
+cc-enforcer:
   改前: {架构定位: ..., 根因: ..., 方案: ...}               # rule 02
   改中: [{file: "path:line", what: "..."}]                  # rule 09
   收敛:                                                     # rule 06

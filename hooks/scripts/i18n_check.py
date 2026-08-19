@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-enslaver — i18n sync checker (language version control).
+"""cc-enforcer — i18n sync checker (language version control).
 
 English is the *skeleton* (source-of-truth) language: the root ``.md``
 files under ``rules/`` and ``prompts/`` define the canonical structure.
@@ -283,7 +283,7 @@ def _out(s: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="cc-enslaver i18n sync checker (English is the skeleton)",
+        description="cc-enforcer i18n sync checker (English is the skeleton)",
     )
     parser.add_argument(
         "--quiet", action="store_true",
@@ -294,11 +294,11 @@ def main(argv: list[str] | None = None) -> int:
     drifts = check_sync()
     if not drifts:
         if not args.quiet:
-            _out("cc-enslaver i18n: all translations in sync with the "
+            _out("cc-enforcer i18n: all translations in sync with the "
                  "English skeleton.\n")
         return 0
     if not args.quiet:
-        _out(f"cc-enslaver i18n: {len(drifts)} drift(s) vs the English "
+        _out(f"cc-enforcer i18n: {len(drifts)} drift(s) vs the English "
              f"skeleton:\n\n")
         for d in drifts:
             _out(f"  {d}\n")

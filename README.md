@@ -1,4 +1,4 @@
-# cc-enslaver
+# cc-enforcer
 
 > **Rules your coding agent physically cannot ignore.**
 > A Claude Code plugin (and LLM-agnostic rule pack) that stops reactive patches,
@@ -6,8 +6,8 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.32.2-blue.svg)](CHANGELOG.md)
-[![Tests](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enslaver/actions/workflows/test.yml)
+[![Plugin Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
 **[中文文档 →](README.zh.md)**
@@ -20,14 +20,14 @@ Every "be rigorous" instruction you put in a prompt has the same flaw: the model
 decides whether to follow it. Under pressure — a long session, a compacted
 context, a failing test at 2am — it decides not to, and tells you it did.
 
-cc-enslaver moves the important half of that contract **out of the prompt and
+cc-enforcer moves the important half of that contract **out of the prompt and
 into the harness**. Claude Code hooks run *before* each tool call and *before*
 each reply is allowed to end. A violation returns a real `deny` / `block`
 verdict, so the agent cannot reason, apologise, or "just this once" its way
 past it:
 
 ```text
-cc-enslaver · rule 09 violation (rolling-patch interception)
+cc-enforcer · rule 09 violation (rolling-patch interception)
 
 Tool: Edit
 Target: hooks/scripts/stop_guard.py
@@ -78,18 +78,18 @@ The repo ships `.claude-plugin/marketplace.json`, so it registers as a
 single-plugin marketplace:
 
 ```bash
-git clone https://github.com/skymanbp/cc-enslaver.git /path/to/cc-enslaver
+git clone https://github.com/skymanbp/cc-enforcer.git /path/to/cc-enforcer
 ```
 
 Then in any Claude Code session (CLI or IDE):
 
 ```
-/plugin marketplace add /path/to/cc-enslaver
-/plugin install cc-enslaver@cc-enslaver
+/plugin marketplace add /path/to/cc-enforcer
+/plugin install cc-enforcer@cc-enforcer
 ```
 
-Verify with `/plugin` → **Installed** should list `cc-enslaver@cc-enslaver`.
-Commands then surface as `/cc-enslaver:checklist`, `/cc-enslaver:verify`, …
+Verify with `/plugin` → **Installed** should list `cc-enforcer@cc-enforcer`.
+Commands then surface as `/cc-enforcer:checklist`, `/cc-enforcer:verify`, …
 
 > **Requirements:** Python on PATH (tested on 3.13). Hook scripts use the
 > standard library only — no pip step, no third-party packages.
@@ -101,8 +101,8 @@ You do not need Claude Code. The rules are plain Markdown in [`rules/`](rules/)
 translation):
 
 ```bash
-cat rules/*.md    > cc-enslaver.txt     # English skeleton
-cat rules/zh/*.md > cc-enslaver.txt     # Chinese translation
+cat rules/*.md    > cc-enforcer.txt     # English skeleton
+cat rules/zh/*.md > cc-enforcer.txt     # Chinese translation
 # feed as system prompt / pre-context to the agent of your choice
 ```
 
@@ -193,15 +193,15 @@ becomes a regex a hook matches against the literal content of every Edit, Write
 and Bash call before it lands:
 
 ```bash
-/cc-enslaver:edict add E01 "no mongoose, use prisma" --must \
+/cc-enforcer:edict add E01 "no mongoose, use prisma" --must \
     --deny-edit 'from ["'"'"']mongoose["'"'"']' \
     --deny-bash 'npm\s+(i|install)\s+mongoose'
 ```
 
 - **Two severities, mechanically different.** `must` + a regex → `PreToolUse`
   DENY naming the edict id. `should` → reminder text only, never denies.
-- **Two scopes.** `.claude/cc-enslaver/edicts.toml` (project, commit it so the
-  team shares the red line) or `~/.claude/cc-enslaver/edicts.toml` (`--global`).
+- **Two scopes.** `.claude/cc-enforcer/edicts.toml` (project, commit it so the
+  team shares the red line) or `~/.claude/cc-enforcer/edicts.toml` (`--global`).
 - **Hot-reloaded** — the loader re-reads on every hook event, so you can iterate
   on a regex mid-session.
 - **Re-injected every turn**, so compaction cannot quietly drop your rules.
@@ -218,12 +218,12 @@ Details: [`docs/EDICTS.md`](docs/EDICTS.md)
 
 | Surface | What it does |
 |---|---|
-| `/cc-enslaver:checklist` | Prints the **8-section checklist** (pre-edit → post-edit → convergence → fidelity → read/think → systematic → TL;DR → repo sync). Its patch-marker item is a *closed set* synchronised with the hook's real constant, so you cannot tick every box and still get denied. |
-| `/cc-enslaver:verify` | Turns the agent's last reply into untrusted input: extracts every factual claim, buckets it (code location / behaviour / external / run result) and prescribes a re-verification method per bucket. Recall is explicitly not allowed. |
-| `/cc-enslaver:edict` | `list / add / remove / reload / path` for Imperial Edicts (`--global` for personal scope). |
-| `/cc-enslaver:gc` | Lists — or with `--apply`, deletes — session-state files older than N days. Dry-run by default, and the command file forbids the agent from choosing `--apply` for you. |
-| `/cc-enslaver:i18n` | Checks every translation still matches the English skeleton file-for-file and heading-for-heading. |
-| `/cc-enslaver:sync-gate` | `init / list / check / add / remove / path` for this project's rule-12 co-update groups. **`check` is the point**: the gate's loader is failing-open, so a dropped group or a glob that matches no file makes it stop guarding *silently* — an unenforced gate you still trust is worse than none. `check` names both and exits 1, so it works in CI. |
+| `/cc-enforcer:checklist` | Prints the **8-section checklist** (pre-edit → post-edit → convergence → fidelity → read/think → systematic → TL;DR → repo sync). Its patch-marker item is a *closed set* synchronised with the hook's real constant, so you cannot tick every box and still get denied. |
+| `/cc-enforcer:verify` | Turns the agent's last reply into untrusted input: extracts every factual claim, buckets it (code location / behaviour / external / run result) and prescribes a re-verification method per bucket. Recall is explicitly not allowed. |
+| `/cc-enforcer:edict` | `list / add / remove / reload / path` for Imperial Edicts (`--global` for personal scope). |
+| `/cc-enforcer:gc` | Lists — or with `--apply`, deletes — session-state files older than N days. Dry-run by default, and the command file forbids the agent from choosing `--apply` for you. |
+| `/cc-enforcer:i18n` | Checks every translation still matches the English skeleton file-for-file and heading-for-heading. |
+| `/cc-enforcer:sync-gate` | `init / list / check / add / remove / path` for this project's rule-12 co-update groups. **`check` is the point**: the gate's loader is failing-open, so a dropped group or a glob that matches no file makes it stop guarding *silently* — an unenforced gate you still trust is worse than none. `check` names both and exits 1, so it works in CI. |
 | **`verifier` subagent** | A deliberately crippled read-only checker (Read/Grep/Glob only — a permission fact, not an instruction). Returns *intact / drift / missing / mismatch / unverifiable* per claim. It cannot become the fixer, so it has no incentive to quietly patch a discrepancy. |
 | **`systematic-debug` skill** | Auto-triggers on bug-fix language and takes over the workflow: build a fast deterministic reproduction loop **first**, then hypothesise. "A 30-second intermittent flaky loop is barely better than no loop; a 2-second deterministic loop is a debugging superpower." |
 | **`repo-refresh` skill** | Auto-triggers on repo-audit language: sweeps code *and* prose together for stale / outdated / redundant / wrong / drifted content, then asks you to convert whatever coupling it found into a sync-gate group. |
@@ -274,7 +274,7 @@ the naive version demonstrably failed:
 
 | Event | Matcher | Behaviour | Implementation |
 |---|---|---|---|
-| `SessionStart` | — | Inject the 12-rule discipline summary + reply schema + Imperial Edicts (English by default, any language via `CC_ENSLAVER_LANG`). | [`inject_context.py`](hooks/scripts/inject_context.py) |
+| `SessionStart` | — | Inject the 12-rule discipline summary + reply schema + Imperial Edicts (English by default, any language via `CC_ENFORCER_LANG`). | [`inject_context.py`](hooks/scripts/inject_context.py) |
 | `UserPromptSubmit` | — | Re-inject per-turn decision triggers + edicts — the defence against context compaction. | [`inject_context.py`](hooks/scripts/inject_context.py) |
 | `PreToolUse` | `Read\|Edit\|Write` | Record reads, capture mtime baselines, and run the content + frequency + edict gates listed above. | [`read_guard.py`](hooks/scripts/read_guard.py) |
 | `PreToolUse` | `Bash` | Tokenise the command, deny bypass flags and destructive operations, process read registrations, scan edicts. | [`bash_guard.py`](hooks/scripts/bash_guard.py) |
@@ -302,14 +302,14 @@ contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
 
 | Variable | Effect |
 |---|---|
-| `CC_ENSLAVER_LANG=<code>` | Injection language for prompts, edicts and deny reasons. Unset / `en` = English skeleton; `zh` = Chinese; any other code reads `<dir>/<code>/` with per-file fallback to English. |
-| `CC_ENSLAVER_DISABLE_LAYER_G=1` | Turn off Stop layer (g) file-claim verification. The other eight layers still apply. |
-| `CC_ENSLAVER_AUTO_GC_DAYS=N` | Auto-prune session state older than N days at SessionStart, rate-limited to once per 24h. Unset / `0` → disabled. |
-| `CLAUDE_PLUGIN_DATA` | Session-state base dir. Set by Claude Code; falls back to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/`, then `~/.claude/local/cc-enslaver/`. |
-| `CLAUDE_PROJECT_DIR` | Project root, used to resolve `.claude/cc-enslaver/edicts.toml` and `sync-gate.toml`. |
+| `CC_ENFORCER_LANG=<code>` | Injection language for prompts, edicts and deny reasons. Unset / `en` = English skeleton; `zh` = Chinese; any other code reads `<dir>/<code>/` with per-file fallback to English. |
+| `CC_ENFORCER_DISABLE_LAYER_G=1` | Turn off Stop layer (g) file-claim verification. The other eight layers still apply. |
+| `CC_ENFORCER_AUTO_GC_DAYS=N` | Auto-prune session state older than N days at SessionStart, rate-limited to once per 24h. Unset / `0` → disabled. |
+| `CLAUDE_PLUGIN_DATA` | Session-state base dir. Set by Claude Code; falls back to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/`, then `~/.claude/local/cc-enforcer/`. |
+| `CLAUDE_PROJECT_DIR` | Project root, used to resolve `.claude/cc-enforcer/edicts.toml` and `sync-gate.toml`. |
 
 **Per-project sync gate** (rule 12) is opt-in: declare co-update groups in
-`.claude/cc-enslaver/sync-gate.toml` and Stop layer (i) enforces them.
+`.claude/cc-enforcer/sync-gate.toml` and Stop layer (i) enforces them.
 
 ---
 
@@ -336,7 +336,7 @@ mode it exists to prevent:
 ## Repository structure
 
 ```
-cc-enslaver/
+cc-enforcer/
 ├── rules/                       # 12 rules + index — English skeleton (source of truth)
 │   └── zh/                      # Chinese translation, structurally CI-gated
 ├── prompts/                     # SessionStart + per-turn injections (+ zh/)
@@ -367,7 +367,7 @@ cc-enslaver/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 601 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 604 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -378,7 +378,7 @@ cc-enslaver/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **601 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **604 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -464,7 +464,7 @@ guarding, and prints one stderr line nobody reads.
 stopped looking. So:
 
 ```
-$ /cc-enslaver:sync-gate check
+$ /cc-enforcer:sync-gate check
   ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
   !! code-docs.require    'nowhere/*.rst'      → 0 file(s)
 

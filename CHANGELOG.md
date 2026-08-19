@@ -2174,8 +2174,8 @@ enforcement machinery and every human doc's prose language exactly as they were.
 - **Runtime default flipped to English.** `DEFAULT_LANG = "en"` added to
   [`hooks/scripts/inject_context.py`](hooks/scripts/inject_context.py) and
   [`hooks/scripts/lib/edicts.py`](hooks/scripts/lib/edicts.py). Unset /
-  `CC_ENSLAVER_LANG=en` → read the root English skeleton;
-  `CC_ENSLAVER_LANG=<code>` → read `<dir>/<code>/<file>`, **falling back to the
+  `CC_ENFORCER_LANG=en` → read the root English skeleton;
+  `CC_ENFORCER_LANG=<code>` → read `<dir>/<code>/<file>`, **falling back to the
   root English skeleton** (with a stderr note) when that translation is missing.
   The old hardcoded `{zh,en}` gate is gone — **any** language code passes through.
 - **Edict UI chrome (`_INJECT_STRINGS` / `_DENY_REASON_TEMPLATES`)** now defaults
@@ -2206,7 +2206,7 @@ enforcement machinery and every human doc's prose language exactly as they were.
   [`tests/test_inject_context.py`](tests/test_inject_context.py) and
   [`tests/test_edicts.py`](tests/test_edicts.py) from Chinese needles to the
   English skeleton, and **re-homed** (not deleted) the Chinese assertions onto
-  `CC_ENSLAVER_LANG=zh` counterpart tests — coverage preserved on both languages.
+  `CC_ENFORCER_LANG=zh` counterpart tests — coverage preserved on both languages.
 - Full suite **216 → 225** (+7 `test_i18n_sync`, +2 net from inject/edict
   bilingual restructure). Guard scripts (`stop_guard` / `read_guard` /
   `bash_guard`) and their **bilingual** marker lists were left untouched, so
@@ -2434,7 +2434,7 @@ allowance semantics. Per SemVer this is a patch release.
 
 ## [0.18.0] — 2026-05-25
 
-**Auto-GC on SessionStart (opt-in via `CC_ENSLAVER_AUTO_GC_DAYS`).**
+**Auto-GC on SessionStart (opt-in via `CC_ENFORCER_AUTO_GC_DAYS`).**
 
 Closes the v0.6.1 roadmap entry. The original v0.6.1 GC was manual-only
 (via `/cc-enforcer:gc`) with the explicit note that auto-GC was
@@ -2464,7 +2464,7 @@ addresses each concern:
     both entry points share identical semantics.
 - **`hooks/scripts/inject_context.py`**:
   - `_maybe_auto_gc()` runs only on `SessionStart` events, only when
-    `CC_ENSLAVER_AUTO_GC_DAYS=N` (positive int) is set, only if the
+    `CC_ENFORCER_AUTO_GC_DAYS=N` (positive int) is set, only if the
     rate-limit marker is older than 24h.
   - Marker file: `<state_dir>/_auto_gc.json` carries `{ts: float,
     deleted: int}`. Rewritten after every real GC attempt (even when
@@ -2488,7 +2488,7 @@ else) so it co-locates with what it tracks — and it's protected by
 ### Tests: 174 → 184 (+10)
 
 `TestAutoGCOnSessionStart` (8 tests) drives `inject_context.py` as a
-subprocess with `CC_ENSLAVER_AUTO_GC_DAYS` in the env:
+subprocess with `CC_ENFORCER_AUTO_GC_DAYS` in the env:
   - env unset → no GC, no marker
   - env set + old files → files deleted, marker written with `deleted` count
   - rate-limit: fresh marker (< 24h) → no deletion
@@ -2509,12 +2509,12 @@ State files are small (KB-sized) and accumulate slowly. Aggressively
 auto-deleting on every install would be a silent behavior change that
 could surprise users debugging long-tail issues ("why did my session
 state for that bug-repro vanish?"). Opt-in via env var matches the
-v0.15 `CC_ENSLAVER_LANG` and v0.16 `CC_ENSLAVER_DISABLE_LAYER_G`
+v0.15 `CC_ENFORCER_LANG` and v0.16 `CC_ENFORCER_DISABLE_LAYER_G`
 convention — explicit, scriptable, no install-time prompts.
 
 ### Changed — docs
 
-- `commands/gc.md`: new section documenting `CC_ENSLAVER_AUTO_GC_DAYS`
+- `commands/gc.md`: new section documenting `CC_ENFORCER_AUTO_GC_DAYS`
   with both Bash and PowerShell setup snippets.
 - `README.md`: "New in v0.18" banner; Environment switches table
   (both English and Chinese) gains the auto-GC row; roadmap line
@@ -2538,7 +2538,7 @@ Two concrete user-reported gaps closed:
    layout: `lib/edicts.py`, `manage_edicts.py`, `prompts/en/`, etc.),
    8-script enumeration, current environment switches table.
 2. **"圣旨 should have an English adaptation"** — v0.15 added
-   `CC_ENSLAVER_LANG=en` for the base prompts, but `edicts.py`
+   `CC_ENFORCER_LANG=en` for the base prompts, but `edicts.py`
    hardcoded Chinese banner + Chinese DENY headline so English users
    got mixed-language output. v0.17 extends the same switch to cover
    Imperial Edicts.
@@ -2566,11 +2566,11 @@ Two concrete user-reported gaps closed:
   switch flips both).
 - **+5 tests** in `TestBilingualRendering`:
   - Default (no env) → Chinese banner in injection
-  - `CC_ENSLAVER_LANG=en` → English banner + "User-defined,
+  - `CC_ENFORCER_LANG=en` → English banner + "User-defined,
     hot-reloadable" English intro + no Chinese 圣旨 banner bleed-through
   - Unknown lang (`fr`) → fail-safe back to Chinese
   - Default → Chinese `圣旨 E01 violation` headline in Bash DENY
-  - `CC_ENSLAVER_LANG=en` → English `Imperial Edict E01 violation`
+  - `CC_ENFORCER_LANG=en` → English `Imperial Edict E01 violation`
     headline in Bash DENY (no Chinese 圣旨 anywhere in reason)
 
 ### Fixed — Windows portability
@@ -2611,8 +2611,8 @@ Windows (v0.13–v0.16 were tested only in Linux sandbox):
   Write/Bash rows.
 - "Five scripts" enumeration → 8 scripts (added `gc_state.py`,
   `manage_edicts.py`, `lib/` package).
-- New "Environment switches" table documenting `CC_ENSLAVER_LANG`,
-  `CC_ENSLAVER_DISABLE_LAYER_G`, `CLAUDE_PLUGIN_DATA`,
+- New "Environment switches" table documenting `CC_ENFORCER_LANG`,
+  `CC_ENFORCER_DISABLE_LAYER_G`, `CLAUDE_PLUGIN_DATA`,
   `CLAUDE_PROJECT_DIR`.
 - 中文说明 section mirrored: 6 → 7 层 Stop description, layer (g) line,
   4 个 slash 命令, 当前路线图 refresh, 环境变量表.
@@ -2638,7 +2638,7 @@ env var = no behavior change).
 The Chinese term is the original project nomenclature and appears in
 existing CHANGELOG entries, slash-command help text, and contract
 tests. Replacing it would create translation drift. The cleaner
-solution is `CC_ENSLAVER_LANG=en` opt-in, just as v0.15 chose for
+solution is `CC_ENFORCER_LANG=en` opt-in, just as v0.15 chose for
 prompts. Default behavior is identical to v0.16 — users only see
 "Imperial Edicts" when they explicitly ask for English.
 
@@ -2705,7 +2705,7 @@ Layer (g) prefers false-negatives (missed lies) over false-positives
 | Claim verb matches modification but mtime changed | Pass — verified |
 | Claim verb "edited" + baseline mtime + current mtime same | **BLOCK** |
 | Claim verb "created" + baseline=None + file still missing | **BLOCK** |
-| `CC_ENSLAVER_DISABLE_LAYER_G` env var set | Pass — user escape hatch |
+| `CC_ENFORCER_DISABLE_LAYER_G` env var set | Pass — user escape hatch |
 
 The escape-hatch env var exists because file-claim parsing is
 fundamentally fuzzy. Users who hit a false-positive in real workflow
@@ -2748,7 +2748,7 @@ discipline already exists; v0.16 just adds the hook to enforce it.
 
 ## [0.15.0] — 2026-05-25
 
-**English prompts mirror + `CC_ENSLAVER_LANG=en` injection switch.**
+**English prompts mirror + `CC_ENFORCER_LANG=en` injection switch.**
 
 Closes the v0.6.2 / v0.11 follow-up: `rules/en/` has shipped all 9
 rules in English since v0.6.2, but `prompts/` (the soft layer
@@ -2766,7 +2766,7 @@ the language-switch plumbing.
 - **`prompts/en/user-prompt.md`** — English mirror of the 13-row
   decision triggers table (~30 lines).
 - **`hooks/scripts/inject_context.py`**:
-  - `_resolved_lang()` reads `CC_ENSLAVER_LANG` env var
+  - `_resolved_lang()` reads `CC_ENFORCER_LANG` env var
     (`zh` default; `en` switches; any other value falls back to `zh`
     fail-safe).
   - `load_prompt()` tries `prompts/en/<file>` when `lang == "en"`;
@@ -2782,7 +2782,7 @@ the language-switch plumbing.
   through (proves the en/ file is actually being read).
 - `test_lang_en_uses_english_user_prompt` — keyword contract for
   per-turn English injection.
-- `test_unknown_lang_falls_back_to_chinese` — `CC_ENSLAVER_LANG=fr`
+- `test_unknown_lang_falls_back_to_chinese` — `CC_ENFORCER_LANG=fr`
   must not drop the injection.
 - `test_no_lang_env_var_uses_chinese` — defensive default-path test.
 
@@ -2795,7 +2795,7 @@ The user is a Chinese speaker (CLAUDE.md §5), the rules are written
 in Chinese canonical, and most existing test contracts assert
 Chinese phrases. Defaulting to system locale would silently flip
 behavior on different developer machines (CI, Windows-vs-Linux,
-LANG=C, etc.). Explicit opt-in via `CC_ENSLAVER_LANG=en` keeps
+LANG=C, etc.). Explicit opt-in via `CC_ENFORCER_LANG=en` keeps
 behavior deterministic.
 
 ### Tests: 154 → 158 (+4)
@@ -2804,7 +2804,7 @@ behavior deterministic.
 
 - `CLAUDE.md` §3 repo tree: `prompts/en/` subdirectory + the v0.15
   switch note added.
-- `CLAUDE.md` §5 metadata: `CC_ENSLAVER_LANG=en` env-var note.
+- `CLAUDE.md` §5 metadata: `CC_ENFORCER_LANG=en` env-var note.
 
 ---
 

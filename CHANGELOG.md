@@ -1,8 +1,10 @@
 # Changelog
 
 All notable changes to **cc-enforcer** (named **cc-enslaver** through v0.32.2,
-**anti-laziness** through v0.2.x — entries below keep the name the project
-shipped under) are documented here.
+**anti-laziness** through v0.2.x) are documented here. Entries below render
+the current name throughout: on the user's 2026-08-18 ruling the old name was
+retconned out of the historical entries — the v0.33.0 entry is the record of
+the rename itself.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -89,13 +91,17 @@ requires the constant in the path;
 
 ### What was deliberately NOT rewritten
 
-- **This file's past entries.** They keep `cc-enslaver` (and `anti-laziness`
-  for v0.1–v0.2.x): a dated record claiming `/cc-enforcer:gc` shipped in
-  v0.6.1 would be a lie with a version number on it. The header note carries
-  the name lineage instead. Same reasoning as the v0.2.x rename record.
-- **Frozen artifacts elsewhere on this machine** (software-copyright deposits,
-  pre-single-SoT legacy snapshots, dated audit logs) — surveyed, classified,
-  left alone.
+- **This file's past entries — at release time.** They kept `cc-enslaver`, on
+  the argument that a dated record claiming `/cc-enforcer:gc` shipped in
+  v0.6.1 would be a lie with a version number on it. Hours later the user
+  ruled the other way — retcon everywhere, "as if the name was always
+  cc-enforcer" — so the entries below now render the current name, and this
+  entry plus the header note are the only in-repo record that a rename
+  happened. Git commit history and the published GitHub release objects are
+  NOT rewritten: that would take force-pushes and break external references.
+- **Frozen software-copyright deposits** (CodeEraser-ip) — the one exclusion
+  the user kept when ordering the retcon; every other dated record on this
+  machine was swept to the new name in the same ruling.
 
 ### Verification
 
@@ -128,7 +134,7 @@ was reachable from "did I update the README" — the README was fine.
 > [`repo-refresh`] should call this command's `add`, and close with `check`.
 
 `skills/repo-refresh/SKILL.md` Step 6 still said *"register the couplings you
-found into `.claude/cc-enslaver/sync-gate.toml`"* — hand-edit the TOML, no
+found into `.claude/cc-enforcer/sync-gate.toml`"* — hand-edit the TOML, no
 mention of the CLI that had existed for two releases, and none of `check`.
 
 **Document A asserted that document B does X; document B did not know.** I
@@ -296,7 +302,7 @@ them buys a directory name and costs a cross-tree `sys.path` splice), and
 CLI that manages its config.
 
 **Still open, with the blocker named rather than left vague:** per-session
-ephemeral edicts (`/cc-enslaver:edict add --session`) cannot be built with the
+ephemeral edicts (`/cc-enforcer:edict add --session`) cannot be built with the
 current CLI shape — the CLI is a Bash subprocess with no `session_id`, which is
 precisely why `register_read`'s authoritative half lives inside `bash_guard`.
 It needs its own design round, not a corner of this one.
@@ -450,7 +456,7 @@ neither, while `skills/repo-refresh/SKILL.md` has been instructing agents since
 v0.23 to "register the couplings you found into sync-gate.toml" — with no tool
 to do it and no way to check the result.
 
-### `/cc-enslaver:sync-gate`
+### `/cc-enforcer:sync-gate`
 
 New [`hooks/scripts/manage_sync_gate.py`](hooks/scripts/manage_sync_gate.py) +
 [`commands/sync-gate.md`](commands/sync-gate.md):
@@ -459,8 +465,8 @@ New [`hooks/scripts/manage_sync_gate.py`](hooks/scripts/manage_sync_gate.py) +
 `check` is the point of the whole feature:
 
 ```
-$ /cc-enslaver:sync-gate check
-config: .../.claude/cc-enslaver/sync-gate.toml
+$ /cc-enforcer:sync-gate check
+config: .../.claude/cc-enforcer/sync-gate.toml
 3 group(s) loaded:
   hooks-tests
     when    = ['hooks/scripts/*.py']
@@ -526,7 +532,7 @@ session even when the env var is missing.
 Run against a project that has **no config yet**, every candidate fails
 `.is_file()` and resolution falls through to the process cwd. Under test with
 `CLAUDE_PROJECT_DIR` pointed at a scratch repo, from a shell sitting in this
-one, the CLI appended two groups to **cc-enslaver's own `sync-gate.toml`**.
+one, the CLI appended two groups to **cc-enforcer's own `sync-gate.toml`**.
 
 **Upstream ladder.** Symptom: wrong file written. Propagation: `_write_target`
 trusted a resolver whose contract is "find an existing config". Origin: *"where
@@ -1522,7 +1528,7 @@ every one of the HIGH findings is a guard that was silently not guarding.
   manage_edicts' own header.
 - **MED — a UTF-8 BOM silently dropped every rule** in both configs. tomllib
   does not strip it, so the first `[[table]]` became an invalid statement:
-  `/cc-enslaver:edict list` reported "(edicts file is empty)" while every
+  `/cc-enforcer:edict list` reported "(edicts file is empty)" while every
   `must` rule sat unenforced. A BOM is what several standard Windows save
   paths emit.
 - **MED — `sync_gate.load()` crashed on a non-UTF-8 config**, taking Stop
@@ -1578,7 +1584,7 @@ every one of the HIGH findings is a guard that was silently not guarding.
   `gc_state`, `manage_edicts` and `read_guard` carried bare `# noqa: E402`
   on their sys.path-bootstrap imports, and `inject_context` a bare
   `try: … except: pass` — so a full-file Write of any of them was DENIED by
-  this plugin's own content detectors: **no agent running cc-enslaver could
+  this plugin's own content detectors: **no agent running cc-enforcer could
   rewrite them.** v0.23 recognised the failure mode and fixed exactly one
   file (`lib/sync_gate.py`), then never swept the tree — precisely the
   repo-wide-sync omission rule 12 exists to catch. All five now carry the
@@ -1765,7 +1771,7 @@ docs, tests, translations), so stale siblings kept shipping.
   explicitly verified current", with the sweep reported via a `同步核对:` /
   `sync-check:` closing line. Two halves:
   - **Passive — sync gate (per-project 代码门禁)**. Projects register known
-    co-update invariants in `.claude/cc-enslaver/sync-gate.toml`
+    co-update invariants in `.claude/cc-enforcer/sync-gate.toml`
     (`[[groups]]` with `when` / `require` globs; fnmatch on project-relative
     paths, `*` crosses separators; optional `mode = "all"` demands *every*
     require glob be matched — the lock-step semantics that catches the
@@ -1784,7 +1790,7 @@ docs, tests, translations), so stale siblings kept shipping.
     deliberately NOT a marker — it is the config file's name, not a claim.
     No config → the layer never fires (opt-in); loader/evaluator
     failing-open. This repo dogfoods its own gate:
-    [`.claude/cc-enslaver/sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml)
+    [`.claude/cc-enforcer/sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml)
     (rules→prompts/docs/checklist, hooks→tests, plugin.json→marketplace+CHANGELOG
     with `mode = "all"`).
   - **Active — `repo-refresh` skill**
@@ -2155,7 +2161,7 @@ enforcement machinery and every human doc's prose language exactly as they were.
   `assertEqual(check_sync(), [])`, auto-discovered by `unittest discover` → runs in
   the existing GitHub Actions matrix (ubuntu + windows, Python 3.13) on every
   push/PR. This makes "语言版本控制" a *hard action*, not soft docs (rule 07).
-- **[`commands/i18n.md`](commands/i18n.md)** — `/cc-enslaver:i18n` runs the check.
+- **[`commands/i18n.md`](commands/i18n.md)** — `/cc-enforcer:i18n` runs the check.
 - **[`docs/I18N.md`](docs/I18N.md)** — manifest: declares English as the skeleton,
   the translatable surface, how to add a language (`rules/<code>/` +
   `prompts/<code>/` [+ an optional UI-string block]), the sync contract, and the
@@ -2201,7 +2207,7 @@ one-sentence plain-language summary at the end of every done-claim reply.
   the time; v0.21 promoted English to the skeleton at `prompts/`, so the
   link is left unlinked rather than pointed at a file that no longer
   exists):
-  a ```yaml `cc-enslaver:` block with fields `改前 / 改中 / 收敛 / 忠实 /
+  a ```yaml `cc-enforcer:` block with fields `改前 / 改中 / 收敛 / 忠实 /
   收尾 / tldr` (English mirror: `before / edits / convergence / fidelity
   / closing / tldr`). Modification tasks use the full schema;
   non-modification done-claim replies use the minimal form
@@ -2212,7 +2218,7 @@ one-sentence plain-language summary at the end of every done-claim reply.
   fires on **every** done-claim turn, not just edit turns — it is the
   final gate, reached only after all discipline checks pass.
 - Per-block **`大白话:` line** appended to every Stop block reason
-  (before the one-shot footer), so cc-enslaver's own output is symmetric
+  (before the one-shot footer), so cc-enforcer's own output is symmetric
   with the layer-(h) requirement it imposes.
 - New tests (full suite **203 → 216**): `TestTldrLayerH` ×8,
   `TestCanonicalYamlSchema` ×2 (zh + en schemas pass layers a–h),
@@ -2254,7 +2260,7 @@ Project-level `edicts.toml` was silently invisible to hook subprocesses
 and to `manage_edicts.py` whenever `CLAUDE_PROJECT_DIR` failed to
 propagate — verified to occur on Windows when Claude Code's Bash tool
 spawns child processes. Symptom: a user creates an edict via
-`/cc-enslaver:edict add ...`, it appears in the soft-layer injection
+`/cc-enforcer:edict add ...`, it appears in the soft-layer injection
 (because `inject_context.py` had the env var), but the `PreToolUse`
 hooks miss it and the user gets no `must` enforcement. Or worse: the
 `add` command itself fails with "set CLAUDE_PROJECT_DIR" even though
@@ -2271,10 +2277,10 @@ the user is sitting in the project root.
 - `_cwd_if_project_root()`: returns `Path.cwd()` if it has a marker,
   else `None`. Used by both the loader and the writer.
 - **Loader (`edicts_path`)** new resolution order:
-  1. `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
-  2. `$(cwd)/.claude/cc-enslaver/edicts.toml` — **new**, only when
+  1. `${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml`
+  2. `$(cwd)/.claude/cc-enforcer/edicts.toml` — **new**, only when
      cwd has a project-root marker
-  3. `${HOME}/.claude/cc-enslaver/edicts.toml` — personal global
+  3. `${HOME}/.claude/cc-enforcer/edicts.toml` — personal global
 - **Writer (`default_project_path`)** falls back to cwd under the same
   marker conditions; returns `None` only when neither env var nor cwd
   marker is available.
@@ -2312,7 +2318,7 @@ Full test suite (203 tests, was 186) passes in 23.6 s.
 
 - Existing tests pre-set `CLAUDE_PROJECT_DIR`; their behaviour is
   unchanged because the env var is step 1 in the resolution order.
-- Personal-global users (`~/.claude/cc-enslaver/edicts.toml` with no
+- Personal-global users (`~/.claude/cc-enforcer/edicts.toml` with no
   project file) are unaffected — they hit step 3 either way.
 - The new fallback never overrides an explicit user choice; it only
   fires when the env var is genuinely absent.
@@ -2398,7 +2404,7 @@ allowance semantics. Per SemVer this is a patch release.
 **Auto-GC on SessionStart (opt-in via `CC_ENSLAVER_AUTO_GC_DAYS`).**
 
 Closes the v0.6.1 roadmap entry. The original v0.6.1 GC was manual-only
-(via `/cc-enslaver:gc`) with the explicit note that auto-GC was
+(via `/cc-enforcer:gc`) with the explicit note that auto-GC was
 deferred on three grounds: SessionStart latency, critical-path risk,
 debuggability. v0.18 ships auto-GC behind an **opt-in env var** and
 addresses each concern:
@@ -2409,7 +2415,7 @@ addresses each concern:
     state_dir resolution, marker read, GC call, marker write); all
     failures route to stderr and the injection still emits normally.
   - **Debuggability**: shares the exact same `prune_old_sessions()`
-    routine as `/cc-enslaver:gc`, so any bug surfaces in the manual
+    routine as `/cc-enforcer:gc`, so any bug surfaces in the manual
     path too (where it's much easier to diagnose).
 
 ### Added — opt-in auto-GC
@@ -2492,7 +2498,7 @@ Two concrete user-reported gaps closed:
 
 1. **"README 严重过期"** — v0.16 added Layer (g) but the README §3 still
    said "**six** layered checks", the repo tree was last updated at
-   v0.11, `/cc-enslaver:edict` was missing from every slash-command
+   v0.11, `/cc-enforcer:edict` was missing from every slash-command
    list, and the roadmap entries had ALL been delivered. v0.17 does a
    full content sweep: 9 rules + Imperial Edicts + **7** Stop-hook
    gates (with Layer (g) bullet), updated repo tree (matches actual
@@ -2518,8 +2524,8 @@ Two concrete user-reported gaps closed:
     to env). Chinese default keeps `🏛️ 圣旨...` banner; English emits
     `🏛️ Imperial Edicts (project hard rules; priority > builtin 9)`.
   - `deny_reason(hit, *, kind, tool_or_cmd, lang=None)` — same. Chinese
-    keeps `cc-enslaver · 圣旨 E01 violation` headline (preserves
-    keyword-contract tests); English emits `cc-enslaver · Imperial Edict
+    keeps `cc-enforcer · 圣旨 E01 violation` headline (preserves
+    keyword-contract tests); English emits `cc-enforcer · Imperial Edict
     E01 violation`.
 - **`hooks/scripts/inject_context.py`** — passes its already-resolved
   `_resolved_lang()` to `render_injection()` so the base prompt
@@ -2559,7 +2565,7 @@ Windows (v0.13–v0.16 were tested only in Linux sandbox):
 - Header line: "9 built-in rules + Imperial Edicts (圣旨) + **7
   Stop-hook gates** (v0.17.0)" — was "6 Stop-hook gates (v0.16.0)".
 - §3 Stop-hook list now seven bullets with Layer (g) description.
-- §4 Slash command list: four items (`/cc-enslaver:edict` added).
+- §4 Slash command list: four items (`/cc-enforcer:edict` added).
 - §7 LLM-agnostic core: mentions `prompts/en/` v0.15 + v0.17
   bilingual edicts.
 - Roadmap line: stale items (deep file-claim verification, rolling-
@@ -2796,7 +2802,7 @@ invasive. False-positive rate would be high.
 ### Added — 圣旨 `--global` scope (v0.12 follow-up)
 
 - **`hooks/scripts/manage_edicts.py`**:
-  - `_global_path()` returns `~/.claude/cc-enslaver/edicts.toml`.
+  - `_global_path()` returns `~/.claude/cc-enforcer/edicts.toml`.
   - `add --global` writes to global file (was previously project-only).
   - `remove` falls back from project to global when not finding the
     edict in project; `remove --global` restricts to global file.
@@ -2944,8 +2950,8 @@ behind 23 new tests.
 
 - **`hooks/scripts/lib/edicts.py`** — TOML loader + soft-layer renderer
   + hard-layer matchers. Stdlib-only (`tomllib` since Python 3.11).
-- **File location**: `${CLAUDE_PROJECT_DIR}/.claude/cc-enslaver/edicts.toml`
-  (project-level, team-shareable). Falls back to `~/.claude/cc-enslaver/
+- **File location**: `${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml`
+  (project-level, team-shareable). Falls back to `~/.claude/cc-enforcer/
   edicts.toml` for personal global. Both empty/missing → empty edict
   list, no behavior change (failing-open).
 - **Schema** (array of tables, `[[edicts]]`):
@@ -2962,7 +2968,7 @@ behind 23 new tests.
   context compaction via per-turn re-injection.
 - **PreToolUse(Edit|Write) integration** — `read_guard.py` calls
   `edicts_lib.find_edit_violation` after the rule-09 patch-style check.
-  First matching `must` edict → DENY with `cc-enslaver · 圣旨 <id>
+  First matching `must` edict → DENY with `cc-enforcer · 圣旨 <id>
   violation` reason naming the edict + matched pattern + snippet.
 - **PreToolUse(Bash) integration** — `bash_guard.py` calls
   `edicts_lib.find_bash_violation` after the built-in static patterns
@@ -2971,14 +2977,14 @@ behind 23 new tests.
 - **`hooks/scripts/manage_edicts.py`** — CRUD helper:
   `list / add / remove / reload / path`. Used by the slash command and
   directly from the shell.
-- **`commands/edict.md`** — `/cc-enslaver:edict` slash command wrapping
+- **`commands/edict.md`** — `/cc-enforcer:edict` slash command wrapping
   the manage script.
 - **`docs/EDICTS.md`** — user guide with format, enforcement contract,
   3 worked examples, limitations.
 
 #### Why TOML and not YAML
 
-Python's stdlib has `tomllib` (3.11+) but no YAML parser. cc-enslaver's
+Python's stdlib has `tomllib` (3.11+) but no YAML parser. cc-enforcer's
 no-third-party-deps contract holds since v0.1. Rolling a YAML subset
 adds parser-bug risk; TOML's array-of-tables shape is verbose but
 unambiguous, which suits a hand-edited config.
@@ -3006,7 +3012,7 @@ encodes this contract.
 
 - **Uniform 4-part shape** for every block reason (layers a → f):
   ```
-  cc-enslaver · Stop check FAILED at Layer (X) [rule NN — short label]
+  cc-enforcer · Stop check FAILED at Layer (X) [rule NN — short label]
 
   | Layer | Rule | Status      | Note                              |
   |-------|------|-------------|-----------------------------------|
@@ -3309,7 +3315,7 @@ This release adds **Step 0 — Construct a Reproducible Signal (Feedback Loop)**
 as a mandatory prerequisite to Step 1. It borrows the Phase-1 framing of
 `mattpocock-skills:diagnose` ("If you have a fast, deterministic,
 agent-runnable pass/fail signal for the bug, you will find the cause") and
-adapts it to the cc-enslaver verification discipline.
+adapts it to the cc-enforcer verification discipline.
 
 Step 0 contents (all enforced, not advisory):
 
@@ -3344,7 +3350,7 @@ Three new entries in the forbidden-behaviours list:
 `mattpocock-skills` was installed on 2026-05-13 as a Claude Code marketplace.
 The `diagnose` skill in that pack codifies what "build a feedback loop first"
 actually looks like as a 10-pattern menu, which is exactly the gap
-cc-enslaver's systematic-debug skill had. Importing those patterns (with
+cc-enforcer's systematic-debug skill had. Importing those patterns (with
 attribution; the upstream is MIT-licensed) closes the gap without inventing
 a parallel taxonomy.
 
@@ -3452,8 +3458,8 @@ hook fires again.
 
 ## [0.9.0] — 2026-05-04
 
-**Project rename: `anti-laziness` → `cc-enslaver` (and marketplace
-`agent-rigor` → `cc-enslaver`).** All five name layers (plugin name,
+**Project rename: `anti-laziness` → `cc-enforcer` (and marketplace
+`agent-rigor` → `cc-enforcer`).** All five name layers (plugin name,
 marketplace name, GitHub repo, slash-command prefix, on-disk state
 directory basename) are now unified under a single identifier. No
 behavioural change to any rule, hook, or test — only string
@@ -3465,38 +3471,38 @@ Pre-0.9.0 the repo had two parallel names by accident of history:
 the plugin internal `name` field said `anti-laziness`, while the
 marketplace + GitHub repo used `agent-rigor`. New users saw
 `/plugin install anti-laziness@agent-rigor` and asked which is "the"
-name. v0.9.0 collapses everything to **`cc-enslaver`** so the
+name. v0.9.0 collapses everything to **`cc-enforcer`** so the
 marketplace/install/slash-command/import-path all match.
 
 ### Breaking changes (rename consequences)
 
 - **Slash commands** prefixes change:
-  `/anti-laziness:checklist` → `/cc-enslaver:checklist`,
-  `/anti-laziness:verify`    → `/cc-enslaver:verify`,
-  `/anti-laziness:gc`        → `/cc-enslaver:gc`.
-- **Install command** is now `/plugin install cc-enslaver@cc-enslaver`
+  `/anti-laziness:checklist` → `/cc-enforcer:checklist`,
+  `/anti-laziness:verify`    → `/cc-enforcer:verify`,
+  `/anti-laziness:gc`        → `/cc-enforcer:gc`.
+- **Install command** is now `/plugin install cc-enforcer@cc-enforcer`
   (still works against the same local marketplace path).
 - **State directory basename** changes from `anti-laziness` to
-  `cc-enslaver` in the fallback paths
-  (`~/.claude/local/cc-enslaver/sessions/` and
-  `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/`).
+  `cc-enforcer` in the fallback paths
+  (`~/.claude/local/cc-enforcer/sessions/` and
+  `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/sessions/`).
   The `${CLAUDE_PLUGIN_DATA}` path supplied by Claude Code is keyed
   on the plugin's `name`, so it also moves automatically. **Old
   per-session state files (`last_blocked_turn`, `read_files`) will
   not migrate** — they are effectively orphaned. Acceptable because
   state is short-lived (one Claude Code session) and the orphans are
-  harmless KB-sized JSON. Run `/cc-enslaver:gc --apply` against the
+  harmless KB-sized JSON. Run `/cc-enforcer:gc --apply` against the
   *old* state dir if you want to reclaim space.
 - **GitHub repository name** changes from `skymanbp/agent-rigor` to
-  `skymanbp/cc-enslaver`. GitHub installs an automatic redirect from
+  `skymanbp/cc-enforcer`. GitHub installs an automatic redirect from
   the old name, so existing clones / CI badges keep working. The
   CHANGELOG `compare` links and `plugin.json` `homepage` /
   `repository` fields now point at the new URL directly.
 - **Already-installed copies** of the plugin will continue to work
   on the old name until the user re-installs from the renamed
   marketplace. `/plugin marketplace remove agent-rigor` then
-  `/plugin marketplace add /path/to/cc-enslaver`, then
-  `/plugin install cc-enslaver@cc-enslaver`.
+  `/plugin marketplace add /path/to/cc-enforcer`, then
+  `/plugin install cc-enforcer@cc-enforcer`.
 
 ### Out of scope (rename did NOT touch)
 
@@ -3511,14 +3517,14 @@ marketplace/install/slash-command/import-path all match.
 
 ### Changed (mechanical text replacements)
 
-- `anti-laziness` → `cc-enslaver` (117 occurrences across 22 files):
+- `anti-laziness` → `cc-enforcer` (117 occurrences across 22 files):
   plugin.json, marketplace.json, CLAUDE.md, CHANGELOG.md, README.md,
   agents/verifier.md, commands/{checklist,gc,verify}.md,
   docs/ARCHITECTURE.md, prompts/{session-start,user-prompt}.md,
   rules/{,en/}00-index.md, hooks/scripts/{bash_guard,gc_state,
   inject_context,read_guard,register_read,stop_guard}.py,
   hooks/scripts/lib/state.py, tests/_helpers.py.
-- `agent-rigor` → `cc-enslaver` (homepage/repository URL +
+- `agent-rigor` → `cc-enforcer` (homepage/repository URL +
   marketplace `name` field + CHANGELOG compare links + README
   install instructions): plugin.json, marketplace.json, CHANGELOG.md,
   README.md.
@@ -3543,8 +3549,8 @@ OK
 
 All 76 tests pass against the renamed identifiers. Smoke test:
 `stop_guard.py` rule-06/07 block reasons now read
-`cc-enslaver · rule 0X enforcement (...)` and the injected context
-mentions `cc-enslaver` in place of `anti-laziness`.
+`cc-enforcer · rule 0X enforcement (...)` and the injected context
+mentions `cc-enforcer` in place of `anti-laziness`.
 
 Self-applied rule 06 + rule 07 — including verifying every modifier
 the user used ("全部统一" / "保证更新" / "正常工作") landed as actual
@@ -3799,7 +3805,7 @@ Chinese sources remain canonical; the English mirror is best-effort
 and intended for two use cases:
 
 1. Non-CJK readers who want to read the discipline pack.
-2. Using cc-enslaver as an LLM-agnostic system-prompt fragment with
+2. Using cc-enforcer as an LLM-agnostic system-prompt fragment with
    non-Claude agents (OpenAI / Gemini / local models). Concatenate
    `rules/en/*.md` and prepend to your agent's system prompt.
 
@@ -3840,7 +3846,7 @@ and intended for two use cases:
 ## [0.6.1] — 2026-04-29
 
 Session state GC. Manual-only (no auto-trigger) — invokable from a
-Bash tool call or via the new `/cc-enslaver:gc` slash command.
+Bash tool call or via the new `/cc-enforcer:gc` slash command.
 
 ### Why
 
@@ -3862,7 +3868,7 @@ and to avoid a code path running on every cold start.
     per-file age and size, and either `[dry-run] would delete` or
     `deleted: N / bytes_freed: B` summary.
   - Only globs `<state_dir>/*.json`; refuses to touch anything outside.
-- **`commands/gc.md`** — `/cc-enslaver:gc` slash command. Defaults
+- **`commands/gc.md`** — `/cc-enforcer:gc` slash command. Defaults
   to `--dry-run`; invokes the script with whatever argument shape
   the user requested. Documents safe-default semantics.
 - **`tests/test_gc_state.py`** (9 cases):
@@ -4326,10 +4332,10 @@ caught by `claude plugin validate`:
 ### Verified
 
 ```
-$ claude plugin install cc-enslaver@cc-enslaver
-✔ Successfully installed plugin: cc-enslaver@cc-enslaver (scope: user)
+$ claude plugin install cc-enforcer@cc-enforcer
+✔ Successfully installed plugin: cc-enforcer@cc-enforcer (scope: user)
 $ claude plugin list
-  ❯ cc-enslaver@cc-enslaver
+  ❯ cc-enforcer@cc-enforcer
     Version: 0.3.1
     Scope: user
     Status: ✔ enabled
@@ -4393,8 +4399,8 @@ call against a file is recorded as "known content" for the rest of the session.
 
 - **`hooks/scripts/lib/state.py`** — per-session JSON state at
   `${CLAUDE_PLUGIN_DATA}/sessions/<session_id>.json` (with documented fallbacks
-  to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enslaver/sessions/` and
-  `~/.claude/local/cc-enslaver/sessions/`). Path normalisation via
+  to `${CLAUDE_PROJECT_DIR}/.claude/local/cc-enforcer/sessions/` and
+  `~/.claude/local/cc-enforcer/sessions/`). Path normalisation via
   `os.path.realpath` + `os.path.normcase` for case-insensitive Windows
   comparison.
 - **`hooks/scripts/read_guard.py`** — single script with two roles:
@@ -4406,7 +4412,7 @@ call against a file is recorded as "known content" for the rest of the session.
     exception logs to stderr but lets the tool call proceed.
 - **`.claude-plugin/marketplace.json`** — the plugin can now be installed
   locally via `/plugin marketplace add <path-to-repo>` and then
-  `/plugin install cc-enslaver@<marketplace-name>`.
+  `/plugin install cc-enforcer@<marketplace-name>`.
 
 ### Changed
 
@@ -4453,8 +4459,8 @@ soft layer is wired live.
 - **Hook layer** (`hooks/`) — `hooks.json` registers two events
   (`SessionStart`, `UserPromptSubmit`); `scripts/inject_context.py` emits the
   appropriate `additionalContext` JSON for each event.
-- **Slash commands** (`commands/`) — `/cc-enslaver:checklist` prints the
-  systematic-thinking checklist; `/cc-enslaver:verify` prompts a
+- **Slash commands** (`commands/`) — `/cc-enforcer:checklist` prints the
+  systematic-thinking checklist; `/cc-enforcer:verify` prompts a
   re-verification pass.
 - **Verifier subagent** (`agents/verifier.md`) — independent `file:line` citation
   re-reader, returns drift/missing/intact verdict.
@@ -4467,21 +4473,21 @@ soft layer is wired live.
 
 - Original free-form `claude.md` (replaced by the structured `CLAUDE.md`).
 
-[Unreleased]: https://github.com/skymanbp/cc-enslaver/compare/v0.11.0...HEAD
-[0.11.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.1...v0.10.0
-[0.9.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
-[0.8.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.7.0...v0.9.0
-[0.7.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.2...v0.7.0
-[0.6.2]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.1...v0.6.2
-[0.6.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.5.1...v0.6.0
-[0.5.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.2...v0.4.0
-[0.3.2]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/skymanbp/cc-enslaver/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/skymanbp/cc-enslaver/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/skymanbp/cc-enslaver/releases/tag/v0.1.0
+[Unreleased]: https://github.com/skymanbp/cc-enforcer/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/skymanbp/cc-enforcer/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.7.0...v0.9.0
+[0.8.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.7.0...v0.9.0
+[0.7.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/skymanbp/cc-enforcer/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/skymanbp/cc-enforcer/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/skymanbp/cc-enforcer/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/skymanbp/cc-enforcer/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/skymanbp/cc-enforcer/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/skymanbp/cc-enforcer/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/skymanbp/cc-enforcer/releases/tag/v0.1.0

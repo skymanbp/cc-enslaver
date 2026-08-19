@@ -1218,8 +1218,16 @@ class TestReaderWriterCollision(_GuardTestBase):
                 t.join(timeout=5)
 
             state = json.loads(state_file.read_text(encoding="utf-8"))
+            # Basename prefix, not full-path substring: the old `"f_" in p`
+            # also matched the DIRECTORY part, so a mkdtemp suffix containing
+            # "f_" (8 random chars from [a-z0-9_], ~0.5%/run) counted seed.txt
+            # too — CI 2026-08-19 failed 201 != 200 exactly this way, and the
+            # trap-dir reproduction (TMP=...\trap_f_dir) fails deterministically.
+            # test_bash_guard's substring needles all contain ".", which the
+            # suffix alphabet cannot produce, so this was the class's only member.
             recorded = sum(
-                1 for p in state.get("read_files", []) if "f_" in p
+                1 for p in state.get("read_files", [])
+                if os.path.basename(p).startswith("f_")
             )
             self.assertEqual(
                 recorded, n,

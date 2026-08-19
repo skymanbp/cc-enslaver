@@ -114,12 +114,18 @@ it fired means there is content here you have not yet examined.
 If you have already Read this file in this session but the guard still
 denies (Claude Code occasionally short-circuits Read to a result cache
 without firing the hook -- a known issue), you can register the file
-as read via the v0.4.0 escape hatch. From a Bash tool call:
+as read via the v0.4.0 escape hatch. Run it as TWO SEPARATE Bash tool
+calls -- the guard grants read credit only when the registration is the
+ENTIRE command of a single unconditional segment, so any chained form
+(`&&`, `||`, `;`, a pipe, a command substitution) earns no credit while
+the script still prints "register_read: ok".
 
-  # 1. Compute SHA-256 of the file currently on disk:
-  HASH=$(python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' PATH)
-  # 2. Register:
-  python "${{CLAUDE_PLUGIN_ROOT}}/hooks/scripts/register_read.py" --file PATH --hash "$HASH"
+  Bash call 1 -- compute SHA-256 of the file currently on disk:
+  python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' PATH
+
+  Bash call 2 -- register, with NOTHING chained before or after it.
+  Paste the hex digest printed by call 1 in place of HEX:
+  python "${{CLAUDE_PLUGIN_ROOT}}/hooks/scripts/register_read.py" --file PATH --hash HEX
 
 The PreToolUse(Bash) hook recomputes the hash from disk and only
 registers if it matches your claim, so the escape hatch cannot itself
@@ -663,14 +669,17 @@ def _line_window(text: str, span_start: int, span_end: int) -> str:
     itself goes through `_has_rationale_at`, which needs whole-text
     context.
     """
-    # v0.25.1 — clamp a span that consumed its own terminating newline.
-    # Five PATCH_MARKERS regexes end in `(?:\n|$)`, so their m.end()
-    # lands at the START of the next line; find("\n", span_end) then
-    # located the NEXT line's terminator and the documented "±1 line"
-    # window silently became "+2 lines below" — an unrelated rationale
-    # two lines away suppressed the DENY. (The upward direction and the
-    # bare try/except scanner, whose span carries no newline, were ±1
-    # all along.)
+    # Clamp a span that consumed its own terminating newline: m.end()
+    # would land at the START of the next line, find("\n", span_end)
+    # would then locate the NEXT line's terminator, and the documented
+    # "±1 line" window would silently become "+2 lines below" — an
+    # unrelated rationale two lines away suppressing the DENY. That was
+    # live through v0.25.0, when five PATCH_MARKERS regexes still ended
+    # in `(?:\n|$)`; v0.25.1 dropped those anchors (see the note above
+    # PATCH_MARKERS), so no current marker span reaches here with a
+    # trailing newline and the clamp is defensive, kept for whatever
+    # pattern is added next. `_window_bounds` carries the same clamp,
+    # widened to CR.
     if span_end > span_start and text[span_end - 1] == "\n":
         span_end -= 1
     line_start = text.rfind("\n", 0, span_start)
@@ -1007,8 +1016,8 @@ def _find_hardcoded_secret(
     read or when an adjacent line carries an essential / example
     rationale (HARDCODE_RATIONALE_TOKENS).
 
-    `lang` reaches `_has_rationale` so the rationale search is confined to
-    real comments. This detector was the worst casualty of the old
+    `lang` reaches `_has_rationale_at` so the rationale search is confined
+    to real comments. This detector was the worst casualty of the old
     "find the first `#` or `//`" approximation: `example` is a rationale
     token and `example.com` is the IANA reserved example domain, so a
     single neighbouring line such as `API = "https://api.example.com"`

@@ -562,11 +562,14 @@ def was_just_blocked(session_id: str, turn_count: int | None) -> bool:
 # --------------------------------------------------------------------------- #
 # Edit-turn recording (v0.11.0 — for rule 08 + rule 09 Stop-hook layers).
 #
-# When the agent successfully Edits or Writes a file, we stamp the current
-# turn_count into `last_edit_turn`. The Stop hook layers (e) and (f) only
-# fire when `last_edit_turn == current turn_count`: this scopes the
-# rule-08/09 closing checks to turns that actually modified files,
-# avoiding false positives on read-only / analysis turns.
+# When the agent successfully Edits or Writes a file, we set
+# `edited_since_last_stop` and — only when the payload carried one — stamp
+# `last_edit_turn`. The edit-gated Stop layers (e)/(f)/(g)/(i) fire when
+# `did_edit_this_turn` is True, which the flag alone satisfies; the
+# turn-number match is the secondary path, since production Stop payloads
+# ship no turn_count (v0.23 — see `record_edit_turn`). Either way the
+# rule-08/09/12 closing checks stay scoped to turns that actually modified
+# files, avoiding false positives on read-only / analysis turns.
 #
 # v0.13 — adds the rolling-patch counter (`edits_per_file`) that v0.11
 # foreshadowed. PreToolUse(Edit|Write) classifies the incoming edit as

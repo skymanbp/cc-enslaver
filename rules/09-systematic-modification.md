@@ -286,7 +286,7 @@ A bare marker without justification = laziness, intercepted.
 2. All connected points of the root cause have been covered (rule 02 Q5).
 3. Every sibling instance of the diagnosed class has been enumerated and covered in the same pass — no point-to-point residue (v0.28 unified fix).
 4. `new_string` contains no unjustified patch markers (read_guard patch-style check passes).
-5. Chain-of-thought or final reply explicitly records the "root cause / impact / alternatives" triplet (Stop layer (f) passes).
+5. The **final reply** explicitly records the "root cause / impact / alternatives" triplet (Stop layer (f) passes). Layer (f) reads the final reply text only — a triplet that stayed in the chain of thought does not count.
 6. Rule 06 convergence + rule 07 fidelity self-quizzes done.
 
 Otherwise → **not systematic**, return to rule 02 + rule 03 + rule 08.

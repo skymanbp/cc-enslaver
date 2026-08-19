@@ -9,7 +9,7 @@
 
 | You wrote / want to do | Trigger | Physical consequence |
 |---|---|---|
-| "should / probably / I think / maybe / 应该" | rule 01 + 06 hedge | Stop layer (b) BLOCK |
+| "应该是 / 大概 / 我觉得 / I think / maybe / probably" within 50 chars of a done-claim (bare "should" / "应该" are deliberately NOT detected — only first-person uncertainty is) | rule 01 + 06 hedge | Stop layer (b) BLOCK |
 | Cite a file not Read this session (violates **read-before-edit**) | rule 04 + 08 | **PreToolUse(Edit\|Write) DENY** |
 | About to do a ≤ 5 line "quick fix" without 7 questions, missing **think-before-write** | rule 02 + 08 | — |
 | About to write `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` without why | rule 09 | **PreToolUse(Edit\|Write) DENY** |

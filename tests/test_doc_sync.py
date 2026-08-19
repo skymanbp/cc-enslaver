@@ -244,6 +244,21 @@ CLAIMS: tuple[Claim, ...] = (
         "the Chinese README undercounts the installed commands",
     ),
     Claim(
+        # v0.34.1 — the zh mirror's test counts were two releases stale
+        # (604 at a 615 suite) while CI was green, because only README.md's
+        # counts were registered. Same class as the v0.31.1 badge fix.
+        "readme-zh-tree-test-count", "README.zh.md",
+        r"tests/\s+# (\d+) 个测试（python",
+        _test_count,
+        "the Chinese structure tree understates the suite",
+    ),
+    Claim(
+        "readme-zh-coverage-test-count", "README.zh.md",
+        r"\*\*(\d+) 个测试\*\*覆盖",
+        _test_count,
+        "the Chinese coverage claim understates the suite",
+    ),
+    Claim(
         "readme-injected-rule-count", "README.md",
         r"(\d+)-rule discipline summary",
         _rule_count,
@@ -325,7 +340,12 @@ BASH_DENY_SURFACES = (
 )
 
 # Surfaces whose repository-structure tree claims to enumerate the codebase.
-INVENTORY_SURFACES = ("README.md", "CLAUDE.md")
+# README.zh.md joined in v0.34.1: the v0.34.0 release added lib/envfile.py to
+# both English trees (this gate forced it) while the Chinese tree never got
+# the module — the same mirror-coverage hole v0.31.1 closed for the version
+# badge, one surface over. A mirror that enumerates the codebase is held to
+# the same inventory as the original.
+INVENTORY_SURFACES = ("README.md", "CLAUDE.md", "README.zh.md")
 
 # --------------------------------------------------------------------------- #
 # The CURRENT release's own narrative is not history yet.
@@ -346,6 +366,10 @@ _TEST_DELTA = re.compile(r"(\d+)\s*(?:→|->)\s*(\d+)\s*(?:tests|个)")
 
 CURRENT_RELEASE_SURFACES = (
     "README.md",
+    # The zh mirror narrates releases too; v0.34.1 added it after its test
+    # counts sat two releases stale behind a green gate (mirror-coverage
+    # class, third instance: badge v0.31.1, counts v0.34.1).
+    "README.zh.md",
     "CLAUDE.md",
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",

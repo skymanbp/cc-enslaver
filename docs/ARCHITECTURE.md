@@ -81,7 +81,7 @@ Five hook entries across four events:
 
 | Event | Matcher | Script | Purpose |
 |---|---|---|---|
-| `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot |
+| `SessionStart` | — | `inject_context.py` | Inject full discipline summary at session boot; then run the two maintenance passes (opt-in auto-GC of old session state, `CLAUDE_ENV_FILE` dedupe) |
 | `UserPromptSubmit` | — | `inject_context.py` | Inject compact per-turn reminder |
 | `PreToolUse` | `Read\|Edit\|Write` | `read_guard.py` | Record on Read/Write; deny Edit/Write of unread existing file (rule 04 + 08); deny Edit/Write with unjustified patch-style new_string (rule 09), hardcoded secret (rule 10), or user-home path dependency (rule 11) in code targets; record the edit-turn signal for Stop layers (e)/(f)/(g)/(i) — `edited_since_last_stop` flag always, plus `last_edit_turn` when the payload supplies a turn_count (v0.23: production payloads do NOT); record accepted edits into `edited_files` for Stop layer (i) (rule 12, v0.23) |
 | `PreToolUse` | `Bash` | `bash_guard.py` | Deny on bypass patterns (rule 03 + 09); also register file-as-read on `register_read.py` invocation |
@@ -115,8 +115,14 @@ which is exactly what Stop layer (g) needs to adjudicate "I created X".
 Four scripts are registered as hooks (`inject_context.py`, `read_guard.py`,
 `bash_guard.py`, `stop_guard.py` — the last since v0.6.0). Each has a
 different responsibility and a different failure mode:
-- `inject_context.py` is purely additive: always exit 0, only emit
-  `additionalContext`. Never reads or writes disk state.
+- `inject_context.py` never blocks: always exit 0, and stdout carries
+  nothing but `additionalContext`. It is *not* disk-read-only, though —
+  on `SessionStart` it also runs two maintenance passes: opt-in auto-GC
+  (deletes expired session files, rewrites the `_auto_gc.json` marker)
+  and `envfile.maybe_dedupe()` (rewrites the harness-owned
+  `CLAUDE_ENV_FILE`, v0.34). Both run after the payload is assembled and
+  both fail open, so their failure mode is a skipped maintenance pass,
+  never a lost injection.
 - `read_guard.py` owns per-session disk state, with both recording and
   gating in PreToolUse (Read/Write/Edit). Its failure mode is state-file
   corruption.
@@ -146,7 +152,15 @@ Always exit 0. Emits:
 }
 ```
 
-Never blocks; only injects.
+Never blocks, and nothing but that envelope reaches stdout. It is not
+inject-only on disk, however: `SessionStart` additionally runs the opt-in
+auto-GC (prunes session state, rewrites `_auto_gc.json` — see
+[`gc_state.py`](../hooks/scripts/gc_state.py)) and
+[`lib/envfile.py`](../hooks/scripts/lib/envfile.py)'s `maybe_dedupe()`,
+which collapses duplicate `export` lines in the harness's
+`CLAUDE_ENV_FILE` (v0.34). Both are side-channel maintenance — invoked
+after the context is built, failing-open, diagnostics on stderr only —
+so neither can alter or suppress the injected payload.
 
 #### Hard-layer output contract (`read_guard.py`)
 
@@ -180,7 +194,8 @@ location resolves in this order:
    per-project fallback.
 3. `~/.claude/local/cc-enforcer/sessions/<sid>.json` — final fallback.
 
-State files are git-ignored (`.gitignore` line 26). Paths within state are
+State files are git-ignored (`.gitignore:27` — `.claude/local/`, which
+covers fallback 2; fallbacks 1 and 3 live outside the repo). Paths within state are
 canonicalised via `os.path.realpath` + `os.path.normcase` so case-insensitive
 filesystems (Windows) compare correctly.
 
@@ -346,6 +361,9 @@ detector changed. **It does not weaken layer (i)**, verified by probe rather
 than by reading: since v0.27 a marker settles only groups a previous block
 actually NAMED, so a first violation still blocks and names its group, and the
 schema field is where the answer to *that* group goes on the next turn. A
+mandatory field does invite a boilerplate answer, though, and that half stayed
+open until v0.32: a placeholder value now counts as absent, and a marker the
+agent merely quoted is not the agent's claim.
 **v0.32 closes the gap v0.31.1 recorded.** `_has_sync_marker` was
 `any(pattern.search(text))` — presence only — so `sync-check: n/a`, and a
 marker the agent merely *quoted*, both settled a named group. It now applies
@@ -773,7 +791,10 @@ produced, the verifier independently:
 
 1. Reads each cited file.
 2. Confirms the line number exists and the cited content matches.
-3. Reports `intact` / `drift` / `missing` per citation.
+3. Reports one of five verdicts per citation — `intact` / `drift` /
+   `missing` / `mismatch` / `unverifiable` (the full table, with the
+   evidence each verdict owes, is in
+   [`../agents/verifier.md`](../agents/verifier.md)).
 
 It carries `Read`, `Grep`, `Glob` tools — explicitly **no** `Edit`, `Write`, or
 `Bash`. It cannot mutate state; its only output is a verdict.
@@ -842,6 +863,11 @@ Session starts
     ▼
 SessionStart hook fires → inject_context.py --event SessionStart
     │  reads prompts/session-start.md (distilled from rules/*.md)
+    │  then, after the payload is assembled, two maintenance passes
+    │  (both failing-open, neither touching the payload):
+    │      auto-GC        → prune old session state + rewrite _auto_gc.json
+    │                       (opt-in: CC_ENFORCER_AUTO_GC_DAYS)
+    │      envfile        → dedupe `export` lines in CLAUDE_ENV_FILE (v0.34)
     ▼
 Claude Code injects full discipline summary into context
 

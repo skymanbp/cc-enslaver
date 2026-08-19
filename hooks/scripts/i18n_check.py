@@ -79,6 +79,7 @@ class Drift:
     lang: str      # translation subdir name, e.g. "zh"
     file: str      # filename, or "" for a dir-level drift
     kind: str      # "missing_file" | "orphan_file" | "header_structure"
+                   # | "enforcement_tokens"
     detail: str
 
     def __str__(self) -> str:

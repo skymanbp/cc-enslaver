@@ -37,8 +37,8 @@ laziness signals appear in proximity to a "done" claim:
       actually edited a file this turn** (state.did_edit_this_turn is
       True). Pass condition: any rule-08 marker (`rule 08`, `改前必读`,
       `写前必想`, `read-before-edit`, `think-before-write`) OR at
-      least 3 of the six rule-02 systematic-thinking keywords
-      (架构 / 职责 / 根源 / 方案 / 连带 / 风险 / 全局, or English
+      least 3 of the six rule-02 systematic-thinking keyword groups
+      (架构 / 职责 / 根源 / 方案 / 连带 / 风险, or English
       equivalents). Without an actual edit this turn, layer (e)
       silently allows — analysis-only / answer-only turns aren't
       required to surface think-before-write markers.
@@ -113,14 +113,24 @@ edit_turn)`; the body is composed by `_build_block_reason(...)`. This
 replaces the v0.6-v0.11 monolithic 50-line REASON templates with a
 uniform compact format.
 
-# One-shot guard — why we never block twice in a row
+# One-shot guard — why no single layer blocks twice in a row
 
 A Stop hook that always blocks would loop forever: block → continue →
-block → continue → … . We record `last_blocked_turn` in the
-session state file. If the *current* `turn_count` is within 3 turns
-of the last block, we skip the heuristic and allow the Stop. The
-agent gets one (well, up to three) chances to recover before we
-fire again.
+block → continue → … . We record `last_blocked_turn` plus the set of
+layers that have already spent their block (`blocked_layers`) in the
+session state file. When the *current* `turn_count` is within 3 turns of
+the last block, the grace window is open — but v0.29 scoped it PER
+LAYER, not per turn: `state.get_forgiven_layers` returns the spent set,
+those layers are skipped, and every layer that has not yet blocked in
+this recovery sequence is still evaluated and may still block once.
+
+Blocking the whole turn was the earlier design, and it meant a reply
+that fixed the layer it had been told about while still violating a
+different one sailed through — the unnamed layer was unenforceable in
+exactly the situation it exists for. Escalation stays bounded: each
+block adds its layer to the spent set, so the sequence terminates after
+at most one block per layer, and any allowed Stop clears the set
+(`state.clear_blocked_layers`) to start the next sequence clean.
 
 # Why layered checks instead of one
 
@@ -1285,17 +1295,21 @@ def _verify_claims(
 #   1. A single-line headline naming the failed layer and the rule it
 #      enforces. Tests assert on the keywords here (`rule 06`, `rule 01`,
 #      `self-quiz`, `hedge`, `rule 07`, `rule 08`, `rule 09`).
-#   2. A status table listing all six layers (a)-(f) with a Pass / FAIL /
+#   2. A status table listing all nine layers (a)-(i) with a Pass / FAIL /
 #      pending / n/a marker. The agent (and the human reading over its
 #      shoulder) can see at a glance what passed and what didn't.
 #   3. A short recovery block specific to the failing layer.
 #   4. A common one-shot-guard footer.
 #
-# The six layers are ordered (a) → (f). When layer N fails, layers < N are
-# Pass (we got past them), layer N is FAIL, layers > N are "pending" (never
-# evaluated). When the failure occurs on a non-edit turn, layers (e)+(f)
-# show "n/a (non-edit turn)" instead of pending — they would not have
-# fired anyway. On an edit turn they show "pending".
+# Rows are DISPLAYED in LAYER_META order, (a) → (i). Each verdict, though,
+# comes from the row's position in `_EVAL_ORDER` — the order main() really
+# runs, which puts (b) first. Layers evaluated before the failing one are
+# Pass (we got past them), the failing one is FAIL, the rest are "pending"
+# (never evaluated). Using the display index here is precisely the v0.12–
+# v0.29 bug that printed "(a) ✅ Pass" on a (b) failure. When the failure
+# occurs on a non-edit turn, the edit-gated layers (e)/(f)/(g)/(i) show
+# "n/a (non-edit turn)" instead of pending — they would not have fired
+# anyway. On an edit turn they show "pending".
 # --------------------------------------------------------------------------- #
 LAYER_META: list[dict[str, str]] = [
     {

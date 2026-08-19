@@ -12,10 +12,13 @@ Why TOML and not YAML:
   rolling a custom YAML subset is fragile. TOML's array-of-tables shape
   is verbose but unambiguous, which suits a config file users hand-edit.
 
-File location resolution (first hit wins):
+File location resolution (first existing file wins; see `edicts_path`):
   1. ${CLAUDE_PROJECT_DIR}/.claude/cc-enforcer/edicts.toml — project,
      team-shareable, recommended
-  2. ${HOME}/.claude/cc-enforcer/edicts.toml — personal global fallback
+  2. $(cwd)/.claude/cc-enforcer/edicts.toml — only when cwd carries a
+     project-root marker (v0.18.1, for the contexts where Claude Code
+     does not propagate CLAUDE_PROJECT_DIR)
+  3. ${HOME}/.claude/cc-enforcer/edicts.toml — personal global fallback
 
 Schema:
 

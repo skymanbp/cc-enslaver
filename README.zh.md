@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.34.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.34.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -260,7 +260,7 @@ Stop 钩子读 agent 即将收尾的那段回复。只要里面含完成声明�
 让位的是无界增长的圣旨列表，且按**整条圣旨**边界截断并留指针——因为半条圣旨
 读起来仍是一条完整指令。
 
-[`hooks/scripts/`](hooks/scripts/) 下 9 个脚本建立在 8 个共享
+[`hooks/scripts/`](hooks/scripts/) 下 9 个脚本建立在 9 个共享
 [`lib/`](hooks/scripts/lib/) 模块上。注册为钩子的只有上表那四个；另外五个
 （`register_read.py`、`manage_edicts.py`、`manage_sync_gate.py`、`gc_state.py`、
 `i18n_check.py`）分别服务于 escape hatch、slash 命令与 CI。它们**刻意不搬进单独
@@ -323,7 +323,7 @@ cc-enforcer/
 │       ├── manage_sync_gate.py  # rule-12 连带更新组：CRUD + check 诊断
 │       ├── gc_state.py          # 会话状态回收：CLI + auto-GC 被调方
 │       ├── i18n_check.py        # 骨架 ↔ 翻译的结构对等检查
-│       └── lib/                 # —— 八个共享模块 ——
+│       └── lib/                 # —— 九个共享模块 ——
 │           ├── srclex.py        # 判定：代码 / 注释 / docstring / 数据字面量
 │           ├── mdctx.py         # 判定：markdown 围栏 / 引用块上下文
 │           ├── shellcmd.py      # 判定：tokenize → 分段 → argv → 子命令
@@ -331,12 +331,13 @@ cc-enforcer/
 │           ├── tomlio.py        # 配置：容错 TOML 读取 + 共享的写入编码器
 │           ├── projroot.py      # 配置：项目根判定，两个加载器共用
 │           ├── edicts.py        # 功能：圣旨加载 / 匹配 / 渲染
+│           ├── envfile.py       # 功能：CLAUDE_ENV_FILE 去重卫生（v0.34）
 │           └── sync_gate.py     # 功能：rule-12 组的读、写与匹配
 ├── commands/                    # 6 个 slash 命令
 ├── agents/verifier.md           # 只读引用核验子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 604 个测试（python -m unittest discover tests）
+└── tests/                       # 617 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名——见 tests/README.md
     ├── _helpers.py              #   共享的 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   四个钩子入口的黑盒子进程测试
@@ -347,7 +348,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 下 **604 个测试**覆盖——黑盒子进程测试按 Claude
+全部脚本由 [`tests/`](tests/) 下 **617 个测试**覆盖——黑盒子进程测试按 Claude
 Code 的真实方式启动每个钩子（脚本被 import 与被调用时，模块级状态、stdin、
 stdout 缓冲和退出码的行为都不同），另有共享模型的单元测试与三道漂移门。
 CI：ubuntu-latest × windows-latest × Python 3.13，`fail-fast: false`，零依赖。

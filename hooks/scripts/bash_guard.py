@@ -3,11 +3,19 @@
 
 PreToolUse handler with matcher `Bash`. Two responsibilities:
 
-  1. Bypass-pattern blocking. Denies known "lazy bypass" patterns:
-       --no-verify          skipping git/commit hooks
-       --no-gpg-sign        skipping commit signature
-       git push --force     irreversible overwrite (no --force-with-lease)
-       chmod 777            world-writable permissions
+  1. Bypass-pattern blocking. Denies known "lazy bypass" patterns. Six
+     of them live in STATIC_PATTERNS, each entry a `match(argv) -> bool`
+     predicate evaluated per shell segment (v0.26; not a regex over the
+     raw command string — see the note above STATIC_PATTERNS):
+       --no-verify              skipping git/commit hooks
+       --no-gpg-sign            skipping commit signature
+       chmod 777                world-writable permissions
+       git rebase --skip        abandoning a conflict silently
+       --break-system-packages  bypassing PEP 668
+       rm -rf on a system root, the home variable, or tilde
+     A seventh detector sits outside that list because it needs git's
+     sub-command resolved rather than a flag lookup: `_detect_force_push`
+     blocks `git push --force` / `-f` without `--force-with-lease`.
      Each match emits a structured deny citing rule 03.
 
   2. Read-cache escape hatch (v0.4.0). When the agent invokes
@@ -50,9 +58,11 @@ from lib import shellcmd  # noqa: E402
 # --------------------------------------------------------------------------- #
 # Static bypass patterns.
 #
-# Each entry is a regex against the full command string. The `name` is
-# echoed in the deny reason so the agent knows exactly which pattern
-# was matched. The `explanation` tells the agent how to recover.
+# Each entry carries `match(argv) -> bool`, a predicate applied to one
+# parsed shell segment's argv (v0.26 — it was a regex against the full
+# command string until then). The `name` is echoed in the deny reason so
+# the agent knows exactly which pattern was matched. The `explanation`
+# tells the agent how to recover.
 # --------------------------------------------------------------------------- #
 # v0.26.0 audit — these six moved from raw-text regex to ARGV predicates.
 #

@@ -410,27 +410,82 @@ class TestOutputCap(unittest.TestCase):
         )
         self.assertIn("elided to stay under", out)
 
+    def _rendered_edicts(self, n: int, payload: int = 300) -> str:
+        """The REAL injected shape, via the real renderer.
+
+        The first version of these tests hand-rolled the `[Exx]` line
+        shape that `manage_edicts list` PRINTS — but the injected block is
+        a markdown table whose data rows start "| `<id>` |" — so the tests
+        stayed green while `_clip_edicts`, keyed to the wrong shape,
+        dropped every edict on the over-cap path and reported 0 cut
+        (fixed v0.34.1).
+        """
+        from lib import edicts as edicts_lib
+        eds = [
+            edicts_lib.Edict(id=f"E{i:02d}", text="x" * payload,
+                             severity="must")
+            for i in range(1, n + 1)
+        ]
+        return edicts_lib.render_injection(eds, lang="en")
+
     def test_whole_edicts_only_never_half_of_one(self) -> None:
         body = "B" * 8000
-        edicts = "".join(
-            f"\n  [E{i:02d}] must\n    " + "x" * 300 + "\n" for i in range(1, 20)
-        )
-        out = ic.build_context("session-start.md", body, edicts)
+        out = ic.build_context(
+            "session-start.md", body, self._rendered_edicts(19))
         self.assertLessEqual(len(out), ic.OUTPUT_CAP)
-        # Every retained entry must carry its full 300-char payload: a
+        kept_rows = [ln for ln in out.splitlines()
+                     if ic._EDICT_ENTRY.match(ln)]
+        # Non-vacuity guard: the pre-v0.34.1 defect dropped EVERY edict,
+        # which would sail through a loop over zero retained rows.
+        self.assertTrue(
+            kept_rows,
+            "no edict retained at all — the boundary pattern no longer "
+            "matches the rendered rows",
+        )
+        # Every retained row must carry its full 300-char payload: a
         # half-rendered edict still reads as a complete instruction.
-        for marker in re.findall(r"\[E\d+\] must", out):
-            idx = out.index(marker)
-            self.assertIn("x" * 300, out[idx:idx + 700], msg=f"{marker} truncated")
+        for row in kept_rows:
+            self.assertIn("x" * 300, row, msg=f"truncated row: {row[:60]}")
+
+    def test_elision_notice_reports_the_true_count(self) -> None:
+        # v0.34.1 regression pin: with the old `[Exx]`-shaped boundary
+        # pattern the rendered table matched nothing, so the over-cap path
+        # dropped EVERY edict while the notice claimed 0 cut — an
+        # unfounded claim in the output of the plugin built to block them.
+        total = 19
+        out = ic.build_context(
+            "session-start.md", "B" * 8000, self._rendered_edicts(total))
+        kept = sum(1 for ln in out.splitlines()
+                   if ic._EDICT_ENTRY.match(ln))
+        m = re.search(r"<!-- (\d+) edict\(s\) elided", out)
+        self.assertIsNotNone(
+            m, "over-cap path must emit the elision notice")
+        self.assertEqual(
+            kept + int(m.group(1)), total,
+            "kept + reported-elided must equal the total",
+        )
+        self.assertGreater(int(m.group(1)), 0)
+
+    def test_entry_pattern_is_coupled_to_the_renderer(self) -> None:
+        # If render_injection ever changes its row shape, this fails
+        # before production silently reverts to drop-all-report-zero.
+        rendered = self._rendered_edicts(2, payload=10)
+        rows = [ln for ln in rendered.splitlines()
+                if ic._EDICT_ENTRY.match(ln)]
+        self.assertEqual(len(rows), 2)
+        # Twin: the table header / separator rows are NOT entries.
+        self.assertFalse(ic._EDICT_ENTRY.match("| ID | Severity | X |"))
+        self.assertFalse(ic._EDICT_ENTRY.match("|----|----------|---|"))
 
     def test_body_alone_over_cap_keeps_body_drops_edicts(self) -> None:
         # Negative case: nothing can be salvaged by eliding edicts, so
         # the contract is emitted whole (degraded, harness-persisted)
         # rather than silently cut mid-sentence.
         out = ic.build_context(
-            "session-start.md", "H" * (ic.OUTPUT_CAP + 5000), "\n  [E01] must\n    x\n",
+            "session-start.md", "H" * (ic.OUTPUT_CAP + 5000),
+            self._rendered_edicts(1, payload=10),
         )
-        self.assertNotIn("[E01]", out)
+        self.assertNotIn("`E01`", out)
         self.assertIn("H" * 100, out)
 
 

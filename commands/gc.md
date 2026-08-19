@@ -1,6 +1,6 @@
 ---
-description: 列出（或删除）超过 N 天未被触碰的 cc-enforcer 会话状态文件。默认 dry-run（仅打印），加 --apply 才真正删除。
-argument-hint: "[--apply] [--older-than DAYS]   (默认 dry-run + 30 天)"
+description: 列出（或删除）超过 N 天未被触碰的 cc-enforcer 会话状态文件。本命令默认替你传 --dry-run（仅打印），加 --apply 才真正删除；脚本本身要求 --dry-run / --apply 恰好传一个。
+argument-hint: "[--apply] [--older-than DAYS]   (本命令默认补 --dry-run + 30 天)"
 ---
 
 # /cc-enforcer:gc
@@ -12,7 +12,11 @@ argument-hint: "[--apply] [--older-than DAYS]   (默认 dry-run + 30 天)"
 
 ## 安全默认
 
-**默认 `--dry-run` 模式**（只打印不删除）。要真正删除必须显式加 `--apply`。
+**本命令默认替你补 `--dry-run`**（只打印不删除），要真正删除必须显式改成
+`--apply`。注意"默认"只存在于本命令这一层：`gc_state.py` 自己要求
+`--dry-run` / `--apply` **恰好传一个**，一个都不传（或两个都传）它会打印
+`gc_state: pass exactly one of --dry-run or --apply` 并 exit 1，而不是退回
+dry-run —— 无标志时永不删除，是靠"拒绝执行"实现的。
 mtime 是该会话状态**最近一次被写入**的时间戳 —— 不只是 Read：记录编辑、
 Stop 拦截、滚动补丁计数、mtime 基线、同步 ack 等九个以上的 mutator 都会
 刷新它。所以一个只改文件、不读新文件的会话同样是"活跃"的。30 天没有任何
@@ -33,7 +37,8 @@ python "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/gc_state.py" --apply --older-than 30
 ```
 
 参数解释：
-- `--dry-run` / `--apply`：互斥，必须传一个。无参数默认走 `--dry-run`。
+- `--dry-run` / `--apply`：互斥，且**必须恰好传一个**；都不传 → exit 1（不是
+  隐式 dry-run）。用户没说要删时，本命令替他传 `--dry-run`。
 - `--older-than DAYS`：阈值（天数）。默认 30。
 
 ## 输出契约

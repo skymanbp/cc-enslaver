@@ -18,6 +18,77 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.34.1] — 2026-08-19
+
+**Fact-alignment release.** The user asked "is every text in this project —
+comments, code, docs — aligned with the facts?" and the honest way to answer
+was to check: a four-agent audit read every checkable claim (docs vs code,
+rules/prompts vs hook behavior, comments/docstrings vs reality, plus the
+cross-repo surfaces the rename touched). 29 in-repo misalignments were
+confirmed and fixed. Most were prose written against an earlier mechanism and
+never carried forward: "six layers" at nine, "regex against the command
+string" three releases after the argv rewrite, an architecture doc still
+promising `inject_context.py` "never reads or writes disk state" while
+SessionStart has run auto-GC since v0.18 and rewrites `CLAUDE_ENV_FILE` since
+v0.34.0.
+
+### The bug the audit flushed out of a comment (615 → 617 tests)
+
+`_clip_edicts` trims the edict block when an injection exceeds the
+10,000-char hook cap. Its entry-boundary pattern matched the `[Exx]` line
+shape that `manage_edicts list` PRINTS — but the injected block is a markdown
+table whose rows start with a backticked id, so the pattern matched nothing:
+the over-cap path silently dropped EVERY edict while the elision notice
+reported **0 cut** — an unfounded claim in the output of the plugin built to
+block unfounded claims. The existing test stayed green because its fixture
+hand-rolled the same wrong shape the code expected. The fixture now goes
+through the real renderer, with a non-vacuity guard (zero retained rows is a
+failure, not a vacuous pass), an honest-count assertion (kept + reported ==
+total), and a shape-coupling pin so a future renderer change fails the suite
+before production reverts to drop-all-report-zero.
+
+### Contract fixes (what a reader is told vs what the code does)
+
+- **The read-before-edit DENY recipe silently failed.** It showed the hash
+  step and the register step in one fenced block "from a Bash tool call" —
+  but the registration parser credits only a bare single-segment command
+  (v0.27, by design). An agent pasting the block as one call got no credit
+  and no error. The recipe now says: two separate Bash calls, nothing chained.
+- **Injected prompts stopped over-promising detectors** (user ruling: prompts
+  align down to implementations, no strictness change): the hedge row now
+  lists the shapes `_HEDGE_INNER` actually matches — bare "should"/"应该" are
+  deliberately NOT detected — and the rule-08 row names the six keyword
+  groups the hook counts (职责/responsibility was real but unlisted;
+  "alternatives" was listed but never counted).
+- `rules/09` no longer claims chain-of-thought satisfies layer (f) — the hook
+  reads only the final reply text.
+- `commands/gc.md` no longer claims the bare CLI defaults to `--dry-run` — it
+  refuses without exactly one flag; the dry-run default belongs to the slash
+  command.
+
+### The mirror lesson, third time
+
+README.zh.md's test counts sat two releases stale (604 at a 615 suite)
+behind a green gate, because `test_doc_sync` registered the counts for
+README.md only — the same coverage hole v0.31.1 fixed for the version badge
+and v0.34.1 found again one field over. README.zh.md now joins
+`INVENTORY_SURFACES`, the test-count `CLAIMS`, and
+`CURRENT_RELEASE_SURFACES`, so the class is closed by derivation rather than
+by another round of hand-checking.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **617 tests, OK** (615 + 2: the
+  clip regression and its coupling pin; the doc gates went red on the stale
+  counts mid-release and green after — the extension proving itself).
+- `hooks/scripts/i18n_check.py` → clean (en + zh prompt/rule edits moved in
+  lockstep).
+- F1's zero-behavior-change claim proven mechanically: AST-minus-docstrings
+  diff against HEAD identical for all comment-only files; the two deltas are
+  the authorized deny-template text and the `_clip_edicts` fix itself.
+
+---
+
 ## [0.34.0] — 2026-08-18
 
 **Env-file hygiene: SessionStart bounds `CLAUDE_ENV_FILE` growth.**

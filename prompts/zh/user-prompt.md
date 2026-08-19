@@ -7,7 +7,7 @@
 
 | 你写出 / 想做 | 触发 | 物理后果 |
 |---|---|---|
-| "应该 / 大概 / 我记得 / probably / maybe" | rule 01 + 06 hedge | Stop layer (b) BLOCK |
+| "应该是 / 大概 / 我记得 / 我觉得 / probably / maybe" 且与 done-claim 相距 50 字符内（光秃秃的"应该" / "should" 刻意不算——只认第一人称含糊）| rule 01 + 06 hedge | Stop layer (b) BLOCK |
 | 引用本会话未 Read 过的文件（违反 **改前必读**）| rule 04 + 08 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 ≤ 5 行 "快速修复"，未走七问、缺**写前必想** | rule 02 + 08 | — |
 | 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|

@@ -1,6 +1,6 @@
 # Tests — index
 
-**615 tests, 17 files, zero dependencies.** This file is the index: every
+**617 tests, 17 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -45,7 +45,7 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
-| [`test_inject_context.py`](test_inject_context.py) | 26 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, and the 10,000-character output cap. |
+| [`test_inject_context.py`](test_inject_context.py) | 28 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, the 10,000-character output cap, and the v0.34.1 edict-clipping regression (boundary pattern coupled to the real rendered row shape; elision notice must report the true count). |
 | [`test_read_guard.py`](test_read_guard.py) | 99 | [`read_guard.py`](../hooks/scripts/read_guard.py) — read-before-edit allow/deny matrix, the rule 09 / 10 / 11 content detectors, the rolling-patch counter, path normalisation, `edited_files` recording, 12-way concurrent state writes, and fail-open. |
 | [`test_bash_guard.py`](test_bash_guard.py) | 21 | [`bash_guard.py`](../hooks/scripts/bash_guard.py) — the bypass-pattern catalog, force-push spellings, the register-as-read hatch (including its chaining and command-position rules), event gating, fail-open. |
 | [`test_stop_guard.py`](test_stop_guard.py) | 138 | [`stop_guard.py`](../hooks/scripts/stop_guard.py) — all nine layers, the status-table format contract, per-layer grace, production-shape payloads (no `turn_count`), transcript fallback, tldr presence and length. |
@@ -71,7 +71,7 @@ demonstrably did.
 | File | Tests | Guards against |
 |---|---:|---|
 | [`test_version_sync.py`](test_version_sync.py) | 5 | A version pointer that does not match `plugin.json`. The set of version-bearing JSON pointers is *closed*, so a newly added field fails until registered. Born from v0.22.1, which shipped with a stale `marketplace.json`. |
-| [`test_doc_sync.py`](test_doc_sync.py) | 12 | Stale counts and inventories: rule count, command count, test count, the Bash deny set on every surface that claims to list it, the `lib/` module inventory in both structure trees (in **both** directions), and every repo-relative markdown link. |
+| [`test_doc_sync.py`](test_doc_sync.py) | 12 | Stale counts and inventories: rule count, command count, test count, the Bash deny set on every surface that claims to list it, the `lib/` module inventory in all three structure trees (README.zh.md joined in v0.34.1, closing the mirror-coverage class for the third time), and every repo-relative markdown link. |
 | [`test_i18n_sync.py`](test_i18n_sync.py) | 9 | Translation drift: file-set parity, ATX heading-level sequence, and enforcement-token parity (a `zh` session must not be promised a smaller deny set than an `en` one). |
 
 ### Audit-round regressions

@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.34.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.34.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -285,7 +285,7 @@ cap: the contract is protected and the (unbounded) edict list is what yields,
 elided at whole-edict boundaries with a pointer — because half an edict still
 reads as a complete instruction.
 
-Nine scripts under [`hooks/scripts/`](hooks/scripts/) sit on eight shared
+Nine scripts under [`hooks/scripts/`](hooks/scripts/) sit on nine shared
 [`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
 registered as hooks; the other five (`register_read.py`, `manage_edicts.py`,
 `manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`) back the escape hatch,
@@ -354,7 +354,7 @@ cc-enforcer/
 │       ├── manage_sync_gate.py  # rule-12 co-update groups: CRUD + `check` diagnostics
 │       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
-│       └── lib/                 # -- eight shared modules --
+│       └── lib/                 # -- nine shared modules --
 │           ├── srclex.py        # judgement: code vs comment vs docstring vs literal
 │           ├── mdctx.py         # judgement: markdown fence / blockquote context
 │           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
@@ -368,7 +368,7 @@ cc-enforcer/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 615 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 617 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -379,7 +379,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **615 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **617 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

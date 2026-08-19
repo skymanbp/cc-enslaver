@@ -2,12 +2,16 @@
 """
 cc-enforcer — context injection hook.
 
-Single entry-point for every Claude Code hook this plugin subscribes to.
-Reads the matching prompt file from `../../prompts/` and emits the JSON
-shape that Claude Code expects for the corresponding hook event.
+The plugin's soft layer. `hooks/hooks.json` registers five hook entries
+across four scripts; this one serves the two injection events —
+SessionStart and UserPromptSubmit — by reading the matching prompt file
+from `../../prompts/` and emitting the JSON shape that Claude Code
+expects for the corresponding hook event. The hard (blocking) layers are
+separate scripts: read_guard.py and bash_guard.py on PreToolUse,
+stop_guard.py on Stop.
 
-Why one script instead of three:
-  Per CLAUDE.md §2.6 (minimum effective change), three near-identical
+Why one script for both injection events instead of two:
+  Per CLAUDE.md §2.6 (minimum effective change), two near-identical
   scripts is duplication. A single dispatch on --event is the smallest
   surface that still keeps each event's contract explicit.
 
@@ -26,8 +30,8 @@ https://code.claude.com/docs/en/hooks.md as of 2026-04-27):
       }
     }
 
-We always exit 0 — this hook is purely additive (soft layer). Hard-layer
-blocking hooks live in separate scripts (none in v0.1).
+We always exit 0 — this hook is purely additive (soft layer). Every
+blocking decision belongs to the three guard scripts named above.
 """
 
 from __future__ import annotations
@@ -202,9 +206,17 @@ def build_context(prompt_filename: str, body: str, edict_block: str = "") -> str
 def _clip_edicts(block: str, room: int) -> tuple[str, int]:
     """Keep as many whole edicts as `room` allows; report how many were cut.
 
-    Edits are cut at entry boundaries (a line starting with the `[Exx]`
-    marker manage_edicts renders) rather than mid-character: half an edict
-    reads as a complete instruction and would be obeyed as one.
+    Entries are cut at table-row boundaries — `render_injection` emits one
+    markdown row per edict, each starting ``| `<id>` |`` (lib/edicts.py) —
+    never mid-row: half an edict reads as a complete instruction and would
+    be obeyed as one. Keeping ``lines[:kept_upto]`` preserves the block
+    preamble (title / intro / table header) ahead of the first kept row.
+
+    v0.34.1 — the original boundary pattern matched the ``[Exx]`` line
+    shape that ``manage_edicts list`` PRINTS, which the injected block
+    never contains (it is a markdown table), so any over-cap injection
+    silently dropped EVERY edict while the elision notice reported 0 cut —
+    exactly the unfounded-claim shape this plugin exists to block.
     """
     lines = block.splitlines(keepends=True)
     starts = [i for i, line in enumerate(lines) if _EDICT_ENTRY.match(line)]
@@ -222,7 +234,10 @@ def _clip_edicts(block: str, room: int) -> tuple[str, int]:
     ))
 
 
-_EDICT_ENTRY = re.compile(r"^\s*[-*]?\s*\[?E\d+\]?")
+# A rendered edict row: first cell is the backticked id (lib/edicts.py
+# render_injection). The table header row (`| ID |`) and the separator
+# (`|----|`) carry no backtick, so neither counts as an entry.
+_EDICT_ENTRY = re.compile(r"^\|\s*`")
 
 
 def emit(event_name: str, additional_context: str) -> None:

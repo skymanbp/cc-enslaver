@@ -37,7 +37,7 @@ Subcommands
   list                Print the groups the loader actually parsed.
   check               list + report dropped groups and dead globs; exits
                       1 when anything is wrong, so it is usable in CI.
-  add NAME --when G... --require G... [--mode all] [--note ...]
+  add NAME --when G... --require G... [--all] [--note ...]
   remove NAME
   path                Print the resolved config location.
 

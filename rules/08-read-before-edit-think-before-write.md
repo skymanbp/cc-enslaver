@@ -82,7 +82,7 @@ Before any `Edit` / `Write`, explicitly answer in chain-of-thought or final repl
 
 1. The target file has been Read in this session (read_guard does not DENY).
 2. All call sites / connected files have been Read (manual self-check + Stop layer (e) backstop).
-3. At least 3 of the six items (root cause / architecture / solution / impact / risk / alternatives) are explicitly recorded in chain-of-thought or final reply.
+3. At least 3 of the six pre-write answers above are recorded in the **final reply** — that is the only text Stop layer (e) reads, and what it counts there is the rule-02 keyword set (root cause / architecture / responsibility / solution / impact / risk). "Alternatives compared" is thinking advice above; it is not one of the six the hook counts.
 4. `new_string` contains no patch-style markers (see rule 09 physical interception).
 
 Otherwise → **read-before-edit / think-before-write not met**, return to Read / Grep / verify.

@@ -42,6 +42,7 @@ from pathlib import Path
 # Make `lib/` importable when run directly as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import edicts as edicts_lib  # noqa: E402 — sys.path mutated above
+from lib import envfile as envfile_lib  # noqa: E402 — sys.path mutated above
 from lib import state as state_lib  # noqa: E402 — sys.path mutated above
 
 # v0.18: lazy import only when auto-GC actually triggers (kept None
@@ -304,8 +305,15 @@ def main() -> int:
     # Runs after the main injection so even if GC blows up, the prompt
     # injection already landed. Rate-limited by a marker file so we don't
     # re-scan on every rapid session restart.
+    #
+    # v0.34 env-file hygiene rides the same slot and cadence: SessionStart
+    # is exactly the event on which a non-idempotent plugin re-appends its
+    # exports (it fires per compact/resume), so deduping here bounds the
+    # accumulation at one generation regardless of hook ordering. Both
+    # maintenance passes are failing-open and never touch the payload.
     if args.event == "SessionStart":
         _maybe_auto_gc(session_id)
+        envfile_lib.maybe_dedupe()
 
     emit(args.event, build_context(
         prompt_filename, additional_context, edict_block,

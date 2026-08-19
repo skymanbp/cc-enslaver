@@ -18,6 +18,39 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.34.0] — 2026-08-18
+
+**Env-file hygiene: SessionStart bounds `CLAUDE_ENV_FILE` growth.**
+
+The field failure (2026-08-17, booked from a CodeEraser session): Claude
+Code hands every hook a `CLAUDE_ENV_FILE` that is sourced into subsequent
+Bash calls, and SessionStart fires on every compact/resume — so a plugin
+that appends its `export` lines unconditionally on that event grows the
+file without bound. The codex companion plugin re-appended three exports
+per compact until ~8 KB of duplicate environment killed every Bash call
+silently: the session lost its hands with no diagnostic.
+
+The true origin is that plugin's non-idempotent append — outside this
+repo's control, and a patch to a cached third-party copy dies on its next
+version pin. The CLASS, though, is squarely this plugin's remit: session
+protection. New [`lib/envfile.py`](hooks/scripts/lib/envfile.py) dedupes
+the file on every SessionStart (the same slot and cadence as auto-GC —
+and as the defect), keeping the LAST occurrence per variable name, which
+is byte-equivalent to what sourcing the whole file already yields (later
+exports win): nothing observable changes, only the growth goes. Hook
+ordering against the offending appender does not matter — whichever runs
+first, accumulation is bounded at one generation per variable instead of
+one per compact.
+
+Failing open throughout, refusal over gamble: any line that is not an
+export / blank / comment, or any quoted value spanning lines, refuses the
+WHOLE pass and leaves the file byte-identical — dropping the opening line
+of a multi-line value would corrupt the file, and a hygiene pass that can
+corrupt or crash the injection is worse than the disease it treats. Each
+acceptance case ships with its refusal twin. 604 → 615 tests.
+
+---
+
 ## [0.33.0] — 2026-08-18
 
 **Project rename: `cc-enslaver` → `cc-enforcer`** (user decision, 2026-08-18).

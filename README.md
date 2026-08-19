@@ -6,7 +6,7 @@
 > intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.34.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -362,12 +362,13 @@ cc-enforcer/
 │           ├── tomlio.py        # config: tolerant TOML reader + the shared writer
 │           ├── projroot.py      # config: project-root detection, shared by both loaders
 │           ├── edicts.py        # feature: Imperial Edicts loader / matcher / renderer
+│           ├── envfile.py       # feature: CLAUDE_ENV_FILE dedupe hygiene (v0.34)
 │           └── sync_gate.py     # feature: rule-12 groups — read, write and match
 ├── commands/                    # 6 slash commands
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 604 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 615 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -378,7 +379,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **604 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **615 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

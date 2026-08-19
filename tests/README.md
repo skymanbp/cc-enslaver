@@ -1,6 +1,6 @@
 # Tests — index
 
-**604 tests, 16 files, zero dependencies.** This file is the index: every
+**615 tests, 17 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -54,6 +54,7 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
+| [`test_envfile.py`](test_envfile.py) | 11 | [`lib/envfile.py`](../hooks/scripts/lib/envfile.py) (v0.34) — the pure dedupe model (last-occurrence wins, order survives, refusal twins for non-export lines and open quotes) plus black-box SessionStart runs proving a duplicated `CLAUDE_ENV_FILE` shrinks and a refused one stays byte-identical. |
 | [`test_edicts.py`](test_edicts.py) | 64 | [`lib/edicts.py`](../hooks/scripts/lib/edicts.py) loading / injection / DENY / severity gating **and** the [`manage_edicts.py`](../hooks/scripts/manage_edicts.py) CLI, including its TOML round-trip, cwd fallback, and the v0.33 single-definition pin on the `--global` path (write target must be the loader's `global_path()`, which must derive from `_PLUGIN_NAME`). |
 | [`test_sync_gate.py`](test_sync_gate.py) | 19 | [`lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) — config resolution order, TOML tolerance, any-vs-all mode, `./` glob normalisation, project-relative boundaries. |
 | [`test_gc_state.py`](test_gc_state.py) | 19 | [`gc_state.py`](../hooks/scripts/gc_state.py) — argument validation, dry-run vs apply, threshold semantics, and auto-GC on SessionStart. |

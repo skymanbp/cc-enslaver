@@ -222,12 +222,20 @@ def _apply(path: Path, old: str, new: str) -> bool:
 def _frame(reason: str, work: Path, limit: int = 18) -> list[str]:
     """Verbatim hook output, trimmed to `limit` lines with the cut marked.
 
-    The only edit made to the hook's text is shortening the throwaway
-    workspace path to `paygate/`, so the transcript does not carry a
-    machine-specific temp directory (rule 11's concern, applied to output).
+    The only edit made to the hook's text is normalising the target path:
+    the throwaway workspace prefix is shortened to `paygate`, and the
+    separator after it is forced to `/`.
+
+    Both halves are required, and v0.36.0 shipped only the first. The
+    committed SVGs are rendered once and compared byte for byte by
+    `tests/test_demo.py`, so a path rendered with the HOST's separator makes
+    the image a Windows artefact: CI reproduced `paygate/charge.py` against
+    a committed `paygate\\charge.py` and failed on Linux within minutes of
+    the release. An artefact pinned across platforms may not contain a
+    platform-dependent string.
     """
-    reason = reason.replace(str(work / "paygate") + os.sep, "paygate" + os.sep)
     reason = reason.replace(str(work / "paygate"), "paygate")
+    reason = reason.replace("paygate" + os.sep, "paygate/")
     lines = [l.rstrip() for l in reason.strip().splitlines()]
     kept = lines[:limit]
     if len(lines) > limit:

@@ -16,7 +16,7 @@
 <text x="18" y="236" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #1 swallow the crash and return None</text>
 <text x="18" y="274" fill="#ff7b72" font-weight="700" xml:space="preserve">cc-enforcer · rule 09 violation (patch-style new_string)</text>
 <text x="18" y="312" fill="#d29922" xml:space="preserve">Tool: Edit</text>
-<text x="18" y="331" fill="#d29922" xml:space="preserve">Target: paygate\charge.py</text>
+<text x="18" y="331" fill="#d29922" xml:space="preserve">Target: paygate/charge.py</text>
 <text x="18" y="350" fill="#ff7b72" xml:space="preserve">Pattern matched: Python: bare try / except: pass (silent exception swallow)</text>
 <text x="18" y="388" fill="#d29922" xml:space="preserve">Snippet (the offending segment in your new_string):</text>
 <text x="18" y="407" fill="#c9d1d9" xml:space="preserve">    except Exception:</text>
@@ -38,7 +38,7 @@
 <text x="18" y="768" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #5 widen the timeout, the gateway seemed slow</text>
 <text x="18" y="806" fill="#ff7b72" font-weight="700" xml:space="preserve">cc-enforcer · rule 09 violation (rolling-patch interception)</text>
 <text x="18" y="844" fill="#d29922" xml:space="preserve">Tool: Edit</text>
-<text x="18" y="863" fill="#d29922" xml:space="preserve">Target: paygate\charge.py</text>
+<text x="18" y="863" fill="#d29922" xml:space="preserve">Target: paygate/charge.py</text>
 <text x="18" y="882" fill="#d29922" xml:space="preserve">Rolling-patch counter: 3 small edit(s) already applied</text>
 <text x="18" y="901" fill="#c9d1d9" xml:space="preserve">this session; this would be attempt #4 — at or above the</text>
 <text x="18" y="920" fill="#c9d1d9" xml:space="preserve">threshold of 4.</text>

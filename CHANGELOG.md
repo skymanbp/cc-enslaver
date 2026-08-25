@@ -18,6 +18,31 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.36.1] — 2026-08-25
+
+**The demo's images were a Windows artefact.** CI went red within minutes of
+v0.36.0: the deny banner's target rendered as `paygate\charge.py` on the
+machine that produced the committed SVGs, and Linux reproduces the same run
+as `paygate/charge.py`. A byte-for-byte comparison of an 8 KB image is not a
+kind way to learn that.
+
+Root cause: [`run_demo.py`](demo/run_demo.py)'s `_frame` normalised the
+*workspace prefix* out of the hook's text but left the separator after it at
+whatever `os.sep` the host uses. **An artefact pinned across platforms may
+not contain a platform-dependent string** — and this one is pinned by
+`tests/test_demo.py` precisely so it cannot drift.
+
+Fixed at the mechanism (the separator is forced to `/`), and the class is now
+asserted where it belongs rather than left to CI:
+`test_transcripts_carry_no_host_specific_paths` fails on a backslash-joined
+demo path or a leaked `cce-demo-` temp directory, in both runs, naming the
+cause instead of printing a diff of two SVGs. Verified red against the
+pre-fix `_frame` before the fix went in.
+
+**690 → 691 tests.**
+
+---
+
 ## [0.36.0] — 2026-08-25
 
 **A demo you can run.** Until now both READMEs illustrated the "before" half

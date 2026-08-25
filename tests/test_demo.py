@@ -106,6 +106,27 @@ class TestDemoStillDemonstratesRefusals(unittest.TestCase):
         self.assertNotIn("cc-enforcer · ", self.without,
                          "the unguarded run must contain no verdicts at all")
 
+    def test_transcripts_carry_no_host_specific_paths(self) -> None:
+        """The images are pinned byte for byte, so they must be portable.
+
+        v0.36.0 shipped images rendered on Windows: the deny banner's target
+        read `paygate\\charge.py`, which Linux reproduces as `paygate/…`, and
+        CI went red minutes after the release. Asserted here rather than left
+        to CI, so the failure names the cause instead of showing a diff of
+        two 8 KB SVGs.
+        """
+        for name, text in (("without", self.without), ("with", self.with_)):
+            with self.subTest(run=name):
+                self.assertNotIn(
+                    "paygate" + chr(92), text,
+                    "the transcript renders the demo path with a Windows "
+                    "separator; _frame must normalise it to '/'",
+                )
+                self.assertNotIn(
+                    "cce-demo-", text,
+                    "the throwaway workspace path leaked into the transcript",
+                )
+
     def test_the_two_runs_perform_the_same_edits(self) -> None:
         """Same task, same sequence — the hooks are the only variable."""
         for n, (label, _, _) in enumerate(run_demo.STEPS, 1):

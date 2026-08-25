@@ -13,6 +13,7 @@
 | 局部打补丁而非**系统式**修改（rolling patches / wrap-and-swallow）| rule 09 | rule 09 DENY（若含未带 why 的屏蔽标记）|
 | 即将在症状位动手修补，而没有沿因果链爬到最上游起源、没说明为什么停在那里、也没先用第一方证据确诊 | rule 03 上游阶梯（v0.28）| edit 轮缺根因三件套时 Stop layer (f) BLOCK（因果链位置本身是文本层纪律）|
 | 与已修过者**同形状**的第二次失败，逐个点对点修，而不是诊断共同根因、统一修复清扫同类 | rule 03 + 09 统一修复（v0.28）| 同文件堆叠 → **PreToolUse(Edit\|Write) DENY**（v0.13）；跨文件形态是文本层纪律 |
+| 因为怕 rolling-patch 计数器拦你，而回避删除、或给改动"注水" | **这不是触发条件，是反面**（v0.35）| 净减少改动与记账类改动（只改版本号 / ISO 日期）**永不计数、永不被拦**。放心删，放心升版本号 |
 | 即将写 `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` 无 why | rule 09 | **PreToolUse(Edit\|Write) DENY** |
 | 即将 `time.sleep()` 掩竞态 / 注释失败测试 / 放宽断言 | rule 03 + 09 | rule 09 DENY（若是新代码）|
 | 即将把密钥 / API key / 服务商 token（`ghp_…` `xox…` `AIza…`）/ 私钥 / URL 内凭证内联成**代码**字面量（本应是配置/环境）| rule 10 | **PreToolUse(Edit\|Write) DENY**（除非占位 / 紧邻 why）|
@@ -29,7 +30,7 @@
 | 本轮做了 Edit 但回复无"根因 + 影响 + 方案"三件套 | rule 09 | Stop layer (f) BLOCK |
 | 声明"I edited X.py / 我修改了 Y.md"但磁盘 mtime 未变 / 声明"created Z"但 Z 不存在 | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | 含 done-claim 的回复末尾缺 `tldr` / 大白话总结 | v0.20 回复 schema | **Stop layer (h) v0.20 BLOCK** |
-| tldr 单条超一句话 / 160 字符（段落不是 TL;DR；多条内容 → 逐条一行短句）| v0.23 tldr 长度约定 | **Stop layer (h) v0.23 BLOCK** |
+| tldr 单条超一句话 / 160 显示列（段落不是 TL;DR；CJK 每字 2 列 ≈ 80 汉字；多条内容 → 逐条一行短句）| v0.23 tldr 长度约定 | **Stop layer (h) BLOCK** |
 | 改完收尾没做全库引用清扫（文档 / 下游 / 测试 / 翻译），sync-gate 某组 `when` 命中而无 `require` 编辑、又没写 `同步核对` / `sync-check` 行 | rule 12 全库同步 | **Stop layer (i) v0.23 BLOCK**（有 `.claude/cc-enforcer/sync-gate.toml` 的项目）|
 | 留 TODO / FIXME 但说"完成" / 做了用户没要求的重构 | rule 07 忠实性 | Stop layer (d) BLOCK |
 
@@ -57,8 +58,9 @@ cc-enforcer:
 **`同步核对` 只结清上一次拦截**点名过**的组——首次违规照样 BLOCK at layer (i) 并
 点名那一组。占位值（`无` / `n/a` / `-`）按**缺失**处理、照样 BLOCK（v0.32），
 引用别人的那一句同理。**
-**tldr 长度（v0.23）：每条一句话——前因、动作、结果——不超 160 字符；
-多条内容逐条一行、每条各自不超上限，否则 Stop layer (h) BLOCK。**
+**tldr 长度：每条一句话——前因、动作、结果——不超 160 显示列（v0.35：CJK
+每字算 2 列，约 80 汉字；ASCII 不变）；多条内容逐条一行、每条各自不超上限，
+否则 Stop layer (h) BLOCK。**
 
 被 Stop block 时：reason 是一个状态表 + 一行「大白话」，找 ❌ 那一行 → 读 Recovery → 修，不要重读整个 prompt。
 

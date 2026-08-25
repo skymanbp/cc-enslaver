@@ -83,6 +83,8 @@ from lib import state as state_lib  # noqa: E402
 from lib import edicts as edicts_lib  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import srclex  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import editscale  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Tools this guard handles (PreToolUse matcher must include all of them).
@@ -134,16 +136,14 @@ be used to bypass the read requirement.
 
 
 # --------------------------------------------------------------------------- #
-# Rolling-patch classification thresholds (v0.13.0 — rule 09 hard layer).
+# Rolling-patch frequency layer (v0.13.0 — rule 09 hard layer).
 #
-# Heuristics — deliberately tunable as module-level constants so they can
-# be reviewed in one place:
-#
-#   "small edit"      = max(|old|, |new|) < SMALL_EDIT_MAX_CHARS chars
-#                       AND max(lines(old), lines(new)) ≤ SMALL_EDIT_MAX_LINES
-#   "systematic"      = max chars ≥ SYSTEMATIC_MIN_CHARS
-#                       OR  max lines ≥ SYSTEMATIC_MIN_LINES
-#   "medium"          = neither (no counter change)
+# The SIZE/SHAPE judgement — what counts as a small edit, what counts as a
+# systematic rewrite, and which changes are exempt outright — lives in
+# lib/editscale.py, along with the v0.35.0 root-cause note on why the
+# thresholds became relative to the target file. This module owns only the
+# FREQUENCY policy: how many small edits to one file are tolerated before
+# the next one is refused.
 #
 # DENY fires when the predicted next small-edit count would be ≥
 # ROLLING_PATCH_THRESHOLD. The recorded count is *not* incremented on
@@ -151,36 +151,37 @@ be used to bypass the read requirement.
 # silently disable the threshold). Recovery: do one systematic edit to
 # reset the counter to 0.
 # --------------------------------------------------------------------------- #
-SMALL_EDIT_MAX_CHARS = 200
-SMALL_EDIT_MAX_LINES = 10
-SYSTEMATIC_MIN_CHARS = 1500
-SYSTEMATIC_MIN_LINES = 50
 ROLLING_PATCH_THRESHOLD = 4
 
 
-def _lines(text: str) -> int:
-    """Line count of `text`. Treats empty string as 0 lines, not 1."""
-    if not text:
-        return 0
-    return text.count("\n") + 1
+def _scale_note(scale: tuple[int, int] | None) -> str:
+    """Render the file's own coverage bar for the DENY message, if known.
 
-
-def _classify_change(old_string: str, new_string: str) -> str:
-    """Return 'systematic' / 'small' / 'medium' for an edit's footprint.
-
-    For Edit, both old and new are meaningful. For Write, callers pass
-    old_string="" so the classification falls back to new_string alone.
-    For Edit-with-empty-old_string (rare insertion case) the same applies.
+    Empty when the target could not be measured — saying nothing is right
+    there, because in that case the classifier genuinely did not apply a
+    coverage test and printing one would describe a check that never ran.
     """
-    old = old_string or ""
-    new = new_string or ""
-    max_chars = max(len(old), len(new))
-    max_lines = max(_lines(old), _lines(new))
-    if max_chars >= SYSTEMATIC_MIN_CHARS or max_lines >= SYSTEMATIC_MIN_LINES:
-        return "systematic"
-    if max_chars < SMALL_EDIT_MAX_CHARS and max_lines <= SMALL_EDIT_MAX_LINES:
-        return "small"
-    return "medium"
+    bar = editscale.coverage_bar(scale)
+    if bar is None or scale is None:
+        return ""
+    chars_bar, lines_bar = bar
+    file_chars, file_lines = scale
+    return (
+        f" — here, {lines_bar} of {file_lines} lines"
+        f" or {chars_bar} of {file_chars} chars"
+    )
+
+
+def _cover_hint(scale: tuple[int, int] | None) -> str:
+    """Render the spanning route in recovery path (1), if it is known."""
+    bar = editscale.coverage_bar(scale)
+    if bar is None:
+        return ""
+    chars_bar, lines_bar = bar
+    return (
+        f", or ≥ {lines_bar} lines / ≥ {chars_bar} chars"
+        " — whichever bar you clear first"
+    )
 
 
 ROLLING_PATCH_DENY_TEMPLATE = """cc-enforcer · rule 09 violation (rolling-patch interception)
@@ -205,21 +206,30 @@ Classification used here:
   small      = max(|old_string|, |new_string|) < {small_chars} chars
                AND max line count ≤ {small_lines}
   systematic = max chars ≥ {sys_chars} OR max line count ≥ {sys_lines}
+               OR the change spans ≥ {ratio_pct}% of this file{scale_note}
                (resets the counter to 0)
   medium     = anything in between (does not count, does not reset)
+
+Never counted, at any counter value (v0.35):
+  net reduction — new_string is SHORTER than old_string. A rolling patch
+                  is an accretion; an edit that leaves the file smaller
+                  than it found it cannot be one.
+  bookkeeping   — only version / ISO-date literals differ and every other
+                  byte is identical (in prose documents, bare integers
+                  count too). Bumping a version number is not a fix.
 
 To proceed, do one of:
 
   (1) **Systematic rewrite**: combine your pending small fixes into a
       single Edit (or Write) of ≥ {sys_lines} lines / ≥ {sys_chars}
-      chars on `new_string` / `content`. This counts as systematic and
-      resets the counter to 0 for this file.
+      chars on `new_string` / `content`{cover_hint}. This counts as
+      systematic and resets the counter to 0 for this file.
 
   (2) **Batch multiple typo-class fixes**: if you genuinely have several
       independent small unrelated changes, expand the surrounding context
-      so each individual Edit clears the small-edit threshold (≥ 10
-      lines / ≥ 200 chars), or use Write to replace the whole file at
-      once.
+      so each individual Edit clears the small-edit threshold (≥ {small_lines}
+      lines / ≥ {small_chars} chars), or use Write to replace the whole
+      file at once.
 
   (3) **Stop and surface**: tell the user "this file needs a systematic
       rewrite; please review my plan before I continue". Let them
@@ -1201,7 +1211,11 @@ def _handle_pre_tool_use(payload: dict) -> None:
         _check_hardcode_and_path(content)
         _check_edicts(content)
 
-    def _check_rolling_patch(old_string: str, new_string: str) -> None:
+    def _check_rolling_patch(
+        old_string: str,
+        new_string: str,
+        scale: tuple[int, int] | None = None,
+    ) -> None:
         """Rule-09 rolling-patch counter (v0.13; atomic since v0.24).
 
         Classify the change and either DENY (small-edit threshold met),
@@ -1212,13 +1226,30 @@ def _handle_pre_tool_use(payload: dict) -> None:
         locked state operation (try_record_small_edit) — the previous
         read-count-then-increment pair let two parallel hooks both see
         count=2 and both allow, landing the forbidden 4th small edit.
+
+        v0.35 — `scale` carries the target file's (chars, lines) so a
+        change can qualify as systematic by SPANNING the file rather than
+        only by absolute size, and two shapes short-circuit before the
+        counter is ever consulted. Order matters: systematic is tested
+        first so a large deletion RESETS rather than merely being
+        skipped, which is the more useful outcome of the two.
         """
-        kind = _classify_change(old_string, new_string)
+        kind = editscale.classify_change(old_string, new_string, scale)
         if kind == "systematic":
             state_lib.reset_edit_count(session_id, file_path)
             return
         if kind != "small":
             return  # "medium" — leave counter untouched
+        # v0.35 exemptions. Neither resets the counter: they are not
+        # re-engagement with the file, they are simply not the behaviour
+        # this layer polices, so they pass through leaving it as it was.
+        if editscale.is_net_reduction(old_string, new_string):
+            return
+        if editscale.is_bookkeeping_edit(
+            old_string, new_string,
+            allow_bare_numbers=not _is_scannable_target(file_path),
+        ):
+            return
         allowed, current = state_lib.try_record_small_edit(
             session_id, file_path, ROLLING_PATCH_THRESHOLD,
         )
@@ -1230,10 +1261,13 @@ def _handle_pre_tool_use(payload: dict) -> None:
                 current_count=current,
                 attempt_count=current + 1,
                 threshold=ROLLING_PATCH_THRESHOLD,
-                small_chars=SMALL_EDIT_MAX_CHARS,
-                small_lines=SMALL_EDIT_MAX_LINES,
-                sys_chars=SYSTEMATIC_MIN_CHARS,
-                sys_lines=SYSTEMATIC_MIN_LINES,
+                small_chars=editscale.SMALL_EDIT_MAX_CHARS,
+                small_lines=editscale.SMALL_EDIT_MAX_LINES,
+                sys_chars=editscale.SYSTEMATIC_MIN_CHARS,
+                sys_lines=editscale.SYSTEMATIC_MIN_LINES,
+                ratio_pct=int(editscale.SYSTEMATIC_COVERAGE_RATIO * 100),
+                scale_note=_scale_note(scale),
+                cover_hint=_cover_hint(scale),
             )
             return  # unreachable; _emit_deny exits
 
@@ -1274,10 +1308,19 @@ def _handle_pre_tool_use(payload: dict) -> None:
             )
             return  # not reached; _emit_deny exits
         _run_content_checks(content)
-        # Rolling-patch check (v0.13). A Write to an existing file is
-        # effectively a full-file replacement; classify by `content`
-        # alone (old_string="" yields the right small/systematic split).
-        _check_rolling_patch("", content)
+        # Rolling-patch check (v0.13). A Write to an existing file is a
+        # full-file replacement, so the side being replaced is the file's
+        # CURRENT text (v0.35) — passing it makes the coverage, net-reduction
+        # and bookkeeping tests see the change that is actually happening.
+        # Before v0.35 this passed old_string="", which measured only the
+        # incoming content: replacing a 3000-char file with 50 chars read as
+        # a "small edit" and counted toward the rolling-patch threshold,
+        # when it is the most complete re-engagement a Write can be.
+        # Unreadable target → None → "" → the pre-v0.35 behaviour exactly.
+        disk_text = editscale.file_text(file_path)
+        _check_rolling_patch(
+            disk_text or "", content, editscale.file_scale(disk_text),
+        )
         state_lib.add_read(session_id, file_path)
         state_lib.record_edit_turn(session_id, turn_count)
         # v0.23: rule-12 edited-file set (Stop layer (i) sync gate).
@@ -1307,8 +1350,13 @@ def _handle_pre_tool_use(payload: dict) -> None:
         new_string = tool_input.get("new_string") or ""
         old_string = tool_input.get("old_string") or ""
         _run_content_checks(new_string)
-        # Rolling-patch check (v0.13).
-        _check_rolling_patch(old_string, new_string)
+        # Rolling-patch check (v0.13; file-relative since v0.35). The scale
+        # is read from disk so "small" can be judged against what the file
+        # actually is, not against a constant chosen for some other file.
+        _check_rolling_patch(
+            old_string, new_string,
+            editscale.file_scale(editscale.file_text(file_path)),
+        )
         # Edit allowed — stamp the edit-turn for Stop layers (e)+(f).
         # We do NOT add_read here because Edit is downstream of a prior
         # Read/Write that already recorded.

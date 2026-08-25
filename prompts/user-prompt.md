@@ -16,6 +16,7 @@
 | Patching locally instead of **systematic** modification (rolling patches / wrap-and-swallow) | rule 09 | rule 09 DENY (if suppression marker has no why) |
 | About to patch at the symptom site without climbing the causal chain to the most-upstream origin, stating why you stop there, and demonstrating the diagnosis first-party | rule 03 upstream ladder (v0.28) | Stop layer (f) BLOCK when the edit turn lacks the root-cause triplet (ladder position itself is text-level) |
 | Fixing the *second* failure of the same shape one-by-one instead of diagnosing the shared root cause and sweeping its class in one unified fix | rule 03 + 09 unified fix (v0.28) | same-file pile-up → **PreToolUse(Edit\|Write) DENY** (v0.13); the cross-file form is text-level |
+| Avoiding a deletion, or padding an edit, because you think the rolling-patch counter will refuse it | **not a trigger — the opposite** (v0.35) | A net reduction and a bookkeeping edit (version / ISO date only) are NEVER counted and never denied. Delete freely; bump versions freely |
 | About to `time.sleep()` to mask a race / comment out failing tests / loosen asserts | rule 03 + 09 | rule 09 DENY (for new code) |
 | About to inline a secret / API key / provider token (`ghp_…` `xox…` `AIza…`) / private key / credentials-in-a-URL as a **code** literal (should be config/env) | rule 10 | **PreToolUse(Edit\|Write) DENY** (unless placeholder / adjacent why) |
 | About to hardcode a user-home absolute path (`C:\Users\…` / `/home/…` / `$HOME` / `%USERPROFILE%` / `"~/…"`) into **code** | rule 11 | **PreToolUse(Edit\|Write) DENY** (unless adjacent why; prose-doc/lockfile exempt) |
@@ -32,7 +33,7 @@
 | Claim "I edited X.py / created Y.md" but disk mtime unchanged / file does not exist | rule 01 + 06 | **Stop layer (g) v0.16 BLOCK** |
 | Left TODO / FIXME but said "done" / did refactors the user didn't ask for | rule 07 fidelity | Stop layer (d) BLOCK |
 | A done-claim reply with no `tldr` / plain-language summary at the end | v0.20 reply schema | **Stop layer (h) v0.20 BLOCK** |
-| A `tldr` item longer than one sentence / 160 chars (a paragraph is not a TL;DR; several things → one short line each) | v0.23 tldr length contract | **Stop layer (h) v0.23 BLOCK** |
+| A `tldr` item longer than one sentence / 160 display columns (a paragraph is not a TL;DR; CJK costs 2 per char ≈ 80 汉字; several things → one short line each) | v0.23 tldr length contract | **Stop layer (h) BLOCK** |
 | Closing an edit without a repo-wide reference sweep (docs / downstream / tests / translations), when a sync-gate `when` group matched but no `require` file was edited and no `同步核对` / `sync-check` line is present | rule 12 repo-wide sync | **Stop layer (i) v0.23 BLOCK** (projects with `.claude/cc-enforcer/sync-gate.toml`) |
 
 ## Closing schema (YAML · mandatory)
@@ -60,8 +61,9 @@ cc-enforcer:
 **`sync-check` settles only groups a previous block NAMED — a first violation still
 BLOCKS at layer (i) and names the group. A placeholder value (`n/a` / `无` / `-`)
 is treated as ABSENT and still BLOCKS (v0.32), as is one you merely quoted.**
-**`tldr` length (v0.23): one sentence per item — cause, action, outcome — ≤ 160 chars;
-several things → one item per line, each within the cap, else Stop layer (h) BLOCK.**
+**`tldr` length: one sentence per item — cause, action, outcome — ≤ 160 display
+columns (v0.35: CJK costs 2 per char, ≈ 80 汉字; ASCII unchanged); several things
+→ one item per line, each within the cap, else Stop layer (h) BLOCK.**
 
 When blocked at Stop: reason is a status table + a plain-language line; find the ❌ row → read Recovery → fix, don't re-read the whole prompt.
 

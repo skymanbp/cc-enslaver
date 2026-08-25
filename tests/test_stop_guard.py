@@ -864,9 +864,16 @@ class TestTldrLayerH(_StopBase):
 
 class TestTldrLengthLayerH(_StopBase):
     """v0.23 — layer (h) part 2: each tldr item must stay within
-    TLDR_MAX_ITEM_CHARS (160). Presence alone no longer suffices; a
+    TLDR_MAX_ITEM_COLUMNS (160). Presence alone no longer suffices; a
     paragraph-length "tldr" blocks with a dedicated overlong recovery.
     Multiple items are fine when each line stays within the cap.
+
+    v0.35 — the unit is DISPLAY COLUMNS, not code points. Every case in
+    this class predates that change and all of them still hold, which is
+    the point: the ASCII cases are byte-identical in meaning (one code
+    point, one column), and the CJK cases were already well past 160
+    either way. The new boundary behaviour is pinned in
+    TestTldrDisplayWidth below.
     """
 
     def _compliant_non_edit(self) -> str:
@@ -1024,6 +1031,116 @@ class TestTldrLengthLayerH(_StopBase):
         self.assertIsNone(
             out, msg=f"nested detail bullet must not be measured, got {out!r}",
         )
+
+
+class TestTldrDisplayWidth(_StopBase):
+    """v0.35 — layer (h)'s cap counts display columns, not code points.
+
+    Root cause pinned here: the v0.23 comment above TLDR_MAX_ITEM_CHARS
+    conceded in passing that "a full English sentence fits; a Chinese
+    sentence is far shorter" — i.e. one number meaning two different
+    things on the two halves of a bilingual contract. 160 code points is
+    about one English sentence and about two Chinese paragraphs, so the
+    zh side enforced a bound roughly twice as loose while layer (h)
+    exists to insist a TL;DR is ONE SENTENCE.
+
+    Direction of the change, asserted rather than described: strictness
+    INCREASE for CJK, exact no-op for Latin.
+    """
+
+    def _compliant_non_edit(self) -> str:
+        return (
+            "已修复并验证。\n$ pytest passed (35/35).\n"
+            "重触发原症状: 已通过。\n"
+            "任务忠实: 用户原始请求一项，已完成，无降级、无遗漏。"
+        )
+
+    def test_100_cjk_chars_now_block(self) -> None:
+        # 100 汉字 = 200 columns. Under the old code-point cap this was
+        # 100 <= 160 and passed; it is two sentences of Chinese, which is
+        # exactly what the cap is supposed to refuse.
+        msg = self._compliant_non_edit() + "\ntldr: " + "改" * 100
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="100 CJK chars = 200 cols must block")
+        self.assertIn("FAILED at Layer (h)", out["reason"])
+        self.assertIn("overlong", out["reason"])
+
+    def test_twin_75_cjk_chars_still_pass(self) -> None:
+        # 75 汉字 = 150 columns — a real one-sentence Chinese tldr, which
+        # must keep working. Without this twin the change above could be
+        # satisfied by simply banning CJK.
+        msg = self._compliant_non_edit() + "\ntldr: " + "改" * 75
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"75 CJK chars = 150 cols must pass, got {out!r}")
+
+    def test_cjk_boundary_is_exactly_160_columns(self) -> None:
+        at_cap = self._compliant_non_edit() + "\ntldr: " + "边" * 80
+        rc, out, _ = self._stop(at_cap, turn_count=5)
+        self.assertIsNone(out, msg=f"80 CJK = exactly 160 cols must pass, got {out!r}")
+
+    def test_cjk_one_char_over_the_boundary_blocks(self) -> None:
+        over = self._compliant_non_edit() + "\ntldr: " + "边" * 81
+        rc, out, _ = self._stop(over, turn_count=5)
+        self.assertIsNotNone(out, msg="81 CJK = 162 cols must block")
+
+    def test_ascii_cap_is_unchanged_at_160(self) -> None:
+        # The no-op half of the claim: no English tldr that passed before
+        # can fail now, because every character still costs one column.
+        msg = self._compliant_non_edit() + "\ntldr: " + "y" * 160
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(out, msg=f"160 ASCII must still pass, got {out!r}")
+
+    def test_ascii_161_still_blocks(self) -> None:
+        msg = self._compliant_non_edit() + "\ntldr: " + "y" * 161
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out, msg="161 ASCII must still block")
+
+    def test_reported_number_is_the_column_count(self) -> None:
+        # A CJK author must be able to reconcile the figure in the block
+        # reason against the cap it supposedly exceeded. Reporting code
+        # points beside a column cap would make that impossible: 90 汉字
+        # must be reported as 180, not 90.
+        msg = self._compliant_non_edit() + "\ntldr: " + "字" * 90
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(out)
+        self.assertIn("180", out["reason"])
+        self.assertIn("columns", out["reason"])
+
+    def test_recovery_names_the_cjk_equivalent(self) -> None:
+        msg = self._compliant_non_edit() + "\ntldr: " + "字" * 90
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIn("80 汉字", out["reason"])
+
+    def test_mixed_script_item_is_measured_per_character(self) -> None:
+        # 60 汉字 (120 cols) + 45 ASCII (45 cols) = 165 > 160. Neither
+        # half alone would trip the cap; only the correct per-character
+        # sum does, so this fails if either weight is wrong.
+        item = "字" * 60 + "a" * 45
+        self.assertEqual(len(item), 105)  # code points: comfortably under
+        msg = self._compliant_non_edit() + "\ntldr: " + item
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNotNone(
+            out, msg="165 columns from a mixed item must block")
+
+    def test_combining_marks_cost_nothing(self) -> None:
+        # 155 base letters + 155 combining acutes: 310 code points but
+        # 155 columns, because a combining mark renders on top of its
+        # base rather than beside it.
+        item = ("é" * 155)
+        # Guards the fixture itself: the accented letters above are
+        # DECOMPOSED (base + U+0301) in this source file. If the file is
+        # ever normalised to precomposed U+00E9 the string becomes 155
+        # code points, this case stops exercising combining marks at all,
+        # and this assertion is what says so instead of quietly passing.
+        self.assertEqual(
+            len(item), 310,
+            msg="fixture must stay decomposed (base + combining acute); "
+                "source file appears to have been NFC-normalised",
+        )
+        msg = self._compliant_non_edit() + "\ntldr: " + item
+        rc, out, _ = self._stop(msg, turn_count=5)
+        self.assertIsNone(
+            out, msg=f"155 columns of accented Latin must pass, got {out!r}")
 
 
 class TestSyncGateLayerI(_StopBase):

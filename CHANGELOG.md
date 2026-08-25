@@ -18,6 +18,137 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.35.0] — 2026-08-25
+
+**A cap should be relative to the thing it caps.** Three limits in this
+plugin were absolute numbers compared against something whose size they never
+looked at. All three are now relative, and one of them made the gate *demand
+the opposite of what it exists to encourage*. Decided by the user;
+[`lib/editscale.py`](hooks/scripts/lib/editscale.py) is a new shared
+judgement model, the fourth beside `srclex` / `mdctx` / `shellcmd`.
+
+### The small-file lock-in (rule 09 frequency layer)
+
+`systematic` meant `>= 1500 chars OR >= 50 lines` — an absolute floor,
+compared against a file whose size `_classify_change` never read. **On any
+file below both floors, no edit can reach it.** A full `Write` of a 30-line,
+900-character module classifies as `medium`, which neither counts nor resets.
+So three small edits locked that file for the rest of the session, and the
+only legal move left was to pad it past 1500 characters:
+
+> a gate against reactive patching, demanding the file be made bigger.
+
+A change now also qualifies as systematic by **spanning ≥ 30% of its target**
+on either axis. The absolute floors are **kept**, which makes the change
+monotone-loosening: nothing systematic before stops being systematic now, so
+no existing behaviour tightens.
+
+The obvious alternative — re-scaling both ends, `max(1500, 30% of file)` —
+was **rejected**, and the reason is the same defect mirrored: it raises the
+floor for large files, where 30% of a 50k-character module is unreachable in
+practice, recreating the identical unrecoverable lock-in at the other end of
+the range. One defect traded for its reflection is not a fix.
+
+Stated rather than hidden, **with the measured number**: this layer goes
+inert only on files of about **five lines or fewer**, where a two-line edit
+already spans a third of the file. From six lines up the absolute small-edit
+definition still binds — a 30-line file still denies its fourth two-line
+patch, its coverage bar being 10 lines. Intended, and written into `rules/09`
+(+ zh), both READMEs' known-limits sections, and the module docstring, rather
+than left for a user to discover.
+
+The first draft of those five surfaces said *"not a claim anyone can make
+about a twenty-line file"* — an estimate, written before the live probe. The
+probe then denied a fourth small edit on a 30-line file, which is the
+sentence's own counterexample, and the number was measured
+(`classify_change` against `file_scale`, 2→30 lines) and swept across all
+five surfaces at once rather than corrected where it was noticed. A release
+about making a limit relative to what it limits does not get to state that
+limit from memory.
+
+### Two shapes that are never counted
+
+| Exempt | Test | Why it cannot be a rolling patch |
+|---|---|---|
+| **Net reduction** | `len(new) < len(old)` | A rolling patch is an *accretion* of small additions. An edit that leaves the file shorter than it found it is the opposite of the behaviour this layer stops. |
+| **Bookkeeping** | Both sides byte-identical once numeric runs are elided, and every moved number holds the **same bookkeeping shape** on both sides | Bumping a version or a date is not a symptom fix. |
+
+The bookkeeping allowlist is **shaped, not "any digit changed"**, and that
+distinction is the whole design: `timeout = 30 → 300` and `if n > 3 → n > 4`
+are *also* small numeric edits, and rule 09 names lengthening a timeout and
+loosening an assertion as forbidden. So in code only version (`1.2.3`) and
+ISO-date (`2026-08-25`) shapes qualify. Bare integers are exempt **only in
+prose documents** — the same non-scannable set rules 10 and 11 already exempt
+— because a document has no timeout to lengthen and no assertion to loosen,
+and updating "617 tests" to "676 tests" across six files is the most common
+legitimate small edit this repository performs.
+
+Both exemptions cover the **frequency layer only**. The content detectors run
+first and are untouched: an edit that deletes fifty lines and plants one
+unjustified `# noqa` is still denied, because suppression has nothing to do
+with which direction the file grew.
+
+### The tldr cap meant two different things in two languages
+
+Layer (h) capped each `tldr` item at 160 **code points**, and the root cause
+was sitting in the constant's own comment, which conceded it in passing:
+
+> the cap is generous on purpose (a full English sentence fits; **a Chinese
+> sentence is far shorter**)
+
+One number, two meanings, on the two halves of a bilingual contract. 160 code
+points is about one English sentence and about two Chinese *paragraphs*, so
+the zh side had been enforcing a bound roughly twice as loose — while the
+entire point of layer (h) is that a TL;DR is **one sentence**.
+
+The cap is now 160 **display columns**: East-Asian Wide and Fullwidth
+characters count 2, combining marks count 0, everything else counts 1.
+Ambiguous-width characters deliberately count 1, because resolving them to 2
+would make the cap depend on the reader's locale and font. A deliberate
+strictness increase for CJK and an exact **no-op for Latin** — no English
+tldr that passed before can fail now — asserted in both directions rather
+than described. The block reason now reports the column count, not a
+code-point count, so a CJK author can reconcile the figure against the cap it
+supposedly exceeded.
+
+### Why `lib/editscale.py` exists
+
+The lock-in survived **twenty-two releases** for a structural reason worth
+naming: the classifier was only ever reachable through a hook payload, and
+every test fixture built its target as the single line `# initial`. Against a
+10-character file every "small" edit spans 90% of it — so the one region of
+the input space where the defect lives was the one region no test could
+enter. A model with a signature can be asked about every region directly,
+which is what `tests/test_editscale.py` now does. The fixture is fixed too,
+with the arithmetic it must satisfy written down so a future shrink fails
+loudly instead of quietly disarming the class.
+
+### Also
+
+- **`hooks/scripts/bench_hooks.py`** (new, sixth auxiliary entry point):
+  per-hook p50/p95/max against a bare-interpreter baseline. The baseline row
+  is the point — roughly half of each figure is Python process startup, which
+  this plugin does not control. Its own share is tens of milliseconds.
+- **Both READMEs restructured** to: name / intro / problem targeted /
+  features and scope / implementation / before-after and output samples /
+  benchmark / design philosophy / limits and roadmap. The benchmark section
+  states plainly that **no CI gate pins those numbers** (they are a property
+  of your machine, not the repo) and that repeated runs on the same laptop
+  varied from 108 ms to 252 ms — a benchmark table invites more trust than it
+  has earned. `README.md`'s "New in v0.32" section, three releases stale, is
+  gone: `CHANGELOG.md` is the only release history.
+- `README.zh.md` said `LLB 编程助手` where it meant `LLM`.
+
+### Verification
+
+- `python -m unittest discover -s tests` → **676 tests, OK** (617 + 59).
+- `python hooks/scripts/i18n_check.py` → clean.
+- The rolling-patch suite went red on all six of its cases mid-release — the
+  new relative branch reclassifying every edit against the one-line fixture —
+  which is the defect demonstrating itself before the fixture was fixed.
+
+---
+
 ## [0.34.1] — 2026-08-19
 
 **Fact-alignment release.** The user asked "is every text in this project —

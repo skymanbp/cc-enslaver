@@ -34,12 +34,12 @@
 | Edit/Write with an unjustified suppression marker — `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` / `time.sleep` workaround | `PreToolUse` DENY | Adjacent why-comment (any language — `because` / `因为` count), or fix the root cause |
 | Edit/Write **code** with an unjustified hardcoded secret (secret-named literal ≥ 8 chars / PEM header / `AKIA…` / `ghp_…` `xox…` `AIza…` / credentials-in-a-URL) | `PreToolUse` DENY (rule 10) | Externalize to env, use a marked placeholder, or add a why-comment |
 | Edit/Write **code** with an unjustified user-specific absolute path (`C:\Users\…` / `/home/<user>/…` / `$HOME` / quoted `~/…`) | `PreToolUse` DENY (rule 11) | Derive at runtime (plugin root / cwd / env / arg), or why-comment. Prose-doc + lockfiles exempt |
-| 4th small Edit (≤ 10 lines AND < 200 chars) to one file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars) between | `PreToolUse` DENY | Combine into one large Edit, or `Write` the whole file, or surface to the user |
+| 4th small Edit (≤ 10 lines AND < 200 chars) to one file this session with no systematic rewrite (≥ 50 lines / ≥ 1500 chars / ≥ 30% of that file) between. **Exempt, always:** a net reduction (`len(new) < len(old)`), or a bookkeeping edit (only version / ISO-date literals differ — bare integers too in prose docs) | `PreToolUse` DENY | Combine into one large Edit, or `Write` the whole file, or surface to the user |
 | Bash with `--no-verify` / `--no-gpg-sign` / `git push --force` (not `--force-with-lease`) / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on root / $HOME / ~ | `PreToolUse(Bash)` DENY | Fix the root cause of the hook failure / force-push / permission / conflict |
 | Stop declaring done but missing evidence / hedged / missing self-quiz / missing fidelity / missing rule-08 marker / missing rule-09 triplet | `Stop` 9-layer BLOCK | Read the status table; fix the FAIL row |
 | Stop claiming `I edited X.py` when the file's mtime is unchanged since you first saw it | `Stop` **layer (g)** BLOCK | Actually do the edit, or retract the claim (`CC_ENFORCER_DISABLE_LAYER_G=1` skips) |
 | Stop with a done-claim but **no `tldr`** at the end (violates §3) | `Stop` **layer (h)** BLOCK | Add `tldr: "<one plain sentence>"` |
-| Stop with a tldr item past **160 chars** (a paragraph, not a TL;DR) | `Stop` **layer (h)** BLOCK | One sentence per item; several things → one short line each |
+| Stop with a tldr item past **160 display columns** (a paragraph, not a TL;DR; CJK counts 2 per char, so ≈ 80 汉字) | `Stop` **layer (h)** BLOCK | One sentence per item; several things → one short line each |
 | Stop on an edit turn where a sync-gate `when` group matched, no `require` file was edited, and the reply has no sync marker | `Stop` **layer (i)** BLOCK (rule 12) | Co-update the require-side files, or add a `同步核对:` / `sync-check:` line saying why they need none. The marker settles only groups already SHOWN to you |
 
 **Grace is per layer, not per sequence.** A block records which layer failed
@@ -88,9 +88,10 @@ cc-enforcer:
 ```
 
 > **`tldr` length contract (hard-enforced):** each item is ONE sentence —
-> cause, action, outcome — within **160 characters**. Several things to
-> report → one item per line (`- "..."`), each within the cap. An overlong
-> item → Stop **layer (h)** BLOCK.
+> cause, action, outcome — within **160 display columns** (v0.35: a CJK
+> character costs 2, so ≈ 80 汉字; ASCII is unchanged at 160). Several
+> things to report → one item per line (`- "..."`), each within the cap.
+> An overlong item → Stop **layer (h)** BLOCK.
 
 ---
 

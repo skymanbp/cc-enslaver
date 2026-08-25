@@ -32,12 +32,12 @@
 | Edit/Write 含未带 why 的屏蔽标记 —— `try/except: pass` / `# noqa` / `# type: ignore` / `@ts-ignore` / `@ts-expect-error` / `eslint-disable` / `time.sleep` 工作绕过 | `PreToolUse(Edit\|Write)` DENY | 紧邻补 why 注释（要写在注释里，中英皆可 —— `because` / `因为` / `essential` 都算），或改成真修根因 |
 | Edit/Write 往**代码**里塞未辩护的硬编码密钥（密钥命名字面量 ≥ 8 字符 / PEM 私钥头 / `AKIA…` / 服务商 token `ghp_…` `xox…` `AIza…` / URL 内凭证）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 10）| 外部化到环境 / 密钥库，用标注过的占位，或紧邻补 why 注释 |
 | Edit/Write 往**代码**里塞未辩护的用户特定绝对路径（`C:\Users\…` / `/home/<user>/…` / `/Users/<user>/…` / `$HOME` / `%USERPROFILE%` / 引号 `~/…`）| `PreToolUse(Edit\|Write)` DENY（v0.22，rule 11）| 运行时派生路径（插件根 / cwd / 环境 / 参数），或紧邻补 why 注释。散文文档 + 锁文件目标豁免 |
-| 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符）介入 | `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
+| 同一文件本会话第 4 次小幅 Edit（≤ 10 行 且 < 200 字符）而无系统式重写（≥ 50 行 / ≥ 1500 字符 / ≥ 该文件的 30%）介入。**永远豁免**：净减少改动（`len(new) < len(old)`）、记账类改动（只有版本号 / ISO 日期变化——散文档里纯整数也算）| `PreToolUse(Edit\|Write)` DENY（v0.13） | 合并多个待办为一次大 Edit，或 `Write` 整体覆写，或停下来 surface |
 | Bash 含 `--no-verify` / `--no-gpg-sign` / `git push --force`（非 `--force-with-lease`）/ `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` 打到根 / $HOME / ~ | `PreToolUse(Bash)` DENY | 找钩子失败 / 强推 / 权限 / 冲突的根因 |
 | Stop 时声称完成但**没**验证证据 / 含 hedge / 缺自答 / 缺忠实 / 缺 rule-08 标记 / 缺 rule-09 三件套 | `Stop` 9 层 BLOCK | 看 block reason 的状态表，修失败那一行 |
 | Stop 时声称 `I edited X.py` / `我修改了 Y.md` 但 X/Y 的 mtime 与本会话首次见到时**完全一致**（claim 被磁盘证伪）| `Stop` **layer (g) v0.16** BLOCK | 真做改动；或者撤回声明；或 `CC_ENFORCER_DISABLE_LAYER_G=1` 跳过 |
 | Stop 时含 done-claim 但**末尾缺 `tldr` / 大白话总结**（违反 v0.20 回复 schema）| `Stop` **layer (h) v0.20** BLOCK | 末尾加一行 `tldr: "<一句大白话>"` |
-| Stop 时 tldr 有单条超过 **160 字符**（那是段落，不是 TL;DR）| `Stop` **layer (h) v0.23** BLOCK | 每条一句话——前因、动作、结果；多条内容 → 逐条一行、每条一句短话 |
+| Stop 时 tldr 有单条超过 **160 显示列**（那是段落，不是 TL;DR；v0.35 起 CJK 每字算 2 列，约 80 汉字；ASCII 仍是 160）| `Stop` **layer (h) v0.23** BLOCK | 每条一句话——前因、动作、结果；多条内容 → 逐条一行、每条一句短话 |
 | Stop 时本轮做了 Edit、sync-gate 某组 `when` 命中而无 `require` 编辑、回复又无同步标记 | `Stop` **layer (i) v0.23** BLOCK（rule 12；仅在有 `.claude/cc-enforcer/sync-gate.toml` 的项目）| 连带改 require 侧文件，或加一行 `同步核对:` 说明为何无需改。**v0.27**：标记只结清**已经展示给你看过**的组，所以某组会先拦一次并点名，下一条回复再答 —— 一组一次知情回答 |
 
 **宽限是按层的，不是按序列的。** 一次 block 会记下失败的是哪一层，
@@ -85,8 +85,9 @@ cc-enforcer:
 ```
 
 > **`tldr` 长度硬约定（v0.23）**：每条 tldr 是**一句话** —— 前因、动作、
-> 结果 —— **不超过 160 字符**。多条内容要汇报 → 逐条一行（`- "..."` 列表），
-> 每条各自是一句短话、各自不超上限。单条超长 → Stop **layer (h)** BLOCK。
+> 结果 —— **不超过 160 显示列**（v0.35：CJK 每字算 2 列，约 80 汉字；ASCII
+> 不变仍是 160）。多条内容要汇报 → 逐条一行（`- "..."` 列表），每条各自是
+> 一句短话、各自不超上限。单条超长 → Stop **layer (h)** BLOCK。
 
 ---
 

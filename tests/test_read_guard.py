@@ -90,6 +90,34 @@ class _GuardTestBase(unittest.TestCase):
             payload["turn_count"] = turn_count
         return run_hook([GUARD], payload, env_overrides=self.env)
 
+    def _pre_edit_with_old_new(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+    ) -> tuple[int, dict | None, str]:
+        """Drive PreToolUse(Edit) with BOTH sides supplied.
+
+        `_pre_edit_with_new_string` sends new_string alone, which was
+        enough while classification only looked at the larger side. From
+        v0.35 the old side decides net-reduction and bookkeeping, so
+        cases about those have to state it.
+        """
+        return run_hook(
+            [GUARD],
+            {
+                "session_id": self.sid,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": file_path,
+                    "old_string": old_string,
+                    "new_string": new_string,
+                },
+            },
+            env_overrides=self.env,
+        )
+
     def _pre_write_with_content(
         self,
         file_path: str,
@@ -616,10 +644,38 @@ class TestRollingPatchInterception(_GuardTestBase):
     systematic boundaries (10 lines / 200 chars, 50 lines / 1500 chars)
     so accidental retuning of the constants doesn't silently degrade
     enforcement.
+
+    v0.35 — the fixture target is now a realistically sized module rather
+    than the one-line `# initial\\n` it was from v0.13 to v0.34. That
+    single line is WHY the small-file lock-in went unnoticed for
+    twenty-two releases: against a 10-character file every one of these
+    "small" edits spans 90% of it, so the relative branch added in v0.35
+    classifies them all as systematic and every assertion below turned
+    over at once. The fixture was never representative — it was small
+    enough that the defect could not appear in it, and large enough
+    nowhere. `_LARGE_ENOUGH` states the arithmetic it has to satisfy so a
+    future shrink fails loudly instead of quietly disarming the class.
     """
 
+    # The fixture must be big enough that the ABSOLUTE bounds are the
+    # binding ones for every payload below, i.e. no payload accidentally
+    # reaches the 30% coverage route:
+    #   small   (9 chars,  2 lines)  needs  chars > 30  and lines >= 7
+    #   medium  (44 chars, 15 lines) needs  chars > 147 and lines > 50
+    # 120 lines of ~30 chars clears both with room to spare.
+    _FIXTURE_LINES = 120
+
+    def _fixture_source(self) -> str:
+        return "".join(
+            f"# fixture line {i:03d} — padding to a realistic module size\n"
+            for i in range(self._FIXTURE_LINES)
+        )
+
     def _small_edit_payload(self, target: str) -> tuple[str, str]:
-        # Both sides are well under (10 lines, 200 chars).
+        # Both sides are well under (10 lines, 200 chars). Equal length on
+        # both sides on purpose: a shorter new_string would be a NET
+        # REDUCTION and exempt from the counter entirely (v0.35), which
+        # would make these threshold assertions vacuous.
         return ("old line\n", "new line\n")
 
     def _systematic_edit_payload(self) -> tuple[str, str]:
@@ -629,7 +685,7 @@ class TestRollingPatchInterception(_GuardTestBase):
 
     def _writable_target(self, name: str = "target.py") -> str:
         target = self.tmpdir / name
-        target.write_text("# initial\n", encoding="utf-8")
+        target.write_text(self._fixture_source(), encoding="utf-8")
         return str(target)
 
     def _do_small_edit(self, target: str):
@@ -819,7 +875,12 @@ class TestRollingPatchInterception(_GuardTestBase):
         )
         rc, out, _ = self._pre_write_with_content(target, "def f(): pass\n")
         self.assertIsNone(out, msg=f"Write-new must allow, got {out!r}")
-        Path(target).write_text("def f(): pass\n", encoding="utf-8")
+        # The recreated file must be fixture-sized, not the 14-char stub
+        # the Write announced: against a stub, the follow-up "small" edit
+        # spans most of the file and classifies as systematic (v0.35), so
+        # the counter would read 0 for a reason unrelated to this
+        # regression and the test would pass without testing anything.
+        Path(target).write_text(self._fixture_source(), encoding="utf-8")
         rc, out, _ = self._do_small_edit(target)
         self.assertIsNone(
             out,
@@ -829,6 +890,151 @@ class TestRollingPatchInterception(_GuardTestBase):
             ),
         )
         self.assertEqual(self._counter(target), 1)
+
+    def test_small_file_can_now_reach_a_reset(self) -> None:
+        # v0.35, the defect this release fixes, end-to-end. A 30-line /
+        # ~900-char module is under BOTH absolute systematic floors, so
+        # before v0.35 no edit to it could ever reset the counter: three
+        # small edits and the file was locked for the session, the only
+        # escape being to pad it past 1500 characters. Rewriting it whole
+        # now spans 100% of it and resets.
+        target = str(self.tmpdir / "small.py")
+        src = "".join(f"# line {i}\n" for i in range(30))
+        self.assertLess(len(src), 1500)
+        Path(target).write_text(src, encoding="utf-8")
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        rewritten = "".join(f"# rewritten {i}\n" for i in range(30))
+        rc, out, _ = self._pre_write_with_content(target, rewritten)
+        self.assertIsNone(out, msg=f"whole-file rewrite must allow, got {out!r}")
+        self.assertEqual(
+            self._counter(target), 0,
+            msg="a full rewrite of a sub-floor file must reset the counter",
+        )
+
+    def test_twin_same_rewrite_on_a_large_file_does_not_reset(self) -> None:
+        # The refusal twin for the test above: an edit of the SAME
+        # absolute size against a large file spans a negligible fraction
+        # of it and must NOT buy a reset, or the coverage route would be
+        # a free counter-clearing trick on every file.
+        target = self._writable_target("large.py")
+        Path(target).write_text(
+            "".join(f"# padding line {i:04d}\n" for i in range(4000)),
+            encoding="utf-8",
+        )
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        small_rewrite = "".join(f"# rewritten {i}\n" for i in range(30))
+        self._pre_edit_with_old_new(target, "# padding line 0000\n", small_rewrite)
+        self.assertEqual(
+            self._counter(target), 3,
+            msg="a 30-line edit to a 4000-line file must not count as a rewrite",
+        )
+
+    def test_net_reduction_is_never_denied_even_at_the_threshold(self) -> None:
+        # User contract (v0.35): "whatever the situation, allow a net
+        # reduction". A rolling patch is an accretion; an edit that leaves
+        # the file shorter cannot be one.
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        rc, out, _ = self._pre_edit_with_old_new(
+            target, "# fixture line 000 — padding\n", "# gone\n",
+        )
+        self.assertIsNone(
+            out, msg=f"net-reducing edit must pass at the threshold, got {out!r}")
+        self.assertEqual(
+            self._counter(target), 3,
+            msg="an exempt edit passes through without touching the counter",
+        )
+
+    def test_twin_same_sized_growth_at_the_threshold_still_denies(self) -> None:
+        # The twin: identical shape, one character LONGER instead of
+        # shorter. Without it, deleting the net-reduction branch would
+        # leave the test above green via some other path.
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        rc, out, _ = self._pre_edit_with_old_new(target, "# gone\n", "# gone!\n")
+        self.assertIsNotNone(out, msg="a net-growing 4th small edit must DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_version_bump_is_exempt_at_the_threshold(self) -> None:
+        # User contract (v0.35): bumping a version number is not a patch.
+        target = self._writable_target("plugin.json")
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        self.assertEqual(self._counter(target), 3)
+        rc, out, _ = self._pre_edit_with_old_new(
+            target, '  "version": "0.34.1",', '  "version": "0.35.0",',
+        )
+        self.assertIsNone(out, msg=f"version bump must pass, got {out!r}")
+        self.assertEqual(self._counter(target), 3)
+
+    def test_twin_timeout_bump_in_code_still_denies(self) -> None:
+        # The twin that keeps the exemption honest: same file type, same
+        # shape, same size — but a bare integer in code, which rule 09
+        # names explicitly ("把 timeout 拉长") as forbidden.
+        target = self._writable_target("settings.py")
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        rc, out, _ = self._pre_edit_with_old_new(
+            target, "TIMEOUT = 30", "TIMEOUT = 300",
+        )
+        self.assertIsNotNone(out, msg="lengthening a timeout must still DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_bare_count_bump_in_a_prose_doc_is_exempt(self) -> None:
+        # The prose half of the rule-10/11 scannable split: a markdown
+        # file has no timeout to lengthen and no assertion to loosen, so
+        # a bare-integer update is bookkeeping there.
+        target = self._writable_target("README.md")
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        rc, out, _ = self._pre_edit_with_old_new(
+            target, "covered by **617 tests**", "covered by **619 tests**",
+        )
+        self.assertIsNone(out, msg=f"doc count update must pass, got {out!r}")
+
+    def test_twin_same_count_bump_in_a_test_file_denies(self) -> None:
+        # Byte-identical edit text, .py target: the exemption is decided
+        # by the file, and a loosened assertion must not ride in on it.
+        target = self._writable_target("test_thing.py")
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        rc, out, _ = self._pre_edit_with_old_new(
+            target, "covered by **617 tests**", "covered by **619 tests**",
+        )
+        self.assertIsNotNone(out, msg="a bare-number edit in code must DENY")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_deny_message_quotes_this_files_own_coverage_bar(self) -> None:
+        # The DENY text must describe the check that actually ran on THIS
+        # file, not a constant from some other one — read_guard renders
+        # the bar through the same coverage_bar() the classifier uses.
+        target = self._writable_target()
+        self._pre("Read", target)
+        for _ in range(3):
+            self._do_small_edit(target)
+        rc, out, _ = self._do_small_edit(target)
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("30% of this file", reason)
+        self.assertIn("net reduction", reason)
+        self.assertIn("bookkeeping", reason)
+        # 120 fixture lines → ceil(0.3 * 121) = 37 (the trailing newline
+        # opens a final empty line, per editscale.line_count).
+        self.assertIn("37 of 121 lines", reason)
 
     def test_state_persists_edits_per_file_field(self) -> None:
         # Quick sanity check that the JSON field name is what other tools

@@ -122,7 +122,7 @@ of files at once. Before running one:
 | Layer | Hook | Trigger | Action |
 |---|---|---|---|
 | **Edit/Write content** | `PreToolUse(Edit\|Write)` | `new_string` contains an unjustified patch marker | **DENY** |
-| **Edit/Write frequency** (v0.13) | `PreToolUse(Edit\|Write)` | same file, 4th "small edit" (≤ 10 lines AND < 200 chars) in one session without a systematic rewrite (≥ 50 lines / ≥ 1500 chars) in between | **DENY** |
+| **Edit/Write frequency** (v0.13) | `PreToolUse(Edit\|Write)` | same file, 4th "small edit" (≤ 10 lines AND < 200 chars) in one session without a systematic rewrite (≥ 50 lines / ≥ 1500 chars / **≥ 30% of the file**) in between. **Never counted** (v0.35): a net reduction, or a bookkeeping edit | **DENY** |
 | **Bash command** | `PreToolUse(Bash)` | `--no-verify` / `--no-gpg-sign` / `chmod 777` / `git rebase --skip` / `--break-system-packages` / `rm -rf` on a root path / `git push --force` (not `--force-with-lease`) | **DENY** (v0.3 bash_guard, extended v0.14; matched against parsed argv since v0.26) |
 | **Closing** | `Stop` layer (f) | this turn did Edit but the final reply lacks "root cause + impact + solution" markers | **BLOCK** |
 
@@ -134,14 +134,55 @@ The guard maintains a per-file small-edit counter at
 | Classification | Bounds | Counter action |
 |---|---|---|
 | **small** | max(\|old\|, \|new\|) < 200 chars **and** max line count ≤ 10 | +1 (if predicted to reach 4 → DENY, **no increment**) |
-| **systematic** | max chars ≥ 1500 **or** max line count ≥ 50 | reset to 0 |
+| **systematic** | max chars ≥ 1500 **or** max line count ≥ 50 **or** the change spans ≥ 30% of the target file, on either axis (v0.35) | reset to 0 |
 | **medium** | between the two | no change |
 
 A predicted reach of the threshold (4) triggers DENY and the counter is **not** incremented. Subsequent small edits to the same file therefore also DENY until a systematic rewrite resets the counter — which is exactly what rule 09 wants: **re-engage with the whole file structure, don't keep patching**.
 
+#### Thresholds are relative to the file (v0.35)
+
+The absolute floors alone made the counter **unrecoverable on small files**.
+A file under 1500 characters and 50 lines admits no edit that can reach
+"systematic" — a full `Write` of a 30-line module classifies as *medium*,
+which neither counts nor resets — so three small edits locked that file for
+the rest of the session, and the only legal move left was to pad it past
+1500 characters. A gate against reactive patching, demanding the file be
+made bigger.
+
+The coverage route is therefore an **additional** way to qualify, never a
+replacement: every change that was systematic before still is. Re-scaling
+both ends instead (`max(1500, 30% of file)`) was rejected because it raises
+the floor for large files and recreates the identical lock-in there.
+
+Consequence, stated rather than hidden, with the measured number: this layer
+goes inert only on files of about **five lines or fewer**, where a two-line
+edit already spans a third of the file. From six lines up the absolute
+small-edit definition still binds — a 30-line file still denies its fourth
+two-line patch, because its coverage bar is 10 lines. That is intended —
+*"you have not re-engaged with the file's overall structure"* is not a claim
+anyone can make about a five-line file.
+
+#### Two shapes are never counted (v0.35)
+
+| Exempt shape | Test | Why it cannot be a rolling patch |
+|---|---|---|
+| **Net reduction** | `len(new) < len(old)` | A rolling patch is an *accretion* of small additions. An edit that leaves the file shorter than it found it is the opposite of the behaviour this layer exists to stop. |
+| **Bookkeeping** | Both sides are byte-identical once numeric runs are elided, and every numeric position that moved holds the **same bookkeeping shape** on both sides — version (`1.2.3`) or ISO date (`2026-08-25`); in prose documents, bare integers too | Bumping a version number or a date is not a symptom fix. |
+
+The bookkeeping allowlist is **shaped, not "any digit"**, precisely because
+`timeout = 30 → 300` and `if n > 3 → n > 4` are also small numeric edits —
+and this rule names lengthening a timeout and loosening an assertion as
+forbidden. Bare integers are exempt only where neither exists: prose
+documents, the same non-scannable set rules 10 and 11 exempt.
+
+Both exemptions apply to **this frequency layer only**. The content
+detectors run first and are untouched: an edit that deletes fifty lines and
+plants one unjustified `# noqa` is still denied, because suppression has
+nothing to do with which direction the file grew.
+
 Recovery paths offered in the DENY message:
-1. Combine the pending small fixes into a single systematic Edit (new_string ≥ 50 lines);
-2. Use `Write` to replace the file wholesale (content ≥ 50 lines);
+1. Combine the pending small fixes into a single systematic Edit (new_string ≥ 50 lines, ≥ 1500 chars, or ≥ 30% of the file);
+2. Use `Write` to replace the file wholesale;
 3. Stop and surface to the user that the file needs a refactor.
 
 ### Edit/Write content layer — patch-marker catalog
@@ -245,7 +286,7 @@ A bare marker without justification = laziness, intercepted.
 - ❌ **Loosening tests**: original asserts `X == 5`, you change to `X > 0` to make it pass.
 - ❌ **Extending timeouts**: original `timeout=5s`, you push to `60s` to mask a performance issue.
 - ❌ **Commenting out failing tests**: deleting / commenting / `@skip` to declare "done".
-- ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation. As of v0.13 this is physically intercepted by the `PreToolUse(Edit|Write)` frequency layer, not just soft discipline.
+- ❌ **Rolling patches**: ≥ 4 small Edits on the same file this session without a single systematic rewrite — reactive accumulation. As of v0.13 this is physically intercepted by the `PreToolUse(Edit|Write)` frequency layer, not just soft discipline. Net reductions and bookkeeping edits are exempt (v0.35) — neither accretes.
 - ❌ **Fix one and leave three TODOs**: "I'll patch the rest later" is not allowed; one pass must cover the full root-cause impact.
 - ❌ **Blind bulk replace**: running a rename / codemod / sed without first surveying the token's real neighbourhoods, without an allowlist, or without a refusal report of what it declined.
 - ❌ **Rewriting history-addressing paths** during a move: a path handed to a fixed git rev must keep the layout that rev actually has.

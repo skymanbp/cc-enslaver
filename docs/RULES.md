@@ -175,9 +175,10 @@
 | [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证；同时尊重规则 07 + 08 |
 | [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 + 08 + 09 |
 | [`../skills/repo-refresh/SKILL.md`](../skills/repo-refresh/SKILL.md) | 规则 12 主动半区：全库陈旧 / 过时 / 冗余 / 错误 / 漂移扫描（v0.23）|
-| [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) | 规则 04 + 08（read-before-edit）+ 规则 09（new_string 补丁标记物理拦截）+ 规则 10 + 11（硬编码 / user-home 路径依赖内容检测）+ 规则 12（edited_files 会话记录，v0.23）|
+| [`../hooks/scripts/read_guard.py`](../hooks/scripts/read_guard.py) | 规则 04 + 08（read-before-edit）+ 规则 09（new_string 补丁标记物理拦截 + rolling-patch **频率**策略）+ 规则 10 + 11（硬编码 / user-home 路径依赖内容检测）+ 规则 12（edited_files 会话记录，v0.23）|
+| [`../hooks/scripts/lib/editscale.py`](../hooks/scripts/lib/editscale.py) | 规则 09 的**规模判定**（v0.35）：small / systematic / medium 分类（含相对目标文件的 30% 覆盖率通道）+ 两个豁免（净减少、记账类）。频率策略留在 read_guard，这里只回答"这次改动相对它所改的东西有多大" |
 | [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py) | 规则 03 + 09（bypass 模式拦截）|
-| [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) + 规则 01+06 layer (g) + TL;DR 收尾约定 layer (h, v0.20；v0.23 加单条 160 字符长度上限) + 规则 12 sync-gate layer (i, v0.23) |
+| [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) | 规则 06 layer (a)(c) + 规则 01 layer (b) + 规则 07 layer (d) + 规则 08 layer (e) + 规则 09 layer (f) + 规则 01+06 layer (g) + TL;DR 收尾约定 layer (h, v0.20；v0.23 加单条长度上限，v0.35 改按 160 **显示列**计) + 规则 12 sync-gate layer (i, v0.23) |
 | [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) | 规则 12 被动半区：`.claude/cc-enforcer/sync-gate.toml` 加载 + 连带组求值（v0.23）；写目标解析（`default_project_path`，确定性）与 glob 匹配（`matches_any`，与门禁共用唯一定义）v0.31 |
 | [`../hooks/scripts/manage_sync_gate.py`](../hooks/scripts/manage_sync_gate.py) + [`../commands/sync-gate.md`](../commands/sync-gate.md) | 规则 12 的**配置编写与体检**（v0.31）：`init / list / check / add / remove / path`。`check` 是关键——加载器 failing-open，被丢弃的组与打不中文件的 glob 都不会报错，只会静默停止守护；`check` 把两者点名并以退出码 1 结束，可进 CI（本仓库自 v0.32 起对自己的配置断言它） |
 

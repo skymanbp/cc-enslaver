@@ -1,12 +1,12 @@
 # cc-enforcer
 
 > **Rules your coding agent physically cannot ignore.**
-> A Claude Code plugin (and LLM-agnostic rule pack) that stops reactive patches,
-> guessed citations, surface-level "fixes", and premature "done" claims — by
-> intercepting the agent's own tool calls, not by asking it nicely.
+> A Claude Code plugin — and an LLM-agnostic rule pack — that stops reactive
+> patching, guessed citations, surface-level "fixes" and premature "done" claims
+> by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.34.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.35.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -14,51 +14,31 @@
 
 ---
 
-## The 30-second version
+## 1 · What it is
 
-Every "be rigorous" instruction you put in a prompt has the same flaw: the model
-decides whether to follow it. Under pressure — a long session, a compacted
+Every "be rigorous" instruction you put in a prompt shares one flaw: **the model
+decides whether to follow it.** Under pressure — a long session, a compacted
 context, a failing test at 2am — it decides not to, and tells you it did.
 
 cc-enforcer moves the important half of that contract **out of the prompt and
 into the harness**. Claude Code hooks run *before* each tool call and *before*
 each reply is allowed to end. A violation returns a real `deny` / `block`
-verdict, so the agent cannot reason, apologise, or "just this once" its way
-past it:
+verdict, so the agent cannot reason, apologise, or "just this once" its way past
+it.
 
-```text
-cc-enforcer · rule 09 violation (rolling-patch interception)
-
-Tool: Edit
-Target: hooks/scripts/stop_guard.py
-Rolling-patch counter: 3 small edit(s) already applied this session;
-this would be attempt #4 — at or above the threshold of 4.
-
-To proceed, do one of:
-  (1) Systematic rewrite: combine your pending small fixes into a single
-      Edit of ≥ 50 lines / ≥ 1500 chars. Resets the counter.
-  (2) Batch multiple typo-class fixes into one larger Edit.
-  (3) Stop and surface: tell the user this file needs a rewrite.
-```
-
-That message is not advice printed after the fact. The edit **did not happen**.
-
-Three things follow from that design:
-
-| | |
-|---|---|
-| **It survives compaction** | Rules are re-injected every turn, and the hard layers live in code that does not depend on the model remembering anything. |
-| **It cannot be self-whitelisted** | Built-in guards run *before* user rules, and the read-registration escape hatch is SHA-256 verified against disk — an agent that never opened a file cannot produce its digest. |
-| **It fails open, never closed** | Any exception inside a guard logs to stderr and *allows* the call. A bug in the discipline can never brick your agent. |
+Twelve rules. Eight of them backed by a hook. Zero dependencies, standard
+library only, and every guard fails **open** — a bug in the discipline can never
+brick your agent.
 
 ---
 
-## What problem it solves
+## 2 · The problem it targets
 
-LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider…) fall into
-predictable lazy patterns:
+LLM coding agents (Claude Code, Cursor, Copilot, Cline, Aider…) fail in
+predictable, nameable ways. Each row is a behaviour this plugin was built to
+make impossible rather than discouraged:
 
-| Lazy pattern | What it looks like | Answer |
+| Lazy pattern | What it looks like in practice | Answer |
 |---|---|---|
 | **Reactive patching** | Sees a bug, wraps it in `try/except`, declares done. | rule 03 + 09, `PreToolUse` DENY |
 | **Guessed citations** | Cites files, line numbers or APIs that do not exist. | rule 01 + 05, Stop layer (b)/(g) |
@@ -67,12 +47,157 @@ predictable lazy patterns:
 | **Root-cause bypass** | `sleep` for races, `--no-verify` for hooks, swallowed exceptions. | rule 03, `PreToolUse(Bash)` DENY |
 | **Half-finished work** | Stops at "should work", leaves TODOs, skips the whole flow. | rule 07, Stop layer (d) |
 | **Premature done-claim** | "Fixed" without re-running the failing case or comparing evidence. | rule 06, Stop layers (a)/(c) |
+| **Stale references** | Changes a symbol; leaves its docs, tests and translations behind. | rule 12, Stop layer (i) |
+
+**Effect goal:** an agent that either does the disciplined thing or *visibly
+fails to* — never one that quietly skips a step and reports success.
 
 ---
 
-## Install
+## 3 · Features and scope
 
-### As a Claude Code plugin (recommended)
+### Feature 1 — Twelve rules as a portable contract
+
+The reasoning contract, as plain Markdown in [`rules/`](rules/). Roughly half
+are backed by a hook; the rest are text-level discipline the Stop gate grades
+indirectly.
+
+| # | Rule | What it demands | Enforcement |
+|---|---|---|---|
+| 01 | **Verify, don't guess** | Every claim about a file, API, version, error or citation is checked *in the same turn* it is written. "I don't know" beats a confident wrong answer. | soft + Stop (b)(g) |
+| 02 | **Systematic, not reactive** | Answer seven questions before editing: architecture, responsibility, root cause, plan, ripple, risk, global validity. | soft (graded by (e)) |
+| 03 | **Root cause, not symptom** | Climb the causal chain — symptom site → propagation path → **origin** — until the answer is a mechanism. Stopping early is legal only if you name the true origin and say why. | **Bash DENY** + soft |
+| 04 | **Read fully, not keywords** | Grep locates; understanding requires the whole file plus its callers. | **Edit/Write DENY** |
+| 05 | **Cite traceable sources** | `file:line` for code, URL/DOI for literature, command + output for runtime claims. | soft |
+| 06 | **Verify convergence** | Re-trigger the original symptom, exercise boundary and negative cases, run existing tests, answer four self-quiz questions. **Check 2b:** "no regression" must be a per-item set diff, never a matching total. | **Stop (a)(c)** |
+| 07 | **Task fidelity** | Decompose the user's request into checkable sub-items; every modifier word they used ("all", "strict", "mandatory") must land as a hard action, not a doc line. | **Stop (d)** |
+| 08 | **Read before edit, think before write** | Full read going in; root cause / architecture / impact stated coming out. | **DENY + Stop (e)** |
+| 09 | **Systematic modification** | One root cause, one unified fix — sweep the whole class, never N patches. Suppression markers need an adjacent *why*. | **DENY ×2 + Stop (f)** |
+| 10 | **No non-essential hardcoding** | Secrets, tokens, private keys and credentials-in-URLs never become source literals. | **Edit/Write DENY** |
+| 11 | **No non-essential path dependency** | No `C:\Users\…` / `/home/you/` / `$HOME` baked into code; derive paths at runtime. | **Edit/Write DENY** |
+| 12 | **Repo-wide sync** | An edit is done only when every reference to it — docs, tests, downstream code, translations — is co-updated or explicitly verified current. | **Stop (i)**, opt-in |
+
+Full text: [`rules/`](rules/) · index: [`docs/RULES.md`](docs/RULES.md)
+
+### Feature 2 — Hard gates at the tool boundary (`PreToolUse` → DENY)
+
+These refuse the call outright. Every one ships a named escape hatch, so they
+are bypassable **by saying why**, never by accident.
+
+| Gate | Triggers on | Escape hatch |
+|---|---|---|
+| **Read-before-edit** | Editing a file that exists on disk but was never opened this session. | Read it; or register a SHA-256-verified read. |
+| **Suppression markers** | `# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `time.sleep(…)` workarounds. | Adjacent why-comment (English *or* Chinese), or fix the cause. |
+| **Bare `try/except: pass`** | An exception handler whose body is just `pass` — detected across lines, comments in between included. | Same why-comment hatch. |
+| **Hardcoded secrets** | Secret-named literal, PEM private-key header, `AKIA…`, `ghp_…` / `xox…` / `AIza…`, `user:pass@host` URLs. | Env var, marked placeholder, or why-comment. |
+| **Machine-specific paths** | `C:\Users\…`, `/home/<user>/`, `/Users/<user>/`, `$HOME`, `%USERPROFILE%`, quoted `~/…`. | Derive at runtime, or why-comment. Prose docs and lockfiles exempt. |
+| **Rolling patches** | The 4th small edit (< 200 chars **and** ≤ 10 lines) to one file with no systematic rewrite in between. | One rewrite of ≥ 50 lines / ≥ 1500 chars / **≥ 30% of that file**. Net reductions and version bumps are never counted at all — see §5. |
+| **Dangerous shell** | `--no-verify`, `--no-gpg-sign`, `git push --force` (not `--force-with-lease`), `chmod 777`, `git rebase --skip`, `--break-system-packages`, `rm -rf` on `/` `$HOME` `~`. | Fix the hook failure / permission / conflict instead. |
+| **Your own edicts** | Any regex you registered as a `must` edict. | Only you can relax it. |
+
+### Feature 3 — The done-claim gate (`Stop` → BLOCK, nine layers)
+
+The Stop hook reads the reply the agent is about to finish with. If it contains
+a completion claim, nine layers grade it. Layers (e)(f)(g)(i) apply only to
+turns that actually edited a file.
+
+| Layer | Rule | Blocks when the reply… |
+|---|---|---|
+| (a) | 06 | claims done with **no evidence** — no command, no output, no counts. |
+| (b) | 01 | pairs a done-claim with a **hedge** ("should be fine", "probably", "应该"). |
+| (c) | 06 | shows evidence but never answers the **four convergence questions**. |
+| (d) | 07 | passes convergence but never reconciles against the **user's original request**. |
+| (e) | 08 | edited a file without surfacing ≥ 3 of root cause / architecture / solution / impact / risk. |
+| (f) | 09 | edited a file without the **root cause + impact + solution** triplet. |
+| (g) | 01+06 | says "I edited X" while X's **mtime on disk is unchanged**. |
+| (h) | — | has **no `tldr`**, or a `tldr` item longer than 160 display columns. |
+| (i) | 12 | tripped a project **sync-gate** group with no co-update and no `sync-check:` line. |
+
+**Grace is per layer** (v0.29): the layer that just blocked is forgiven on the
+next attempt — you can never be blocked twice for the same row — but a
+*different* layer you are still violating will still fire. Escalation is bounded
+by the layer count, and any clean reply resets it.
+
+### Feature 4 — Imperial Edicts (圣旨): your own hard rules
+
+Most "custom rules" features are just more text in a prompt. Here your rule
+becomes a regex a hook matches against the literal content of every Edit, Write
+and Bash call before it lands:
+
+```bash
+/cc-enforcer:edict add E01 "no mongoose, use prisma" --must \
+    --deny-edit 'from ["'"'"']mongoose["'"'"']' \
+    --deny-bash 'npm\s+(i|install)\s+mongoose'
+```
+
+- **Two severities, mechanically different.** `must` + a regex → `PreToolUse`
+  DENY naming the edict id. `should` → reminder text only, never denies.
+- **Two scopes.** `.claude/cc-enforcer/edicts.toml` (project — commit it so the
+  team shares the red line) or `~/.claude/cc-enforcer/edicts.toml` (`--global`).
+- **Hot-reloaded** — the loader re-reads on every hook event, so you can iterate
+  on a regex mid-session.
+- **Re-injected every turn**, so compaction cannot quietly drop your rules.
+- **Ordered after the built-ins by design**: an edict can add restrictions,
+  never subtract them.
+- **Fails safe, not quiet**: an unparseable severity falls back to `must`, and a
+  malformed edict drops itself with a stderr diagnostic instead of blocking work.
+
+Details: [`docs/EDICTS.md`](docs/EDICTS.md)
+
+### Feature 5 — What you invoke yourself
+
+**6 slash commands**, one subagent, two auto-triggered skills:
+
+| Surface | What it does |
+|---|---|
+| `/cc-enforcer:checklist` | Prints the **8-section checklist** (pre-edit → post-edit → convergence → fidelity → read/think → systematic → TL;DR → repo sync). Its patch-marker item is a *closed set* synchronised with the hook's real constant, so you cannot tick every box and still get denied. |
+| `/cc-enforcer:verify` | Turns the agent's last reply into untrusted input: extracts every factual claim, buckets it (code location / behaviour / external / run result) and prescribes a re-verification method per bucket. Recall is explicitly not allowed. |
+| `/cc-enforcer:edict` | `list / add / remove / reload / path` for Imperial Edicts (`--global` for personal scope). |
+| `/cc-enforcer:gc` | Lists — or with `--apply`, deletes — session-state files older than N days. Dry-run by default, and the command file forbids the agent from choosing `--apply` for you. |
+| `/cc-enforcer:i18n` | Checks every translation still matches the English skeleton file-for-file and heading-for-heading. |
+| `/cc-enforcer:sync-gate` | `init / list / check / add / remove / path` for this project's rule-12 co-update groups. **`check` is the point**: the gate's loader is failing-open, so a dropped group or a glob that matches no file makes it stop guarding *silently*. `check` names both and exits 1, so it works in CI. |
+| **`verifier` subagent** | A deliberately crippled read-only checker (Read/Grep/Glob only — a permission fact, not an instruction). Returns *intact / drift / missing / mismatch / unverifiable* per claim. It cannot become the fixer, so it has no incentive to quietly patch a discrepancy. |
+| **`systematic-debug` skill** | Auto-triggers on bug-fix language and takes over the workflow: build a fast deterministic reproduction loop **first**, then hypothesise. "A 30-second intermittent flaky loop is barely better than no loop; a 2-second deterministic loop is a debugging superpower." |
+| **`repo-refresh` skill** | Auto-triggers on repo-audit language: sweeps code *and* prose together for stale / outdated / redundant / wrong / drifted content, then asks you to convert whatever coupling it found into a sync-gate group. |
+
+### Out of scope — deliberately
+
+- It does not review your code for correctness. It reviews the agent's *process*.
+- It does not replace a linter, type checker or test suite; it stops the agent
+  from silencing them.
+- It does not sandbox anything. See §9.
+
+---
+
+## 4 · How it is implemented
+
+| Event | Matcher | Behaviour | Implementation |
+|---|---|---|---|
+| `SessionStart` | — | Inject the 12-rule discipline summary + reply schema + Imperial Edicts (English by default, any language via `CC_ENFORCER_LANG`). | [`inject_context.py`](hooks/scripts/inject_context.py) |
+| `UserPromptSubmit` | — | Re-inject per-turn decision triggers + edicts — the defence against context compaction. | [`inject_context.py`](hooks/scripts/inject_context.py) |
+| `PreToolUse` | `Read\|Edit\|Write` | Record reads, capture mtime baselines, run the content + frequency + edict gates. | [`read_guard.py`](hooks/scripts/read_guard.py) |
+| `PreToolUse` | `Bash` | Tokenise the command, deny bypass flags and destructive operations, process read registrations, scan edicts. | [`bash_guard.py`](hooks/scripts/bash_guard.py) |
+| `Stop` | — | The nine-layer done-claim decision, rendered as a status table + recovery + plain-language line. | [`stop_guard.py`](hooks/scripts/stop_guard.py) |
+
+Both injections are budgeted against Claude Code's 10,000-character hook-output
+cap: the contract is protected and the (unbounded) edict list is what yields,
+elided at whole-edict boundaries with a pointer — because half an edict still
+reads as a complete instruction.
+
+Ten scripts under [`hooks/scripts/`](hooks/scripts/) sit on ten shared
+[`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
+registered as hooks; the other six (`register_read.py`, `manage_edicts.py`,
+`manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`, `bench_hooks.py`) back
+the escape hatch, the slash commands, CI and the benchmark. They deliberately
+stay in the same directory rather than moving to a `tools/` tree: `gc_state.py`
+is imported by `inject_context.py` for auto-GC and `register_read.py`'s real
+logic lives inside `bash_guard.py`, so neither is a standalone CLI, and
+separating them would buy a tidier directory name with a cross-tree `sys.path`
+splice. Full contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
+
+### Install
+
+#### As a Claude Code plugin (recommended)
 
 The repo ships `.claude-plugin/marketplace.json`, so it registers as a
 single-plugin marketplace:
@@ -94,11 +219,10 @@ Commands then surface as `/cc-enforcer:checklist`, `/cc-enforcer:verify`, …
 > **Requirements:** Python on PATH (tested on 3.13). Hook scripts use the
 > standard library only — no pip step, no third-party packages.
 
-### As a rule pack for any other LLM
+#### As a rule pack for any other LLM
 
-You do not need Claude Code. The rules are plain Markdown in [`rules/`](rules/)
-(English is the source of truth; [`rules/zh/`](rules/zh/) is the Chinese
-translation):
+You do not need Claude Code. The rules are plain Markdown (English is the source
+of truth; [`rules/zh/`](rules/zh/) is the Chinese translation):
 
 ```bash
 cat rules/*.md    > cc-enforcer.txt     # English skeleton
@@ -112,125 +236,155 @@ discipline. Integration patterns for OpenAI / Gemini / local models are in the
 
 ---
 
-## What it enforces
+## 5 · What it actually looks like
 
-Five categories, in order of how hard they bite.
+### Before / after: the rolling-patch interception
 
-### 1 · The 12 rules
+**Before** — the agent nudges the same file four times, never re-reading it:
 
-The reasoning contract. Roughly half are backed by a hook; the rest are
-text-level discipline the Stop gate grades indirectly.
-
-| # | Rule | What it demands | Enforcement |
-|---|---|---|---|
-| 01 | **Verify, don't guess** | Every claim about a file, API, version, error or citation is checked *in the same turn* it is written. "I don't know" beats a confident wrong answer. | soft + Stop (b)(g) |
-| 02 | **Systematic, not reactive** | Answer seven questions before editing: architecture, responsibility, root cause, plan, ripple, risk, global validity. Ships a worked example, not an exhortation. | soft (graded by (e)) |
-| 03 | **Root cause, not symptom** | Climb the causal chain — symptom site → propagation path → **origin** — until the answer is a mechanism. Stopping early is legal only if you name the true origin and say why. | **Bash DENY** + soft |
-| 04 | **Read fully, not keywords** | Grep locates; understanding requires the whole file plus its callers. | **Edit/Write DENY** |
-| 05 | **Cite traceable sources** | `file:line` for code, URL/DOI for literature, command + output for runtime claims. | soft |
-| 06 | **Verify convergence** | Re-trigger the original symptom, exercise boundary and negative cases, run existing tests, answer four self-quiz questions. **Check 2b:** "no regression" must be a per-item set diff, never a matching total. | **Stop (a)(c)** |
-| 07 | **Task fidelity** | Decompose the user's request into checkable sub-items; every modifier word they used ("all", "strict", "mandatory") must land as a hard action, not a doc line. | **Stop (d)** |
-| 08 | **Read before edit, think before write** | Full read going in; root cause / architecture / impact stated coming out. | **DENY + Stop (e)** |
-| 09 | **Systematic modification** | One root cause, one unified fix — sweep the whole class, never N patches. Suppression markers need an adjacent *why*. | **DENY ×2 + Stop (f)** |
-| 10 | **No non-essential hardcoding** | Secrets, tokens, private keys and credentials-in-URLs never become source literals. | **Edit/Write DENY** |
-| 11 | **No non-essential path dependency** | No `C:\Users\…` / `/home/you/` / `$HOME` baked into code; derive paths at runtime. | **Edit/Write DENY** |
-| 12 | **Repo-wide sync** | An edit is done only when every reference to it — docs, tests, downstream code, translations — is co-updated or explicitly verified current. | **Stop (i)**, opt-in |
-
-Full text: [`rules/`](rules/) · index: [`docs/RULES.md`](docs/RULES.md)
-
-### 2 · Hard gates at the tool boundary (`PreToolUse` → DENY)
-
-These refuse the call outright. Every one ships a named escape hatch, so they
-are bypassable **by saying why**, never by accident.
-
-| Gate | Triggers on | Escape hatch |
-|---|---|---|
-| **Read-before-edit** | Editing a file that exists on disk but was never opened this session. | Read it; or register a SHA-256-verified read. |
-| **Suppression markers** | `# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `time.sleep(…)` workarounds. | Adjacent why-comment (English *or* Chinese), or fix the cause. |
-| **Bare `try/except: pass`** | An exception handler whose body is just `pass` — detected across lines, comments in between included. | Same why-comment hatch. |
-| **Hardcoded secrets** | Secret-named literal, PEM private-key header, `AKIA…`, `ghp_…` / `xox…` / `AIza…`, `user:pass@host` URLs. | Env var, marked placeholder, or why-comment. |
-| **Machine-specific paths** | `C:\Users\…`, `/home/<user>/`, `/Users/<user>/`, `$HOME`, `%USERPROFILE%`, quoted `~/…`. | Derive at runtime, or why-comment. Prose docs and lockfiles exempt. |
-| **Rolling patches** | The 4th small edit (< 200 chars **and** ≤ 10 lines) to one file with no systematic rewrite in between. | One rewrite of ≥ 50 lines / ≥ 1500 chars resets the counter. |
-| **Dangerous shell** | `--no-verify`, `--no-gpg-sign`, `git push --force` (not `--force-with-lease`), `chmod 777`, `git rebase --skip`, `--break-system-packages`, `rm -rf` on `/` `$HOME` `~`. | Fix the hook failure / permission / conflict instead. |
-| **Your own edicts** | Any regex you registered as a `must` edict. | Only you can relax it. |
-
-### 3 · The done-claim gate (`Stop` → BLOCK, nine layers)
-
-The Stop hook reads the reply the agent is about to finish with. If it contains
-a completion claim, nine layers grade it. Layers (e)(f)(g)(i) apply only to
-turns that actually edited a file.
-
-| Layer | Rule | Blocks when the reply… |
-|---|---|---|
-| (a) | 06 | claims done with **no evidence** — no command, no output, no counts. |
-| (b) | 01 | pairs a done-claim with a **hedge** ("should be fine", "probably", "应该"). |
-| (c) | 06 | shows evidence but never answers the **four convergence questions**. |
-| (d) | 07 | passes convergence but never reconciles against the **user's original request**. |
-| (e) | 08 | edited a file without surfacing ≥ 3 of root cause / architecture / solution / impact / risk. |
-| (f) | 09 | edited a file without the **root cause + impact + solution** triplet. |
-| (g) | 01+06 | says "I edited X" while X's **mtime on disk is unchanged**. |
-| (h) | — | has **no `tldr`**, or a `tldr` item longer than 160 characters. |
-| (i) | 12 | tripped a project **sync-gate** group with no co-update and no `sync-check:` line. |
-
-A block renders as a uniform status table naming the failing row, a
-`[Recovery — …]` section with concrete fix steps, and a one-line plain-language
-summary. **Grace is per layer** (v0.29): the layer that just blocked is forgiven
-on the next attempt — you can never be blocked twice for the same row — but a
-*different* layer you are still violating will still fire. Escalation is bounded
-by the layer count and any clean reply resets it.
-
-The table reports **evaluation** order, not the alphabet (v0.30). (b) runs first,
-because a hedge invalidates a done-claim however much evidence sits beside it, so
-a layer-(a) block shows "(b) ✅ Pass" and a layer-(b) block shows "(a) ⏸ pending".
-Until v0.30 both verdicts came from the display index, so a hedge block printed
-"(a) ✅ Pass" — asserting evidence had been found on a turn where the evidence
-check never ran. A gate built to catch unfounded claims does not get to make one.
-
-### 4 · Imperial Edicts (圣旨) — your own hard rules
-
-Most "custom rules" features are just more text in a prompt. Here your rule
-becomes a regex a hook matches against the literal content of every Edit, Write
-and Bash call before it lands:
-
-```bash
-/cc-enforcer:edict add E01 "no mongoose, use prisma" --must \
-    --deny-edit 'from ["'"'"']mongoose["'"'"']' \
-    --deny-bash 'npm\s+(i|install)\s+mongoose'
+```text
+Edit  auth.py   "except:" → "except Exception:"        ✔ applied
+Edit  auth.py   add `if token is None: return`          ✔ applied
+Edit  auth.py   change 401 → 403                        ✔ applied
+Edit  auth.py   wrap refresh() in try/except            ✔ applied
+> "Fixed the auth bug."
 ```
 
-- **Two severities, mechanically different.** `must` + a regex → `PreToolUse`
-  DENY naming the edict id. `should` → reminder text only, never denies.
-- **Two scopes.** `.claude/cc-enforcer/edicts.toml` (project, commit it so the
-  team shares the red line) or `~/.claude/cc-enforcer/edicts.toml` (`--global`).
-- **Hot-reloaded** — the loader re-reads on every hook event, so you can iterate
-  on a regex mid-session.
-- **Re-injected every turn**, so compaction cannot quietly drop your rules.
-- **Ordered after the built-ins by design**: an edict can add restrictions,
-  never subtract them.
-- **Fails safe, not quiet**: an unparseable severity falls back to `must`, and a
-  malformed edict drops itself with a stderr diagnostic instead of blocking work.
+**After** — the fourth edit never lands:
 
-Details: [`docs/EDICTS.md`](docs/EDICTS.md)
+```text
+cc-enforcer · rule 09 violation (rolling-patch interception)
 
-### 5 · What you invoke yourself
+Tool: Edit
+Target: auth.py
+Rolling-patch counter: 3 small edit(s) already applied this session;
+this would be attempt #4 — at or above the threshold of 4.
 
-**6 slash commands**, one subagent, two auto-triggered skills:
+Classification used here:
+  small      = max(|old_string|, |new_string|) < 200 chars
+               AND max line count ≤ 10
+  systematic = max chars ≥ 1500 OR max line count ≥ 50
+               OR the change spans ≥ 30% of this file — here,
+               37 of 121 lines or 1104 of 3672 chars
+               (resets the counter to 0)
 
-| Surface | What it does |
-|---|---|
-| `/cc-enforcer:checklist` | Prints the **8-section checklist** (pre-edit → post-edit → convergence → fidelity → read/think → systematic → TL;DR → repo sync). Its patch-marker item is a *closed set* synchronised with the hook's real constant, so you cannot tick every box and still get denied. |
-| `/cc-enforcer:verify` | Turns the agent's last reply into untrusted input: extracts every factual claim, buckets it (code location / behaviour / external / run result) and prescribes a re-verification method per bucket. Recall is explicitly not allowed. |
-| `/cc-enforcer:edict` | `list / add / remove / reload / path` for Imperial Edicts (`--global` for personal scope). |
-| `/cc-enforcer:gc` | Lists — or with `--apply`, deletes — session-state files older than N days. Dry-run by default, and the command file forbids the agent from choosing `--apply` for you. |
-| `/cc-enforcer:i18n` | Checks every translation still matches the English skeleton file-for-file and heading-for-heading. |
-| `/cc-enforcer:sync-gate` | `init / list / check / add / remove / path` for this project's rule-12 co-update groups. **`check` is the point**: the gate's loader is failing-open, so a dropped group or a glob that matches no file makes it stop guarding *silently* — an unenforced gate you still trust is worse than none. `check` names both and exits 1, so it works in CI. |
-| **`verifier` subagent** | A deliberately crippled read-only checker (Read/Grep/Glob only — a permission fact, not an instruction). Returns *intact / drift / missing / mismatch / unverifiable* per claim. It cannot become the fixer, so it has no incentive to quietly patch a discrepancy. |
-| **`systematic-debug` skill** | Auto-triggers on bug-fix language and takes over the workflow: build a fast deterministic reproduction loop **first**, then hypothesise. "A 30-second intermittent flaky loop is barely better than no loop; a 2-second deterministic loop is a debugging superpower." |
-| **`repo-refresh` skill** | Auto-triggers on repo-audit language: sweeps code *and* prose together for stale / outdated / redundant / wrong / drifted content, then asks you to convert whatever coupling it found into a sync-gate group. |
+Never counted, at any counter value (v0.35):
+  net reduction — new_string is SHORTER than old_string.
+  bookkeeping   — only version / ISO-date literals differ.
+```
+
+That message is not advice printed after the fact. **The edit did not happen.**
+
+### Before / after: the done-claim gate
+
+**Before** — a plausible-looking sign-off:
+
+> Fixed the race condition in the worker pool. Should be stable now.
+
+**After** — the turn cannot end:
+
+```text
+cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim]
+
+| Layer | Rule | Status      | Note                              |
+|-------|------|-------------|-----------------------------------|
+| (a)   | 06   | ⏸  pending  | (not evaluated)                   |
+| (b)   | 01   | ❌ **FAIL** | hedge near done-claim             |
+| (c)   | 06   | ⏸  pending  | (not evaluated)                   |
+…
+Done-claim matched: 'Fixed'
+Hedge matched: 'Should be'
+
+[Recovery — rule 01 + hedge]
+Pick one:
+  • Drop the hedge and state the result with concrete output, or
+  • Drop the done-claim and say explicitly "not yet verified".
+
+大白话: 你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。
+```
+
+Note the status table reports **evaluation** order, not the alphabet (v0.30).
+(b) runs first, because a hedge invalidates a done-claim however much evidence
+sits beside it — so a layer-(b) block shows "(a) ⏸ pending", not "(a) ✅ Pass".
+Until v0.30 both verdicts came from the display index, so a hedge block printed
+"(a) ✅ Pass" — asserting evidence had been found on a turn where the evidence
+check never ran. **A gate built to catch unfounded claims does not get to make
+one.**
+
+### Output sample: the reply schema it enforces
+
+Every done-claim reply must end with this block. The field names *are* the Stop
+hook's detection markers:
+
+```yaml
+cc-enforcer:
+  before: {architecture: ..., root cause: ..., solution: ...}
+  edits: [{file: "path:line", what: "..."}]
+  convergence:
+    re-trigger: "$ python -m unittest → Ran 676 tests, OK"
+    boundary case: ...
+    existing tests: ...
+    self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
+  fidelity: {request coverage: [...], standard: ..., no degradation: ...}
+  closing: {root cause: ..., impact: ..., solution: ...}
+  sync-check: <co-files updated, or why none needed>
+  tldr: "<one plain sentence>"
+```
 
 ---
 
-## Why this isn't a prompt file — or a linter
+## 6 · Benchmark
+
+Every hook is a separate OS process that Claude Code spawns and waits for, so
+the plugin's latency sits directly in the critical path of the agent's tool
+calls. Reproduce with:
+
+```bash
+python hooks/scripts/bench_hooks.py --runs 60
+```
+
+Measured on Windows 11, Python 3.13.3, 60 runs each after 3 discarded warm-ups:
+
+| Scenario | p50 | p95 | max | cc-enforcer's own share |
+|---|---:|---:|---:|---:|
+| `PreToolUse(Read)` | 108.2 ms | 152.5 ms | 176.3 ms | **+52.5 ms** |
+| `PreToolUse(Edit)` | 115.4 ms | 148.5 ms | 160.6 ms | **+59.7 ms** |
+| `PreToolUse(Bash)` | 137.1 ms | 162.9 ms | 173.3 ms | **+81.4 ms** |
+| `Stop` (all nine layers) | 137.2 ms | 161.2 ms | 176.1 ms | **+81.5 ms** |
+| *baseline:* `python -c pass` | 55.7 ms | 63.6 ms | 69.5 ms | — |
+
+**The baseline row is the point.** Roughly half of every figure is the Python
+interpreter starting up, which cc-enforcer does not control and which is
+markedly slower on Windows than on Linux. The plugin's own work — lexing the
+source, parsing the shell command, grading nine Stop layers — is the *own share*
+column: **tens of milliseconds**, against an LLM turn measured in seconds.
+
+**Honesty about these numbers**, since a benchmark table invites more trust than
+it has earned:
+
+- They are **one machine under normal desktop load**, not a controlled
+  environment. Repeated runs on this same laptop produced p50s from 108 ms to
+  252 ms for the same scenario; the table above is a quiet run.
+- **Nothing in CI pins them.** Every other number in this README is derived from
+  the code by a drift gate (§8); latency cannot be, because it is a property of
+  your machine, not of the repo. The script is the citation — run it yourself.
+- The `own share` column is a subtraction of two medians, not a measured
+  isolate. Treat it as an order of magnitude, not a figure.
+
+### Accuracy posture
+
+There is no precision/recall table here, and that absence is deliberate. The
+detectors are tuned to **prefer false negatives** (`宁可漏报不误报`): a missed
+violation costs one lazy edit, while a false alarm costs a turn and teaches the
+user to distrust the gate. Where a detector's reach is known to stop short, the
+limit is written into the rule file and pinned by a test asserting the
+*non*-detection, so it cannot quietly drift into an implied guarantee — see
+`_SYNC_NON_ANSWERS` for the canonical example, which documents that
+`sync-check: checked it` is just as empty as `sync-check: n/a` and still passes.
+
+---
+
+## 7 · Why this isn't a prompt file — or a linter
 
 The interesting engineering is in the detectors, and most of it exists because
 the naive version demonstrably failed:
@@ -247,6 +401,14 @@ the naive version demonstrably failed:
   `rm -f build.log && git push origin main` never attributes `-f` to the push,
   `$(git push --force)` is still denied, and `echo git commit --no-verify` is
   correctly *allowed*.
+- **Edit size is measured against the file, not a constant.**
+  [`lib/editscale.py`](hooks/scripts/lib/editscale.py) asks how much of the
+  target a change actually spans. The absolute floors alone made the
+  rolling-patch counter unrecoverable on small files: a full rewrite of a
+  30-line module classified as "medium", which neither counts nor resets, so
+  three small edits locked that file for the session — and the only legal escape
+  was to *pad the file past 1500 characters*. A gate against reactive patching,
+  demanding the file be made bigger.
 - **Markers end at real token boundaries.** `\b` treats a hyphen as a boundary,
   so a naive matcher denied `@ts-ignore-generated` and `# noquality`. The
   detectors use `(?![\w-])`.
@@ -262,43 +424,64 @@ the naive version demonstrably failed:
   cross-process advisory lock and save atomically — measured before the fix:
   2–3 of 10 recorded reads lost at 10-way parallelism, and 192/200 saves lost to
   Windows `os.replace`-vs-open-reader collisions.
-- **The repo is held to its own rules.** Three CI gates make documentation claims
-  un-drift-able: a version gate (every version pointer, the badge and the newest
-  CHANGELOG heading pinned to `plugin.json` by a *closed set* — "a blacklist
-  would have let it through"), a doc gate (every number in this README derived
-  from the code at test time), and an i18n gate.
+- **One limit means one thing.** The tldr cap counts *display columns*, not code
+  points, because a CJK character occupies two of them: 160 code points is about
+  one English sentence and about two Chinese paragraphs, so the zh half of a
+  bilingual contract had been enforcing a bound twice as loose as the en half.
 
 ---
 
-## How it works
+## 8 · Design philosophy
 
-| Event | Matcher | Behaviour | Implementation |
-|---|---|---|---|
-| `SessionStart` | — | Inject the 12-rule discipline summary + reply schema + Imperial Edicts (English by default, any language via `CC_ENFORCER_LANG`). | [`inject_context.py`](hooks/scripts/inject_context.py) |
-| `UserPromptSubmit` | — | Re-inject per-turn decision triggers + edicts — the defence against context compaction. | [`inject_context.py`](hooks/scripts/inject_context.py) |
-| `PreToolUse` | `Read\|Edit\|Write` | Record reads, capture mtime baselines, and run the content + frequency + edict gates listed above. | [`read_guard.py`](hooks/scripts/read_guard.py) |
-| `PreToolUse` | `Bash` | Tokenise the command, deny bypass flags and destructive operations, process read registrations, scan edicts. | [`bash_guard.py`](hooks/scripts/bash_guard.py) |
-| `Stop` | — | The nine-layer done-claim decision, rendered as a status table + recovery + plain-language line. | [`stop_guard.py`](hooks/scripts/stop_guard.py) |
+**Physical enforcement over persuasion.** If a rule matters, it gets a hook. A
+rule that exists only as prose is documented as such — §3 marks which is which,
+and the phrase "mandatory" in a rule file with no hook behind it is treated as a
+defect, not a style.
 
-Both injections are budgeted against Claude Code's 10,000-character hook-output
-cap: the contract is protected and the (unbounded) edict list is what yields,
-elided at whole-edict boundaries with a pointer — because half an edict still
-reads as a complete instruction.
+**Fail open, always.** Any exception inside a guard logs to stderr and *allows*
+the call. Unreadable state is treated permissively. This is the single most
+important invariant in the codebase: a discipline plugin that can brick your
+agent will be uninstalled, and then it enforces nothing at all.
 
-Nine scripts under [`hooks/scripts/`](hooks/scripts/) sit on nine shared
-[`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
-registered as hooks; the other five (`register_read.py`, `manage_edicts.py`,
-`manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`) back the escape hatch,
-the slash commands and CI. They deliberately stay in the same directory rather
-than moving to a `tools/` tree: `gc_state.py` is imported by
-`inject_context.py` for auto-GC and `register_read.py`'s real logic lives
-inside `bash_guard.py`, so neither is a standalone CLI, and separating them
-would buy a tidier directory name with a cross-tree `sys.path` splice. Full
-contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
+**The rules are the product; the hooks are one adapter.** `rules/` is plain
+Markdown with no runtime dependency, and `cat rules/*.md` is a documented
+install path. This is why a rule file describing a *pre*-hardening escape hatch
+is treated as a shipped defect: it hands weaker discipline to every non-Claude-Code
+consumer.
+
+**Structure over text-matching.** Four `lib/` judgement models
+(`srclex`, `mdctx`, `shellcmd`, `editscale`) exist because every guard had been
+answering a *structural* question with a *textual* test, and each audit round
+regenerated the same defect class. One model, one definition, many consumers.
+
+**Prefer false negatives.** A missed violation costs one lazy edit; a false
+alarm costs a turn and erodes trust in the gate. Documented gaps live in the
+rule file rather than being quietly patched.
+
+**The repo is held to its own rules.** Development of cc-enforcer runs under
+cc-enforcer. Three CI drift gates make documentation claims un-drift-able:
+
+- a **version gate** — every version pointer, the badges in *both* READMEs, and
+  the newest CHANGELOG heading pinned to `plugin.json` by a *closed set*
+  ("a blacklist would have let it through");
+- a **doc gate** — every number in this README derived from the code at test
+  time, plus inventory checks in both directions (a tree that lists a deleted
+  file is drift too);
+- an **i18n gate** — every translation structurally matched to the English
+  skeleton, including DENY-row token parity, because the zh injection once
+  listed three fewer Bash patterns while file-set and heading checks stayed green.
+
+**Tech stack:** Python 3.13, standard library only. No dependencies, no build
+step, no lock file. CI: `ubuntu-latest` × `windows-latest`, `fail-fast: false`.
+The Windows leg is not box-ticking — several regressions here are Windows-only
+by construction (`os.replace` sharing violations, `\r\n` defeating end-of-line
+anchors, unquoted drive paths).
 
 ---
 
-## Configuration
+## 9 · Limits, configuration, and what's next
+
+### Configuration
 
 | Variable | Effect |
 |---|---|
@@ -311,25 +494,38 @@ contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2.
 **Per-project sync gate** (rule 12) is opt-in: declare co-update groups in
 `.claude/cc-enforcer/sync-gate.toml` and Stop layer (i) enforces them.
 
----
-
-## Limits — what it does *not* do
+### Known limits — what it does *not* do
 
 Stated plainly, because a discipline plugin that oversells itself is the failure
 mode it exists to prevent:
 
 - **Everything fails open.** A guard that throws logs to stderr and allows the
-  call. Unreadable state is treated permissively. This is deliberate — a bug in
-  the plugin must never brick your agent — but it means enforcement is
-  best-effort, not a security boundary.
+  call. Enforcement is best-effort, **not a security boundary** — it is built to
+  stop a lazy agent, not a hostile one.
 - **The Stop layers only engage on a completion claim.** A reply that never says
   "done" is never graded.
 - **Rules 02 and 05 have no hook of their own**, and the reasoning half of rules
   03, 09 and 12 is text-level. No hook can verify that you *actually* swept a
   defect class; it can only verify that you said you did.
 - **The hard layers are Claude Code-specific.** Other agents get the rule pack.
+- **The rolling-patch gate goes inert on files of ~5 lines or fewer** (v0.35),
+  where a two-line edit already spans a third of the file and so counts as a
+  systematic rewrite. Measured, not estimated: at six lines and up the absolute
+  small-edit definition still binds, and a 30-line file still denies its fourth
+  two-line patch. Intended — "you have not re-engaged with the file's overall
+  structure" is not a claim anyone can make about a five-line file.
 - **Detectors prefer misses to false alarms** — `宁可漏报不误报`. Documented gaps
   live in each rule file rather than being quietly patched.
+
+### Roadmap
+
+**Empty, by decision** (since v0.32.1). Both remaining entries were *retired*,
+not deferred: per-session ephemeral edicts are structurally blocked (the edict
+CLI is a Bash subprocess with no `session_id`), and the layer-(g) content-hash
+upgrade had its premise measured false (mtime here resolves to 1 ms, while layer
+(g) compares a first-encounter baseline against closing time, seconds apart). A
+feature list carrying entries nobody will build is the staleness this repo
+exists to catch.
 
 ---
 
@@ -354,10 +550,12 @@ cc-enforcer/
 │       ├── manage_sync_gate.py  # rule-12 co-update groups: CRUD + `check` diagnostics
 │       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
-│       └── lib/                 # -- nine shared modules --
+│       ├── bench_hooks.py       # per-hook latency benchmark (README §6)
+│       └── lib/                 # -- ten shared modules --
 │           ├── srclex.py        # judgement: code vs comment vs docstring vs literal
 │           ├── mdctx.py         # judgement: markdown fence / blockquote context
 │           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
+│           ├── editscale.py     # judgement: change size relative to its target file
 │           ├── state.py         # state: per-session, cross-process lock, atomic save
 │           ├── tomlio.py        # config: tolerant TOML reader + the shared writer
 │           ├── projroot.py      # config: project-root detection, shared by both loaders
@@ -368,7 +566,7 @@ cc-enforcer/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 617 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 676 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -379,135 +577,11 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **617 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **676 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
-gates. CI: ubuntu-latest × windows-latest × Python 3.13, `fail-fast: false`,
-zero dependencies. The Windows leg is not box-ticking — several regressions here
-are Windows-only by construction (`os.replace` sharing violations, `\r\n`
-defeating end-of-line anchors, unquoted drive paths).
-
----
-
-## New in v0.32
-
-**v0.32.1 — the roadmap is empty, by decision.** Both remaining entries were
-retired rather than carried: per-session ephemeral edicts (structurally
-blocked — the edict CLI is a Bash subprocess with no `session_id`) and the
-layer-(g) content-hash upgrade (premise measured false — mtime here resolves to
-**1 ms**, while layer (g) compares a first-encounter baseline against closing
-time, seconds apart). A feature list carrying entries nobody will build is the
-staleness this repo exists to catch. The release also caught `rules/12` still
-describing the *pre-v0.32* escape hatch — and `rules/` is the LLM-agnostic
-product, so a stale rule file ships weaker discipline to every non-Claude-Code
-consumer.
-
-**v0.32.0 — two things v0.31 recorded instead of closing.** Both decided by the
-user; neither is a defect fix, so that one was a minor.
-
-**Layer (i) rejects an acknowledgement that answers nothing.** v0.31.1 named
-the consequence of making `sync-check` mandatory — a required field invites
-boilerplate, and `sync-check: n/a` settled a named group as firmly as a real
-sweep report. It now must be the agent's own line (read through the same
-`lib/mdctx` model layer (h) uses, so a quoted or fenced marker does not count)
-**and** carry content:
-
-```
-同步核对: prompts 侧核对过，本次改动不影响注入文案。   → settles the group
-sync-check: n/a  ·  无  ·  -  ·  (empty)               → BLOCK (v0.32)
-```
-
-Pinned by its own test so the limit cannot drift into an implied guarantee:
-`sync-check: checked it` is just as empty and **still passes**. This closes the
-bottom tier — bare placeholders — and claims nothing more, because refusing an
-honest report is the worse error. A deliberate strictness increase.
-
-**`check` now runs against this repository, in CI.** v0.31.0 shipped it on the
-argument that an unenforced gate you still trust is worse than none, gave it a
-non-zero exit so it could run in CI — and then never ran it on itself. Wired as
-a test (matching `test_i18n_sync`, so a local `unittest` run covers it too),
-with the twin that keeps it from passing on an empty config. Suite 594 → 601
-tests.
-
----
-
-### v0.31.1 — `sync-check` became a reply-schema field Every
-other closing obligation — `before / edits / convergence / fidelity / closing /
-tldr` — has been a schema field since v0.20, and the v0.20 design is that *the
-field name IS the Stop-hook marker*. Rule 12 arrived three releases later, so
-its acknowledgement was the one duty with no slot to write it in. Now:
-
-```yaml
-  closing: {root cause: ..., impact: ..., solution: ...}
-  sync-check: <co-files updated, or why none needed>   # rule 12, edit turns
-  tldr: "<one plain sentence>"
-```
-
-No detector changed — the key already matches `SYNC_MARKERS`. **It does not
-weaken layer (i)**, which was verified by probe rather than by reading the
-code: since v0.27 a marker settles only groups a previous block actually
-*named*, so a first violation still blocks and names its group. Also fixed: the
-Chinese README's version badge had drifted two releases behind while every gate
-was green — the badge check pinned `README.md` and not its mirror, so it now
-discovers every `README*.md` from disk. Suite 590 → 594 tests.
-
----
-
-### v0.31.0 — the sync gate became inspectable Rule 12's co-update groups have been
-enforceable since v0.23 and *authorable* only by hand-writing TOML — with no way
-to see what the loader made of it. That gap mattered because
-[`lib/sync_gate.py`](hooks/scripts/lib/sync_gate.py) is failing-open by design:
-a dropped group, or a glob that matches no file, does not raise. It just stops
-guarding, and prints one stderr line nobody reads.
-
-**An unenforced gate you still trust is worse than no gate**, because you have
-stopped looking. So:
-
-```
-$ /cc-enforcer:sync-gate check
-  ok hooks-tests.when     'hooks/scripts/*.py' → 18 file(s)
-  !! code-docs.require    'nowhere/*.rst'      → 0 file(s)
-
-1 problem(s):
-  • group code-docs: require glob 'nowhere/*.rst' matches NO file in the repo.
-```
-
-`check` reports every group the loader kept, every group it **dropped and why**,
-and every dead glob — exiting 1, so it runs in CI. `init / add / remove / list /
-path` round it out, mirroring the Imperial-Edict CLI that has had exactly this
-treatment since v0.12.
-
-**Deliberately not auto-created.** No hook writes into your project directory —
-that invariant has held for every release, and an auto-created empty template
-would be functionally identical to no file (zero groups means layer (i) stays
-inert), bought at the price of an unrequested file in everyone's `git status`.
-`init` creates it when *you* ask.
-
-**Writes are verified twice.** Not just "does this parse" but "does the loader
-still see every group" — a `require = []` entry is valid TOML that
-`sync_gate.load()` silently discards, so a parse-only check would let the CLI
-report success over a group that guards nothing. On failure the previous file is
-restored byte-for-byte.
-
-**A defect found in this feature's own first smoke test, reported here rather
-than quietly fixed.** The CLI picked its write target with `config_path()` — the
-resolver built for *reading*, which tries several roots and takes the first that
-already holds a file. Run against a project with no config yet, it fell through
-to the process cwd and wrote two groups into *this plugin's own* config. Root
-cause: **"where do I read from" and "where do I write to" are different
-questions**, and a read-resolver's fallback chain is precisely what makes it the
-wrong answer to the second. Fixed at the mechanism — `default_project_path()`
-(deterministic) and `load_file()` (no fallback) — with the class swept: both
-call sites, both pinned by regression tests, and the read resolver's fallback
-explicitly pinned too, so "fixing" it later by making everything deterministic
-cannot silently break the hook path.
-
-Also: `lib/tomlio.py` now owns the TOML *writer* as well as the reader, so the
-edict CLI and the sync-gate CLI share one encoder instead of the second copy
-missing the next fix. Suite 565 → 590 tests.
-
-Earlier releases: [`CHANGELOG.md`](CHANGELOG.md).
+gates.
 
 ---
 
@@ -521,6 +595,8 @@ by it while working on it. Read [`CLAUDE.md`](CLAUDE.md) §4 before opening a PR
    the checklist and the translation in the same change.
 3. Cite `file:line`; never "I think" / "should be".
 4. Fix root causes. No `--no-verify`, no swallowed errors.
+
+Earlier releases: [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

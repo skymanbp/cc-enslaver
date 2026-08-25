@@ -470,7 +470,9 @@ class TestTldrContextV026(unittest.TestCase):
         self.assertFalse(sg._has_tldr("- > tldr: quoted example\n"))
 
     def test_presence_and_length_halves_agree_on_fences(self) -> None:
-        long_item = "x" * (sg.TLDR_MAX_ITEM_CHARS + 40)
+        # ASCII, so one code point is one column and the +40 overshoot
+        # holds under the v0.35 display-width cap unchanged.
+        long_item = "x" * (sg.TLDR_MAX_ITEM_COLUMNS + 40)
         text_fence = "```text\ntldr: " + long_item + "\n```\n"
         # Not countable for EITHER half -- no presence, nothing measured.
         self.assertFalse(sg._has_tldr(text_fence))

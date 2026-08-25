@@ -62,10 +62,12 @@ laziness signals appear in proximity to a "done" claim:
       canonical schema's `tldr:` field or a 大白话 / TL;DR marker.
       v0.23 adds a HARD LENGTH CAP: each tldr item (the marker line's
       value plus any continuation / list-item line) must stay within
-      TLDR_MAX_ITEM_CHARS characters — one sentence covering cause,
-      action, and outcome. Multiple items are fine (one per line, each
-      within the cap); a paragraph-length "tldr" is not a TL;DR and
-      blocks with a dedicated recovery. Enforced as a closing
+      TLDR_MAX_ITEM_COLUMNS display columns — one sentence covering
+      cause, action, and outcome. v0.35 changed the unit from code
+      points to display columns so the cap means the same thing in
+      Chinese as in English. Multiple items are fine (one per line,
+      each within the cap); a paragraph-length "tldr" is not a TL;DR
+      and blocks with a dedicated recovery. Enforced as a closing
       convention, deliberately not promoted to a numbered rule.
 
   (i) [v0.23.0 NEW] Rule 12 — repo-wide sync gate. Edit turns only, and
@@ -179,6 +181,7 @@ import os
 import re
 import sys
 import traceback
+import unicodedata
 from pathlib import Path
 
 # Make `lib/` importable when run as a script.
@@ -748,11 +751,29 @@ def _has_tldr(text: str) -> bool:
 # Field failure that motivated this: the schema's `tldr` field kept
 # growing into a paragraph, defeating its purpose. The contract is now:
 # each tldr ITEM is one sentence — cause, action, outcome — within
-# TLDR_MAX_ITEM_CHARS characters. Reporting several things is fine:
-# one item per line (YAML list items or continuation lines), each within
-# the cap. The cap is generous on purpose (a full English sentence fits;
-# a Chinese sentence is far shorter) so only genuine paragraphs trip it
-# — the repo's "prefer false negatives" detector philosophy.
+# TLDR_MAX_ITEM_COLUMNS display columns. Reporting several things is
+# fine: one item per line (YAML list items or continuation lines), each
+# within the cap. The cap is generous on purpose so only genuine
+# paragraphs trip it — the repo's "prefer false negatives" philosophy.
+#
+# v0.35.0 — the cap counts DISPLAY COLUMNS, not code points, and the
+# root cause was sitting in this very comment. Its v0.23 wording read
+# "the cap is generous on purpose (a full English sentence fits; a
+# Chinese sentence is far shorter)" — conceding, as an aside, that the
+# limit meant two different things in two languages. It did: 160 code
+# points is roughly one English sentence and roughly two Chinese
+# PARAGRAPHS, so on a bilingual contract the zh half enforced a bound
+# about twice as loose as the en half, and layer (h) exists precisely
+# to insist that a TL;DR is ONE SENTENCE.
+#
+# East-Asian Wide and Fullwidth characters therefore count 2, combining
+# marks count 0, everything else counts 1 — the standard terminal-width
+# model. The same sentence in either language now measures about the
+# same, which is what "one sentence" was always supposed to mean.
+#
+# Direction of the change, stated plainly: a strictness INCREASE for CJK
+# replies and an exact no-op for Latin ones. No English tldr that passed
+# before can fail now, because every character in it still counts 1.
 #
 # Extraction is line-based and conservative: only lines attributable to
 # a tldr marker are measured. Measurable forms (v0.23.1 hardened after
@@ -776,7 +797,25 @@ def _has_tldr(text: str) -> bool:
 # A YAML block scalar (`tldr: |`) is measured per physical line, which
 # matches the "one item per line" reporting convention.
 # --------------------------------------------------------------------------- #
-TLDR_MAX_ITEM_CHARS = 160
+TLDR_MAX_ITEM_COLUMNS = 160
+
+
+def _display_width(text: str) -> int:
+    """Terminal columns `text` occupies, per Unicode East Asian Width.
+
+    'W' (Wide) and 'F' (Fullwidth) cost 2 columns; combining marks cost
+    0, since they render on top of the preceding character rather than
+    beside it. Everything else costs 1, which includes 'A' (Ambiguous) —
+    resolving Ambiguous to 2 would depend on the reader's locale and
+    font, and this cap must not vary with who is looking at it.
+    """
+    width = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
 
 _TLDR_ITEM_LINE = re.compile(
     r"^(?P<prefix>[ \t]*(?:(?:[*+-]|#{1,6})[ \t]+)?)"
@@ -918,11 +957,21 @@ def _tldr_items(text: str) -> list[str]:
 
 
 def _find_overlong_tldr(text: str) -> tuple[str, int] | None:
-    """Return (snippet, length) for the first over-cap tldr item, else None."""
+    """Return (snippet, width) for the first over-cap tldr item, else None.
+
+    The reported number is the item's DISPLAY WIDTH (v0.35), the same
+    quantity compared against the cap — reporting a code-point count
+    beside a column cap would leave a CJK author unable to reconcile the
+    figure in the message with the limit it supposedly exceeded.
+
+    The snippet is still truncated by code points: it only has to stay
+    short enough to read inside the block reason.
+    """
     for item in _tldr_items(text):
-        if len(item) > TLDR_MAX_ITEM_CHARS:
+        width = _display_width(item)
+        if width > TLDR_MAX_ITEM_COLUMNS:
             snippet = item if len(item) <= 120 else item[:117] + "..."
-            return snippet, len(item)
+            return snippet, width
     return None
 
 
@@ -1667,10 +1716,10 @@ Example:
 _RECOVERY_H_LONG = """Your reply has a TL;DR, but at least one of its items is
 too long to be a TL;DR:
 
-  item ({length} chars > {cap} cap): {snippet!r}
+  item ({length} columns > {cap} cap): {snippet!r}
 
 Per the v0.23 length contract, each tldr item is ONE sentence — cause,
-action, outcome — within {cap} characters:
+action, outcome — within {cap} display columns:
 
   tldr: "<前因 + 做了什么 + 结果如何，一句话>"
 
@@ -1682,7 +1731,24 @@ single short sentence within the cap:
     - "顺带把 B 的引用同步了，无行为变化。"
 
 Do not compress by dropping the outcome — drop the process detail
-instead; the body of the reply already carries the detail."""
+instead; the body of the reply already carries the detail.
+
+Why COLUMNS and not characters (v0.35): a CJK character occupies two
+terminal columns, so measuring code points made this cap mean two
+different things in two languages — about one sentence in English and
+about two paragraphs in Chinese. The unit is now the same on both sides
+of the contract. In practice:
+
+  • an all-ASCII item  — the cap is unchanged at {cap} characters;
+  • an all-Chinese item — roughly {cjk_cap} 汉字, which is what a single
+    spoken sentence actually is;
+  • a mixed item — each ASCII character costs 1, each 汉字 costs 2,
+    combining marks cost 0.
+
+The number quoted above is that column count, not a character count, so
+it is directly comparable to the cap. If your item is only slightly
+over, the usual cause is two sentences joined by a comma or a 顿号 —
+split them into two items rather than trimming words out of one."""
 
 _RECOVERY_I = """One or more of this project's co-update groups
 (.claude/cc-enforcer/sync-gate.toml) are unmet for this session's edits:
@@ -2006,19 +2072,23 @@ def main() -> int:
             return 0
 
         # v0.23 Layer (h) part 2: the tldr must actually BE a TL;DR —
-        # each item within TLDR_MAX_ITEM_CHARS. A paragraph-length
-        # "summary" defeats the field's purpose.
+        # each item within TLDR_MAX_ITEM_COLUMNS display columns (v0.35).
+        # A paragraph-length "summary" defeats the field's purpose.
         overlong = _find_overlong_tldr(message) if _live("(h)") else None
         if overlong is not None:
             state_lib.record_stop_block(session_id, turn_count, "(h)")
-            snippet, length = overlong
+            snippet, width = overlong
             _emit_block(_build_block_reason(
                 "(h)", edited_this_turn,
                 _RECOVERY_H_LONG.format(
-                    snippet=snippet, length=length, cap=TLDR_MAX_ITEM_CHARS,
+                    snippet=snippet, length=width,
+                    cap=TLDR_MAX_ITEM_COLUMNS,
+                    cjk_cap=TLDR_MAX_ITEM_COLUMNS // 2,
                 ),
                 matched_phrase=matched,
-                fail_note=f"tldr item overlong ({length} > {TLDR_MAX_ITEM_CHARS})",
+                fail_note=(
+                    f"tldr item overlong ({width} > {TLDR_MAX_ITEM_COLUMNS} cols)"
+                ),
             ))
             return 0
 

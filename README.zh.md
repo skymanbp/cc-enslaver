@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.35.2-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.36.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -221,19 +221,39 @@ cat rules/zh/*.md > cc-enforcer.txt     # 中文翻译
 
 ## 五、实际效果
 
-### Before / After：滚动补丁拦截
+### 同一个任务，跑两遍
 
-**Before** —— agent 对同一个文件戳了四次，从没重读过它：
+一个任务、两次运行、完全相同的起始文件。**唯一的变量是钩子在不在回路里。**
+两张图都可以用 `python demo/run_demo.py --svg` 现场复现，源码在 [`demo/`](demo/)。
 
-```text
-Edit  auth.py   "except:" → "except Exception:"        ✔ 已应用
-Edit  auth.py   加 `if token is None: return`           ✔ 已应用
-Edit  auth.py   把 401 改成 403                          ✔ 已应用
-Edit  auth.py   把 refresh() 包进 try/except             ✔ 已应用
-> "auth 的 bug 修好了。"
-```
+> **`charge()` 在支付网关拒付时抛 `KeyError` 崩掉。让它别再崩。**
 
-**After** —— 第四次编辑根本没落地：
+| | 没有 cc-enforcer | 有 cc-enforcer |
+|---|---|---|
+| 落地的编辑 | 5 / 5 | 3 / 5 |
+| 完成声明 | 通过 | 被拦 |
+| 收尾时的测试套件 | **红的** | 绿的 |
+| 拒付时调用方拿到什么 | 静默的 `None` | 可处理的 `GatewayError` |
+
+![没有 cc-enforcer：五次编辑全落地，崩溃变成静默的 None，一句谎称「suite is
+green」的收尾直接结束回合](demo/out/without-cc-enforcer.svg)
+
+![有 cc-enforcer：吞异常被拒、第四次小改被拒、无证据的完成声明被拦](demo/out/with-cc-enforcer.svg)
+
+**这是一个滞后错误** —— 这类错误不会因为你打了补丁就消失，它只是变安静了。
+原本的 `KeyError` 很响，而且直指出事的那一行；包起来之后返回 `None`，失败就从
+一条栈迹变成了一张记着网关根本没接受过的账目，直到三周后有人对账才会发现。
+
+**哪些是真的，哪些不是。** 图里每一条 cc-enforcer 判决都是钩子的**逐字输出**
+—— `read_guard.py` 与 `stop_guard.py` 以 Claude Code 真实的载荷形态被拉起为子进程；
+每一条测试与探针结果都来自实跑捕获。agent 的那五步是**脚本化**的：没有 LLM 在
+回路里，而正是脚本化才让两遍在除钩子之外的一切上完全相同。
+[`tests/test_demo.py`](tests/test_demo.py) 会重跑 demo 并与已提交的图片逐字节比对，
+所以任何钩子措辞的改动都会让 CI 变红，而不是在首页留一张过期的图。
+
+### 滚动补丁判决，放大看
+
+第五次编辑根本没落地：
 
 ```text
 cc-enforcer · rule 09 violation (rolling-patch interception)
@@ -267,13 +287,14 @@ Never counted, at any counter value (v0.35):
 重新推导它，所以这个示例不可能再和产生它的代码脱节 —— v0.35.1 之前它写的是
 `121` 行文件的 `1104`，因为那是手写上去的。
 
-### Before / After：完成声明闸门
+### 完成声明闸门，放大看
 
-**Before** —— 一个看起来很像样的收尾：
+上面的 demo 演的是 layer (a) 拦下**毫无证据**的声明。layer (b) 是紧挨着的另一种：
+证据也许随后就有，但声明本身是含糊的，这一轮照样结束不了。这条回复：
 
 > 修好了 worker pool 的竞态。我觉得现在稳了。
 
-**After** —— 这一轮结束不了：
+会得到：
 
 ```text
 cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim]
@@ -323,7 +344,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 676 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 690 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -531,18 +552,24 @@ cc-enforcer/
 ├── agents/verifier.md           # 只读引用核对子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 682 个测试（python -m unittest discover tests）
+├── demo/                        # 同一任务跑两遍 —— 第五节那两张图（v0.36）
+│   ├── paygate/                 #   一个带真实滞后 bug 的小项目
+│   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
+│   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
+│   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
+└── tests/                       # 690 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
     ├── test_<lib|cli>.py        #   共享模块与辅助脚本的单元件
+    ├── test_demo.py             #   漂移门：README 的图 vs 现跑一遍 demo
     ├── test_version_sync.py     #   漂移门：每个版本指针 vs plugin.json
     ├── test_doc_sync.py         #   漂移门：文档里的数字与清单 vs 代码
     ├── test_i18n_sync.py        #   漂移门：每份翻译 vs 英文骨架
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **682 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **690 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 

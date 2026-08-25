@@ -18,6 +18,93 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.36.0] — 2026-08-25
+
+**A demo you can run.** Until now both READMEs illustrated the "before" half
+of every comparison with a hand-drawn mock-up — `Edit auth.py … ✔ applied`,
+against a file that does not exist, in a format no tool ever printed. The
+"after" halves were real captured hook output. Half evidence, half drawing,
+and the reader had no way to tell which was which.
+
+[`demo/`](demo/) replaces the drawings with a second recording.
+
+### The same task, twice
+
+One task, two runs, identical starting files. The only variable is whether
+the hooks are in the loop.
+
+> `charge()` raises `KeyError` when the payment gateway declines.
+> Make it stop crashing.
+
+| | Without cc-enforcer | With cc-enforcer |
+|---|---|---|
+| Edits that landed | 5 of 5 | 3 of 5 |
+| Sign-off | accepted | blocked |
+| Suite at the end | **red** | green |
+| Caller gets on a decline | `None`, silently | `GatewayError`, handled |
+
+The five edits are anchored on **different** original text, so a refusal in
+one run cannot change what the remaining edits do in the other. Same
+sequence, same order, both runs.
+
+### The subject is the lagging error
+
+The `KeyError` was loud and pointed at the line that caused it. The reactive
+fix wraps it and returns `None`: the crash is gone, and so is the report.
+`demo/paygate/probe.py` asks the question a green suite cannot answer —
+*what did the caller actually get?* — and the answer is a ledger holding rows
+the gateway refused, with nothing to say so until someone reconciles a
+statement weeks later.
+
+That is why "make it stop crashing" is the task. Patching a loud failure does
+not remove it. It makes it quiet.
+
+### What is real, and what is not
+
+Stated in the demo, in its README, and in both project READMEs, because a
+demo that overstated itself would be the exact defect this plugin exists to
+catch:
+
+| | |
+|---|---|
+| **Real** | Every cc-enforcer verdict — verbatim stdout from [`read_guard.py`](hooks/scripts/read_guard.py) and [`stop_guard.py`](hooks/scripts/stop_guard.py), run as subprocesses with the payload shape Claude Code sends. Nothing transcribed or reworded. |
+| **Real** | Every test and probe result, captured from a throwaway copy of `demo/paygate/`. |
+| **Scripted** | The agent's five moves. No LLM is in the loop; the sequence stands in for one, and scripting it is what makes both runs identical in everything except the hooks. |
+
+Three refusals, all live: the `try/except: pass` (rule 09 patch marker), the
+fourth small edit to one file (rule 09 rolling patches), and the sign-off
+`"Fixed the charge bug. The suite is green."` (Stop layer (a), no evidence).
+
+### Rendered, not screenshotted
+
+[`demo/render_svg.py`](demo/render_svg.py) turns a captured transcript into a
+terminal-style SVG — zero dependencies, assembled as text. A screenshot is a
+picture of a claim; this is generated from the run that just happened, so
+re-running the demo re-renders the image.
+
+### It cannot go stale
+
+[`tests/test_demo.py`](tests/test_demo.py) re-runs the demo and compares
+against the committed SVGs **byte for byte**. A change to any hook's wording
+now fails CI instead of leaving a stale picture on the front page — the
+v0.35.1 class, applied to an image.
+
+Equality alone would be satisfied by a demo that had stopped denying
+anything, as long as somebody re-rendered afterwards. So the same file also
+asserts each verdict **by content**, asserts the unguarded run still ends in
+a silent failure, and asserts the unguarded transcript contains no verdicts
+at all. Both halves, or the gate is decoration.
+
+Making that gate possible needed one change to the demo itself: `unittest`'s
+wall-clock duration is stripped from the captured output. It is the only part
+of the transcript that differs run to run, and a timing left in would make
+the comparison flap — and a flapping gate gets deleted, which is worse than
+not having one.
+
+**682 → 690 tests.**
+
+---
+
 ## [0.35.2] — 2026-08-25
 
 **A fourth co-update group, and the drift it immediately caused.** No code

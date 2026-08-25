@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="661" height="786" viewBox="0 0 661 786" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13">
+<rect width="661" height="786" rx="8" fill="#0d1117"/>
+<rect width="661" height="30" rx="8" fill="#161b22"/>
+<rect y="22" width="661" height="8" fill="#161b22"/>
+<circle cx="18" cy="15" r="5" fill="#ff5f56"/>
+<circle cx="36" cy="15" r="5" fill="#ffbd2e"/>
+<circle cx="54" cy="15" r="5" fill="#27c93f"/>
+<text x="72" y="19" fill="#ff7b72" font-weight="700">WITHOUT cc-enforcer</text>
+<text x="18" y="46" fill="#58a6ff" font-weight="700" xml:space="preserve">$ python probe.py            # the symptom, untouched</text>
+<text x="18" y="65" fill="#ff7b72" xml:space="preserve">  LOUD: settle() raised KeyError('id') on a decline.</text>
+<text x="18" y="84" fill="#c9d1d9" xml:space="preserve">        Unpleasant, but it points at the line that caused it.</text>
+<text x="18" y="122" fill="#58a6ff" font-weight="700" xml:space="preserve">$ python -m unittest test_charge</text>
+<text x="18" y="141" fill="#c9d1d9" xml:space="preserve">  Ran 2 tests</text>
+<text x="18" y="160" fill="#3fb950" xml:space="preserve">  OK</text>
+<text x="18" y="198" fill="#c9d1d9" xml:space="preserve">  task: &quot;charge() crashes on a decline. Make it stop crashing.&quot;</text>
+<text x="18" y="236" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #1 swallow the crash and return None</text>
+<text x="18" y="255" fill="#3fb950" xml:space="preserve">        applied</text>
+<text x="18" y="274" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #2 add a verbosity flag for the failure log</text>
+<text x="18" y="293" fill="#3fb950" xml:space="preserve">        applied</text>
+<text x="18" y="312" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #3 add a retry budget</text>
+<text x="18" y="331" fill="#3fb950" xml:space="preserve">        applied</text>
+<text x="18" y="350" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #4 note the decline shape in the settle docstring</text>
+<text x="18" y="369" fill="#3fb950" xml:space="preserve">        applied</text>
+<text x="18" y="388" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #5 widen the timeout, the gateway seemed slow</text>
+<text x="18" y="407" fill="#3fb950" xml:space="preserve">        applied</text>
+<text x="18" y="445" fill="#d2a8ff" xml:space="preserve">agent&gt; &quot;Fixed the charge bug. The suite is green.&quot;</text>
+<text x="18" y="464" fill="#c9d1d9" xml:space="preserve">        turn ends -- nothing checks the claim</text>
+<text x="18" y="502" fill="#58a6ff" font-weight="700" xml:space="preserve">$ python -m unittest test_charge</text>
+<text x="18" y="521" fill="#ff7b72" xml:space="preserve">  AssertionError: (&lt;class 'charge.GatewayError'&gt;, &lt;class 'KeyError'&gt;) not raised</text>
+<text x="18" y="540" fill="#c9d1d9" xml:space="preserve">  Ran 2 tests</text>
+<text x="18" y="559" fill="#ff7b72" xml:space="preserve">  FAILED (failures=1)</text>
+<text x="18" y="597" fill="#58a6ff" font-weight="700" xml:space="preserve">$ python probe.py            # what the CALLER actually got</text>
+<text x="18" y="616" fill="#c9d1d9" xml:space="preserve">  settle() returned: [None, None]</text>
+<text x="18" y="635" fill="#ff7b72" xml:space="preserve">  SILENT: a declined charge was recorded as a settled one.</text>
+<text x="18" y="654" fill="#8b949e" xml:space="preserve">          The ledger now contains rows the gateway never</text>
+<text x="18" y="673" fill="#c9d1d9" xml:space="preserve">          accepted, and nothing will say so until someone</text>
+<text x="18" y="692" fill="#c9d1d9" xml:space="preserve">          reconciles the statement by hand.</text>
+<text x="18" y="730" fill="#8b949e" xml:space="preserve">  The crash is gone. So is the failure it was reporting.</text>
+<text x="18" y="749" fill="#8b949e" xml:space="preserve">  The sign-off said the suite is green; it is red. Nothing said so.</text>
+</svg>

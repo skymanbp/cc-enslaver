@@ -1,6 +1,6 @@
 # Tests — index
 
-**682 tests, 18 files, zero dependencies.** This file is the index: every
+**690 tests, 19 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -74,6 +74,7 @@ demonstrably did.
 | [`test_version_sync.py`](test_version_sync.py) | 5 | A version pointer that does not match `plugin.json`. The set of version-bearing JSON pointers is *closed*, so a newly added field fails until registered. Born from v0.22.1, which shipped with a stale `marketplace.json`. |
 | [`test_doc_sync.py`](test_doc_sync.py) | 18 | Stale counts and inventories: rule count, command count, test count, the Bash deny set on every surface that claims to list it, the `lib/` module inventory in all three structure trees (README.zh.md joined in v0.34.1, closing the mirror-coverage class for the third time), and every repo-relative markdown link. **v0.35.1 adds three gates over things a doc can only get wrong by hand:** advertised hedge triggers are re-derived from `stop_guard._HEDGE_INNER` (both READMEs named `should be fine` / `应该`, which the detector deliberately ignores — so the layer-(b) demo's output could not have come from its own input); sample coverage bars are re-derived from `editscale.coverage_bar` (the sample printed `1104` where the code computes `1102`); and every backticked `UPPER_SNAKE` identifier in a non-CHANGELOG doc must resolve to a real Python definition or be registered in `DOC_ONLY_IDENTIFIERS` with a reason (ARCHITECTURE cited four block-reason constants deleted in v0.12.0 for the twenty-three releases since). All three were checked RED against the pre-fix tree before being committed. |
 | [`test_i18n_sync.py`](test_i18n_sync.py) | 9 | Translation drift: file-set parity, ATX heading-level sequence, and enforcement-token parity (a `zh` session must not be promised a smaller deny set than an `en` one). |
+| [`test_demo.py`](test_demo.py) | 8 | The before/after images both READMEs embed (v0.36). Re-runs [`demo/run_demo.py`](../demo/run_demo.py) and compares against the committed `demo/out/*.svg` byte for byte, so a change to any hook's wording fails CI instead of leaving a stale picture on the front page — the v0.35.1 class applied to an image. **The equality check is only half of it:** it would also be satisfied by a demo that stopped denying anything, as long as somebody re-rendered afterwards, so each of the three verdicts is additionally asserted by content and the unguarded run is asserted to still end in a silent failure. This is the one gate whose expectation is a *recorded artefact* rather than a value derived at test time — which is why the artefact is regenerated from the live hooks on every run rather than trusted. |
 
 ### Audit-round regressions
 

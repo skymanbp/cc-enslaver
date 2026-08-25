@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.35.2-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.36.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -238,19 +238,46 @@ discipline. Integration patterns for OpenAI / Gemini / local models are in the
 
 ## 5 · What it actually looks like
 
-### Before / after: the rolling-patch interception
+### The same task, run twice
 
-**Before** — the agent nudges the same file four times, never re-reading it:
+One task, two runs, identical starting files. The only variable is whether the
+hooks are in the loop. Reproduce both with `python demo/run_demo.py --svg` —
+sources in [`demo/`](demo/).
 
-```text
-Edit  auth.py   "except:" → "except Exception:"        ✔ applied
-Edit  auth.py   add `if token is None: return`          ✔ applied
-Edit  auth.py   change 401 → 403                        ✔ applied
-Edit  auth.py   wrap refresh() in try/except            ✔ applied
-> "Fixed the auth bug."
-```
+> **`charge()` crashes with `KeyError` when the payment gateway declines.
+> Make it stop crashing.**
 
-**After** — the fourth edit never lands:
+| | Without cc-enforcer | With cc-enforcer |
+|---|---|---|
+| Edits that landed | 5 of 5 | 3 of 5 |
+| Sign-off | accepted | blocked |
+| Suite at the end | **red** | green |
+| What the caller gets on a decline | `None`, silently | `GatewayError`, handled |
+
+![Without cc-enforcer: every edit lands, the crash becomes a silent None, and a
+false "the suite is green" sign-off ends the turn](demo/out/without-cc-enforcer.svg)
+
+![With cc-enforcer: the swallow is denied, the fourth small edit is denied, the
+evidence-free sign-off is blocked](demo/out/with-cc-enforcer.svg)
+
+**This is a lagging error** — the kind that does not disappear when you patch
+it, it just gets quieter. The `KeyError` was loud and pointed at the line that
+caused it. Wrapping it returns `None` instead, and the failure moves from a
+stack trace to a ledger holding rows the gateway refused. Nothing reports it
+until someone reconciles a statement three weeks later.
+
+**What is real, and what is not.** Every cc-enforcer verdict in those images is
+verbatim hook output — `read_guard.py` and `stop_guard.py` run as subprocesses
+with the payload shape Claude Code sends. Every test and probe result is
+captured from a real run. The agent's five moves are **scripted**: no LLM is in
+the loop, and scripting them is what makes the two runs identical in everything
+except the hooks. [`tests/test_demo.py`](tests/test_demo.py) re-runs the demo
+and compares against the committed images byte for byte, so a change in any
+hook's wording fails CI rather than leaving a stale picture here.
+
+### The rolling-patch verdict, up close
+
+The fifth edit never lands:
 
 ```text
 cc-enforcer · rule 09 violation (rolling-patch interception)
@@ -285,13 +312,15 @@ re-derives it from [`lib/editscale.py`](hooks/scripts/lib/editscale.py) so this
 sample cannot drift away from the code that produces it — it said `1104` of a
 `121`-line file until v0.35.1, because it had been written by hand.
 
-### Before / after: the done-claim gate
+### The done-claim gate, up close
 
-**Before** — a plausible-looking sign-off:
+The demo above shows layer (a) refusing a claim with **no evidence**. Layer (b)
+is the neighbouring case — evidence may follow, but the claim is hedged, so the
+turn still cannot end. This reply:
 
 > Fixed the race condition in the worker pool. I think it holds now.
 
-**After** — the turn cannot end:
+produces:
 
 ```text
 cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim]
@@ -345,7 +374,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 676 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 690 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -590,18 +619,24 @@ cc-enforcer/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 682 black-box + unit tests (python -m unittest discover tests)
+├── demo/                        # the same task run twice — §5's images (v0.36)
+│   ├── paygate/                 #   a tiny project with a real lagging bug
+│   ├── run_demo.py              #   drives the real hooks, captures both transcripts
+│   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
+│   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
+└── tests/                       # 690 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
     ├── test_<lib|cli>.py        #   unit tests for shared modules and auxiliary scripts
+    ├── test_demo.py             #   drift gate: the README's images vs a fresh demo run
     ├── test_version_sync.py     #   drift gate: every version pointer vs plugin.json
     ├── test_doc_sync.py         #   drift gate: documented counts + inventories vs code
     ├── test_i18n_sync.py        #   drift gate: every translation vs the English skeleton
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **682 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **690 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

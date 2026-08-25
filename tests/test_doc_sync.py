@@ -768,6 +768,10 @@ DOC_ONLY_IDENTIFIERS: dict[str, str] = {
         "the placeholder token rule 10's hatch looks for; CLAUDE.md's v0.35.1 "
         "row names it while retracting an AKIA finding it caused"
     ),
+    "HANDLED": (
+        "an outcome label demo/paygate/probe.py PRINTS, not a name it binds; "
+        "demo/README.md quotes the printed word"
+    ),
 }
 
 # CHANGELOG is history: an entry describing v0.12 may name a v0.12 identifier.

@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.35.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.35.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -97,7 +97,7 @@ Stop 钩子读 agent 即将收尾的那条回复。只要里面含完成声明�
 | 层 | 规则 | 什么情况下拦 |
 |---|---|---|
 | (a) | 06 | 声称完成但**毫无证据**——没有命令、没有输出、没有计数。 |
-| (b) | 01 | 完成声明旁边挨着一个 **hedge**（"应该没问题"、"probably"、"我觉得"）。 |
+| (b) | 01 | 完成声明旁边挨着一个**第一人称 hedge**（"我觉得"、"应该是"、"I think"、"probably"、"maybe"）。裸的 `应该` / `通常` / `should` **刻意不算** hedge —— 它们在正常技术叙述里出现得太频繁。 |
 | (c) | 06 | 有证据，但从没回答**收敛四问**。 |
 | (d) | 07 | 过了收敛，却从没对照**用户的原始请求**逐项核对。 |
 | (e) | 08 | 改了文件却没写出根因 / 架构 / 方案 / 影响 / 风险中的 ≥ 3 项。 |
@@ -240,29 +240,38 @@ cc-enforcer · rule 09 violation (rolling-patch interception)
 
 Tool: Edit
 Target: auth.py
-Rolling-patch counter: 3 small edit(s) already applied this session;
-this would be attempt #4 — at or above the threshold of 4.
-
+Rolling-patch counter: 3 small edit(s) already applied
+this session; this would be attempt #4 — at or above the
+threshold of 4.
+…
 Classification used here:
   small      = max(|old_string|, |new_string|) < 200 chars
                AND max line count ≤ 10
   systematic = max chars ≥ 1500 OR max line count ≥ 50
-               OR the change spans ≥ 30% of this file — here,
-               37 of 121 lines or 1104 of 3672 chars
+               OR the change spans ≥ 30% of this file — here, 37 of 122 lines or 1102 of 3672 chars
                (resets the counter to 0)
+  medium     = anything in between (does not count, does not reset)
 
 Never counted, at any counter value (v0.35):
-  net reduction — new_string is SHORTER than old_string.
-  bookkeeping   — only version / ISO-date literals differ.
+  net reduction — new_string is SHORTER than old_string. A rolling patch
+                  is an accretion; an edit that leaves the file smaller
+                  than it found it cannot be one.
+  bookkeeping   — only version / ISO-date literals differ and every other
+                  byte is identical (in prose documents, bare integers
+                  count too). Bumping a version number is not a fix.
 ```
 
-这不是事后打印的忠告 —— **那次编辑根本没有发生**。
+这不是事后打印的忠告 —— **那次编辑根本没有发生**。它印出来的那条按文件的门槛
+（这里是 `37 of 122 lines or 1102 of 3672 chars`）是从磁盘上的目标文件算出来的，
+而 [`test_doc_sync.py`](tests/test_doc_sync.py) 会从 [`lib/editscale.py`](hooks/scripts/lib/editscale.py)
+重新推导它，所以这个示例不可能再和产生它的代码脱节 —— v0.35.1 之前它写的是
+`121` 行文件的 `1104`，因为那是手写上去的。
 
 ### Before / After：完成声明闸门
 
 **Before** —— 一个看起来很像样的收尾：
 
-> 修好了 worker pool 的竞态。现在应该稳了。
+> 修好了 worker pool 的竞态。我觉得现在稳了。
 
 **After** —— 这一轮结束不了：
 
@@ -272,19 +281,32 @@ cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim
 | Layer | Rule | Status      | Note                              |
 |-------|------|-------------|-----------------------------------|
 | (a)   | 06   | ⏸  pending  | (not evaluated)                   |
-| (b)   | 01   | ❌ **FAIL** | hedge near done-claim             |
+| (b)   | 01   | ❌ **FAIL**  | hedge near done-claim             |
 | (c)   | 06   | ⏸  pending  | (not evaluated)                   |
 …
 Done-claim matched: '修好了'
-Hedge matched: '应该'
+Hedge matched: '我觉得'
 
 [Recovery — rule 01 + hedge]
-二选一：
-  • 删掉含糊词，用具体输出陈述结果；或
-  • 删掉完成声明，明说"尚未确认"。
+Your reply pairs a completion claim with hedged language
+within ~50 characters. …
+
+Pick one:
+  • Drop the hedge and state the result with concrete output, or
+  • Drop the done-claim and say explicitly "尚未确认 / not yet
+    verified" so the user decides whether to ship.
 
 大白话: 你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。
 ```
+
+hedge 集合**只收第一人称的不确定**——`我记得` / `我觉得` / `我相信` / `可能就` /
+`应该是` / `大概` / `I think` / `I believe` / `I guess` / `maybe` / `probably` /
+`kinda` / `sort of`。裸的 `应该` **不在里面**，这是刻意的：它在正常技术叙述里
+出现得比 hedge 频繁得多。v0.35.1 之前这一节用 *"现在应该稳了"* 演示该层——那句
+话**根本走不到 layer (b)**，也就是说上面那段输出不可能由它上面那句话产生。两者
+现在都取自实跑，且 [`test_doc_sync.py`](tests/test_doc_sync.py) 会从
+`stop_guard._HEDGE_INNER` 派生触发词清单，任何一个面都不能再宣传钩子并不认的
+hedge。
 
 注意状态表报的是**求值顺序**而不是字母顺序（v0.30）：(b) 排在最前，因为无论旁边
 堆了多少证据，一个 hedge 都会让完成声明失效——所以 layer (b) 被拦时表里写的是
@@ -509,7 +531,7 @@ cc-enforcer/
 ├── agents/verifier.md           # 只读引用核对子代理
 ├── skills/                      # systematic-debug、repo-refresh（自动唤起）
 ├── docs/                        # 索引 + ARCHITECTURE、RULES、EDICTS、I18N
-└── tests/                       # 676 个测试（python -m unittest discover tests）
+└── tests/                       # 682 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -520,7 +542,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **676 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **682 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 

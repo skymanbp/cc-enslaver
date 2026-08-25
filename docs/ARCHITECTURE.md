@@ -255,21 +255,29 @@ the last assistant entry in `payload.transcript_path`).
 |------|-----------|--------|
 | 0 | One-shot guard window (`turn_count` ∈ `[last_blocked + 1, last_blocked + 3]`; **v0.23**: production Stop payloads carry no turn_count — verified live — so a monotonic turn number is synthesized from the per-session `stop_counter`, which restores the grace arithmetic in production). **v0.24**: the message is now extracted *before* this guard, and a grace-window reply carrying a sync marker records its layer-(i) group acknowledgement — but only when the block being recovered from was itself at layer (i) (`last_blocked_layer`), so a reply merely quoting "sync-check" while recovering from an unrelated layer cannot ack anything. The block→recover-with-`同步核对` flow used to lose the ack entirely, so the answered group re-blocked after the grace expired | Allow |
 | 1 | No done-claim regex matched | Allow |
-| 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (`HEDGED_DONE_REASON`) |
-| 3 | No evidence regex matched (v0.6.0 base) | **Block** (`NO_EVIDENCE_REASON`) |
-| 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (`MISSING_QUIZ_REASON`) |
-| 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (`MISSING_FIDELITY_REASON`) |
+| 2 | Hedge regex within 50 chars of done-claim (rule 01) | **Block** (layer (b), `_RECOVERY_B`) |
+| 3 | No evidence regex matched (v0.6.0 base) | **Block** (layer (a), `_RECOVERY_A`) |
+| 4 | No convergence marker AND fewer than 2 self-quiz questions (rule 06 deep) | **Block** (layer (c), `_RECOVERY_C`) |
+| 5 | No fidelity marker AND fewer than 2 of 3 fidelity questions (rule 07) | **Block** (layer (d), `_RECOVERY_D`) |
 | 6 | edit turn (`edited_since_last_stop` flag, or `last_edit_turn == turn_count` when supplied) AND no rule-08 marker AND fewer than 3 of 6 rule-02 keywords (rule 08, **v0.11**; edit signal fixed for production in **v0.23**) | **Block** (layer (e)) |
 | 7 | edit turn AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
 | 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENFORCER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
 | 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
-| 10 | A tldr item longer than `TLDR_MAX_ITEM_CHARS` (160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
+| 10 | A tldr item wider than `TLDR_MAX_ITEM_COLUMNS` (160 **display columns**, **v0.35** — a CJK character costs 2, so ≈ 80 汉字; ASCII is unchanged at 160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
 | 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enforcer/sync-gate.toml` — no config, never fires). A marker escape records the acknowledged groups for the session, so one explicit answer per group suffices. **v0.27**: the marker settles only groups the session has actually been SHOWN (`last_blocked_groups`) — the primary path used to ack every pending group while the grace path acked only the presented set, and that inconsistency was itself the bypass (outlast the grace window, reach the looser path). A group is therefore named by one block, then settled by the next reply's marker: one *informed* answer per group. | **Block** (layer (i)) |
 | 12 | All gates passed | Allow |
 
-**Done-claim patterns**: `已解决` / `已修复` / `[修改弄搞]好了` / `完成了` /
-`完工` / `搞定` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
-`\bresolved\b` / `all set` / `should work now` / `that should do it`.
+**Done-claim patterns**: `已解决` / `已修复` / `已完成` / `完成了` / `完工` /
+`搞定` / `[修改弄搞]好了` / `\bfixed\b` / `\bdone\b` / `\bcompleted\b` /
+`\bresolved\b` / `\bimplemented\b` / `\bfinished\b` (v0.25.1) /
+`(is|are|was|were) complete` / `<noun> complete` / `ready to ship`
+(v0.26) / `all set` / `should work now` / `that should do it`. The list
+is exhaustive on purpose: `_has_done_claim` gates **all nine layers**, so
+a completion phrased outside it skips the entire stack — which is why
+v0.25.1 and v0.26 each had to widen it after finding a live phrasing that
+matched nothing. Note that `should work now` and `that should do it` are
+**done**-claims, not hedges; bare `should` is excluded from the hedge set
+just below, and the two lists do not overlap.
 
 **Evidence patterns**: shell-prompt lines (`$ ` / `> `), `Ran N tests`,
 `N passed/failed`, `pytest` / `unittest`, `重触发` / `边界用例` / `反向用例`
@@ -395,8 +403,16 @@ one-line plain-language takeaway (`大白话: ...`) before the one-shot
 footer, so cc-enforcer's own output is symmetric with the layer-(h)
 requirement it imposes on the agent.
 
-**v0.23.0 layer (h) length cap**: beyond mere presence, each tldr item
-must stay within `TLDR_MAX_ITEM_CHARS` (160) characters. Extraction is
+**v0.23.0 layer (h) length cap** (**v0.35** — now measured in display
+columns): beyond mere presence, each tldr item must stay within
+`TLDR_MAX_ITEM_COLUMNS` (160) display columns, where an East-Asian
+wide character costs 2 and a combining mark 0. The constant was
+`TLDR_MAX_ITEM_CHARS` and counted code points until v0.35, which made
+one number mean two things across a bilingual contract — the comment
+above it conceded as much ("a full English sentence fits; a Chinese
+sentence is far shorter"), i.e. the zh side enforced a bound about
+twice as loose while the whole point of the layer is that a TL;DR is
+one sentence. ASCII behaviour is unchanged. Extraction is
 line-based and conservative (only lines attributable to a tldr marker —
 the marker line's value plus more-indented continuation / `- ` list
 lines — are measured; anything ambiguous is not measured, failing open).

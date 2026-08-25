@@ -18,6 +18,105 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.35.1] — 2026-08-25
+
+**The README advertised a detector that does not exist.** This release ran the
+*active* half of rule 12 — the [`repo-refresh`](skills/repo-refresh/SKILL.md)
+full-repo scan — for the first time since v0.32.2. The passive half (per-edit
+sweeps and three CI drift gates) had been green the whole time, which is
+exactly the blind spot rule 06 check 2b names: a green gate says nothing about
+the paragraphs around the numbers it pins.
+
+Six confirmed misalignments, no behaviour change, one new gate per defect class.
+
+### The class: a documented detection that does not happen
+
+Both READMEs described Stop layer (b) in **three places each**, and all three
+were wrong in the same way:
+
+| Surface | Claimed | Live probe |
+|---|---|---|
+| [README.md:107](README.md#L107) layer table | hedge = `"should be fine"`, `"应该"` | falls through to **layer (a)** |
+| [README.zh.md:100](README.zh.md#L100) layer table | hedge = `"应该没问题"` | falls through to **layer (a)** |
+| README.zh.md before-example | `修好了…现在应该稳了。` | never reaches layer (b) |
+| README.md sample output | `Hedge matched: 'Should be'` | no such match |
+
+[`stop_guard.py:377-381`](hooks/scripts/stop_guard.py#L377) states the design
+in a comment predating all of this:
+
+> Generic words like `通常` or `should` are NOT in this list — they appear in
+> legitimate technical writing far from the completion claim.
+
+So the "captured output" in each demo **could not have been produced by the
+input printed directly above it**. A plugin whose entire purpose is refusing
+unfounded claims was making one on its own front page.
+
+**Root cause — one class, not four bugs.** v0.34.1 fixed this exact
+over-promising, on the user's ruling that *prompts align down to
+implementations*, and scoped the sweep to `prompts/`. The READMEs describe the
+same detector and were never in the sweep, so the class was closed on one
+surface and left open on another. `docs/ARCHITECTURE.md` had it right the whole
+time — the developer doc was accurate while the user-facing one was not.
+
+### Two siblings of the same shape
+
+- **A hand-written number posing as captured output.** The rolling-patch sample
+  printed `37 of 121 lines or 1104 of 3672 chars`;
+  `editscale.coverage_bar((3672, 122))` returns `(1102, 37)`.
+- **Four identifiers that have not existed since v0.12.0.** The Stop decision
+  table in `docs/ARCHITECTURE.md` cited `HEDGED_DONE_REASON`,
+  `NO_EVIDENCE_REASON`, `MISSING_QUIZ_REASON` and `MISSING_FIDELITY_REASON`.
+  `git log -S` puts their removal at **a37eb3c (v0.12.0)** — cited for the
+  twenty-three releases since. The live names are `_RECOVERY_A` … `_RECOVERY_I`.
+  The same table's done-claim list had also stopped at the pre-v0.25.1 set,
+  omitting six patterns.
+
+### Fixing the words would decay; each class got a gate
+
+Three new checks in [`tests/test_doc_sync.py`](tests/test_doc_sync.py), all
+deriving from code and never comparing one doc to another:
+
+| Gate | Derives from | Closes |
+|---|---|---|
+| `TestHedgeExamplesAreReal` | `stop_guard._HEDGE_INNER` | every advertised trigger must match; and the tokens docs call *excluded* must genuinely not match |
+| `TestSampleCoverageBarMatchesEditscale` | `editscale.coverage_bar` | a printed `A of B lines or C of D chars` must be the arithmetic |
+| `TestDocsCiteOnlyLiveIdentifiers` | every `UPPER_SNAKE` bound in `hooks/` + `tests/` | a backticked constant must exist or be registered in `DOC_ONLY_IDENTIFIERS` with a reason |
+
+**All three were verified RED against the pre-fix tree before being committed**,
+by running their logic over `git show HEAD:<file>`. A gate that only passes on
+fixed content cannot distinguish a working check from a deleted one — the
+lesson v0.25.1 shipped four allow-only tests to learn.
+
+### Two candidate findings retracted rather than shipped
+
+Both were caught by the repo's own rule 01, and are recorded because a scan
+that reports only its hits is not reporting its accuracy:
+
+- **`marketplace.json` "mojibake."** `??` in the rendered description looked
+  like encoding damage. Byte inspection: `EF BF BD` count **0**, and the
+  suspect run decodes to `同步核对` (U+540C U+6B65 U+6838 U+5BF9). The damage
+  was the terminal's cp936, not the file.
+- **AKIA "false negative."** A standalone AWS key literal appeared to be
+  allowed. It contained `EXAMPLE`, which is the documented placeholder hatch.
+  With a non-placeholder value the detector denies as specified.
+
+### Also
+
+- **Both manifest descriptions trimmed** (user ruling). They had accumulated
+  **nine stacked release narratives** — `marketplace.json` at 18,496 characters
+  of which ~1,050 was the actual pitch — duplicating `CHANGELOG.md` verbatim.
+  This is the second-source defect [`CLAUDE.md`](CLAUDE.md) §6.1 diagnosed and
+  fixed for itself in v0.30; `plugin.json` carried the identical copy, so both
+  were swept rather than only the one that was noticed.
+- Clean on this pass: dead code (0), stale TODOs (0), the 16 `PreToolUse`
+  content detectors and 9 Bash patterns (each probed live, all matching their
+  documentation), i18n skeleton parity, and `tests/README.md`'s per-file counts
+  (17 of 17 exact).
+
+**676 → 682 tests.**
+
+---
+
 ## [0.35.0] — 2026-08-25
 
 **A cap should be relative to the thing it caps.** Three limits in this

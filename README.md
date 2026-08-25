@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.35.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.35.1-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -104,7 +104,7 @@ turns that actually edited a file.
 | Layer | Rule | Blocks when the reply… |
 |---|---|---|
 | (a) | 06 | claims done with **no evidence** — no command, no output, no counts. |
-| (b) | 01 | pairs a done-claim with a **hedge** ("should be fine", "probably", "应该"). |
+| (b) | 01 | pairs a done-claim with a **first-person hedge** ("I think", "probably", "maybe", "我觉得", "应该是"). Bare `should` and `通常` are deliberately *not* hedges — they are ordinary technical prose. |
 | (c) | 06 | shows evidence but never answers the **four convergence questions**. |
 | (d) | 07 | passes convergence but never reconciles against the **user's original request**. |
 | (e) | 08 | edited a file without surfacing ≥ 3 of root cause / architecture / solution / impact / risk. |
@@ -257,29 +257,39 @@ cc-enforcer · rule 09 violation (rolling-patch interception)
 
 Tool: Edit
 Target: auth.py
-Rolling-patch counter: 3 small edit(s) already applied this session;
-this would be attempt #4 — at or above the threshold of 4.
-
+Rolling-patch counter: 3 small edit(s) already applied
+this session; this would be attempt #4 — at or above the
+threshold of 4.
+…
 Classification used here:
   small      = max(|old_string|, |new_string|) < 200 chars
                AND max line count ≤ 10
   systematic = max chars ≥ 1500 OR max line count ≥ 50
-               OR the change spans ≥ 30% of this file — here,
-               37 of 121 lines or 1104 of 3672 chars
+               OR the change spans ≥ 30% of this file — here, 37 of 122 lines or 1102 of 3672 chars
                (resets the counter to 0)
+  medium     = anything in between (does not count, does not reset)
 
 Never counted, at any counter value (v0.35):
-  net reduction — new_string is SHORTER than old_string.
-  bookkeeping   — only version / ISO-date literals differ.
+  net reduction — new_string is SHORTER than old_string. A rolling patch
+                  is an accretion; an edit that leaves the file smaller
+                  than it found it cannot be one.
+  bookkeeping   — only version / ISO-date literals differ and every other
+                  byte is identical (in prose documents, bare integers
+                  count too). Bumping a version number is not a fix.
 ```
 
 That message is not advice printed after the fact. **The edit did not happen.**
+The per-file bar it quotes (here `37 of 122 lines or 1102 of 3672 chars`) is
+computed from the target on disk, and [`test_doc_sync.py`](tests/test_doc_sync.py)
+re-derives it from [`lib/editscale.py`](hooks/scripts/lib/editscale.py) so this
+sample cannot drift away from the code that produces it — it said `1104` of a
+`121`-line file until v0.35.1, because it had been written by hand.
 
 ### Before / after: the done-claim gate
 
 **Before** — a plausible-looking sign-off:
 
-> Fixed the race condition in the worker pool. Should be stable now.
+> Fixed the race condition in the worker pool. I think it holds now.
 
 **After** — the turn cannot end:
 
@@ -289,19 +299,33 @@ cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim
 | Layer | Rule | Status      | Note                              |
 |-------|------|-------------|-----------------------------------|
 | (a)   | 06   | ⏸  pending  | (not evaluated)                   |
-| (b)   | 01   | ❌ **FAIL** | hedge near done-claim             |
+| (b)   | 01   | ❌ **FAIL**  | hedge near done-claim             |
 | (c)   | 06   | ⏸  pending  | (not evaluated)                   |
 …
 Done-claim matched: 'Fixed'
-Hedge matched: 'Should be'
+Hedge matched: 'I think'
 
 [Recovery — rule 01 + hedge]
+Your reply pairs a completion claim with hedged language
+within ~50 characters. …
+
 Pick one:
   • Drop the hedge and state the result with concrete output, or
-  • Drop the done-claim and say explicitly "not yet verified".
+  • Drop the done-claim and say explicitly "尚未确认 / not yet
+    verified" so the user decides whether to ship.
 
 大白话: 你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。
 ```
+
+The hedge set is **first-person uncertainty only** — `我记得` / `我觉得` /
+`我相信` / `可能就` / `应该是` / `大概` / `I think` / `I believe` / `I guess` /
+`maybe` / `probably` / `kinda` / `sort of`. A bare `should` is **not** in it, by
+design: it is ordinary technical prose far more often than a hedge. Until
+v0.35.1 this section demonstrated the layer with *"Should be stable now"* — an
+input that does not reach layer (b) at all, so the sample above could not have
+been produced by the sample above it. Both are now taken from a live run, and
+[`test_doc_sync.py`](tests/test_doc_sync.py) derives the trigger list from
+`stop_guard._HEDGE_INNER` so no surface can advertise a hedge the hook ignores.
 
 Note the status table reports **evaluation** order, not the alphabet (v0.30).
 (b) runs first, because a hedge invalidates a done-claim however much evidence
@@ -566,7 +590,7 @@ cc-enforcer/
 ├── agents/verifier.md           # read-only citation checker subagent
 ├── skills/                      # systematic-debug, repo-refresh (auto-invoked)
 ├── docs/                        # index + ARCHITECTURE, RULES, EDICTS, I18N
-└── tests/                       # 676 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 682 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -577,7 +601,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **676 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **682 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

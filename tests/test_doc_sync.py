@@ -636,6 +636,261 @@ class TestModuleInventoriesAreComplete(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #
+# v0.35.1 — three classes this gate could not see, each found by a live probe
+# rather than by reading.
+#
+# (1) Both READMEs advertised hedge triggers the detector does not match. The
+#     layer-(b) row named "should be fine" / "应该", the before/after demo was
+#     built on "Should be stable now", and the sample output claimed
+#     `Hedge matched: 'Should be'`. stop_guard's own comment says bare `should`
+#     is deliberately excluded — so the English demo's OUTPUT could not have
+#     come from its own INPUT, and the zh demo likewise. v0.34.1 aligned the
+#     injected PROMPTS down to the implementation and scoped the sweep to
+#     prompts/; the READMEs describe the same detector and were not in it.
+#
+# (2) The rolling-patch sample printed "37 of 121 lines or 1104 of 3672 chars"
+#     where `editscale.coverage_bar((3672, 122))` yields (1102, 37). Numbers a
+#     reader would take for captured output, written by hand.
+#
+# (3) docs/ARCHITECTURE.md's decision table cited `HEDGED_DONE_REASON`,
+#     `NO_EVIDENCE_REASON`, `MISSING_QUIZ_REASON` and `MISSING_FIDELITY_REASON`
+#     — four identifiers deleted in v0.12.0 (a37eb3c) and cited for the
+#     twenty-three releases since.
+# --------------------------------------------------------------------------- #
+
+def _load_stop_guard():
+    spec = importlib.util.spec_from_file_location(
+        "_doc_sync_stop_guard", SCRIPTS_DIR / "stop_guard.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_editscale():
+    spec = importlib.util.spec_from_file_location(
+        "_doc_sync_editscale", LIB_DIR / "editscale.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _python_identifiers() -> set[str]:
+    """UPPER_SNAKE names bound anywhere in this repo's Python.
+
+    Union of module-level assignments and def/class names across hooks/ and
+    tests/, so a doc may cite a constant that lives in a test as readily as
+    one in a hook.
+    """
+    names: set[str] = set()
+    roots = (SCRIPTS_DIR, REPO_ROOT / "tests")
+    for root in roots:
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            names |= set(re.findall(r"^(_?[A-Z][A-Z0-9_]{2,})\s*[:=]",
+                                    text, re.MULTILINE))
+            names |= set(re.findall(r"^(?:def|class)\s+(_?[A-Z][A-Z0-9_]{2,})\b",
+                                    text, re.MULTILINE))
+    return names
+
+
+# Each entry captures, in group(1), the span where a surface ENUMERATES the
+# hedge triggers. Only the positive enumeration is captured: the sentence that
+# follows it names `should` / `通常` precisely to say they are NOT hedges, and
+# feeding that clause in would invert the check.
+HEDGE_ENUMERATION_SITES: tuple[tuple[str, str, str], ...] = (
+    ("readme-layer-b-row", "README.md",
+     r"\*\*first-person hedge\*\* \(([^)]*)\)"),
+    ("readme-hedge-prose", "README.md",
+     r"first-person uncertainty only\*\* —(.*?)\. A bare"),
+    ("readme-zh-layer-b-row", "README.zh.md",
+     r"\*\*第一人称 hedge\*\*（([^）]*)）"),
+    ("readme-zh-hedge-prose", "README.zh.md",
+     r"只收第一人称的不确定\*\*——(.*?)。裸的"),
+)
+
+# Tokens the docs present as deliberately EXCLUDED. Derived-side assertion:
+# the pattern must genuinely not match them, or the docs are promising a
+# narrower detector than ships.
+HEDGE_NON_TRIGGERS = ("should", "should be fine", "通常", "应该", "Should be")
+
+_QUOTED_ITEM = re.compile(r"`([^`]+)`|\"([^\"]+)\"|“([^”]+)”")
+
+# Backticked UPPER_SNAKE tokens that legitimately have no Python definition.
+# Closed set with a reason each, mirroring EXAMPLE_LINKS: without it this gate
+# would either be silent or noisy, and a silent gate is the worse failure.
+DOC_ONLY_IDENTIFIERS: dict[str, str] = {
+    "CC_ENFORCER_LANG": "environment variable read via os.environ.get, not a constant",
+    "CLAUDE_ENV_FILE": "environment variable set by Claude Code",
+    "CLAUDE_PLUGIN_DATA": "environment variable set by Claude Code",
+    "CLAUDE_PROJECT_DIR": "environment variable set by Claude Code",
+    "FILE_SHARE_DELETE": "Win32 API flag named in prose, not bound in Python",
+    "AKIA": "the literal AWS key prefix, quoted as a pattern in rule 10",
+    "V3_DIR": "an illustrative identifier inside rule 09's worked example",
+    "TODO": "prose marker",
+    "FIXME": "prose marker",
+    "HACK": "prose marker",
+    "DENY": "prose term for the verdict",
+    "BLOCK": "prose term for the verdict",
+    "LICENSE": "a filename",
+    "TLDR_MAX_ITEM_CHARS": (
+        "historical: renamed to TLDR_MAX_ITEM_COLUMNS in v0.35 and cited in "
+        "ARCHITECTURE only to say so"
+    ),
+    "HEDGED_DONE_REASON": (
+        "historical: deleted in v0.12.0 (a37eb3c); CLAUDE.md's v0.35.1 row "
+        "cites it as an example of the dead names that release removed"
+    ),
+    "UPPER_SNAKE": (
+        "a naming SHAPE, not an identifier — the gate below describes what it "
+        "scans for using the shape's own name"
+    ),
+    "EXAMPLE": (
+        "the placeholder token rule 10's hatch looks for; CLAUDE.md's v0.35.1 "
+        "row names it while retracting an AKIA finding it caused"
+    ),
+}
+
+# CHANGELOG is history: an entry describing v0.12 may name a v0.12 identifier.
+IDENTIFIER_SCAN_SKIP = {"CHANGELOG.md"}
+
+
+class TestHedgeExamplesAreReal(unittest.TestCase):
+    """No surface may advertise a hedge trigger the hook does not match."""
+
+    def setUp(self) -> None:
+        self.hedge = re.compile(_load_stop_guard()._HEDGE_INNER, re.IGNORECASE)
+
+    def _items(self, span: str) -> list[str]:
+        return [next(g for g in m.groups() if g)
+                for m in _QUOTED_ITEM.finditer(span)]
+
+    def test_every_enumeration_site_still_matches(self) -> None:
+        """A reworded sentence fails loudly rather than escaping the gate."""
+        for site_id, path, pattern in HEDGE_ENUMERATION_SITES:
+            with self.subTest(site=site_id):
+                found = re.findall(pattern, _read(path), re.DOTALL)
+                self.assertTrue(
+                    found,
+                    f"stale registration: {site_id} matches nothing in {path}. "
+                    f"Update the pattern here — deleting the registration "
+                    f"stops the fact being checked.",
+                )
+                items = self._items(found[0])
+                self.assertGreaterEqual(
+                    len(items), 3,
+                    f"{site_id} captured {len(items)} example(s); the check "
+                    f"would be near-vacuous. Widen the capture.",
+                )
+
+    def test_advertised_examples_all_match_the_detector(self) -> None:
+        bogus: list[str] = []
+        for site_id, path, pattern in HEDGE_ENUMERATION_SITES:
+            for span in re.findall(pattern, _read(path), re.DOTALL):
+                for item in self._items(span):
+                    if not self.hedge.search(item):
+                        bogus.append(f"{path} ({site_id}) advertises {item!r}")
+        self.assertEqual(
+            sorted(set(bogus)), [],
+            "surfaces advertise hedge triggers stop_guard does not match:\n  "
+            + "\n  ".join(sorted(set(bogus)))
+            + "\nA documented detection that does not happen is worse than an "
+              "undocumented one: the reader stops checking for it.",
+        )
+
+    def test_the_documented_exclusions_are_genuinely_excluded(self) -> None:
+        """The other direction: docs say bare `should` is not a hedge."""
+        wrongly_matched = [t for t in HEDGE_NON_TRIGGERS if self.hedge.search(t)]
+        self.assertEqual(
+            wrongly_matched, [],
+            f"docs state {wrongly_matched} are NOT hedges, but _HEDGE_INNER "
+            f"matches them. Either the pattern widened or the docs are stale — "
+            f"fix whichever is wrong, but they cannot both stand.",
+        )
+
+
+class TestSampleCoverageBarMatchesEditscale(unittest.TestCase):
+    """The rolling-patch sample's per-file bar is arithmetic, so derive it."""
+
+    _BAR = re.compile(
+        r"(\d+) of (\d+) lines or (\d+) of (\d+) chars")
+    SURFACES = ("README.md", "README.zh.md")
+
+    def test_every_sample_bar_is_what_editscale_computes(self) -> None:
+        coverage_bar = _load_editscale().coverage_bar
+        wrong: list[str] = []
+        found_any = False
+        for surface in self.SURFACES:
+            for lines_bar, lines_total, chars_bar, chars_total in \
+                    self._BAR.findall(_read(surface)):
+                found_any = True
+                expected = coverage_bar((int(chars_total), int(lines_total)))
+                actual = (int(chars_bar), int(lines_bar))
+                if expected != actual:
+                    wrong.append(
+                        f"{surface}: sample prints {actual} for a "
+                        f"{chars_total}-char / {lines_total}-line file; "
+                        f"editscale.coverage_bar says {expected}")
+        self.assertTrue(
+            found_any,
+            "no rolling-patch sample bar found in either README; this check "
+            "would pass vacuously. If the sample moved, re-point SURFACES.",
+        )
+        self.assertEqual(
+            sorted(wrong), [],
+            "README samples print a coverage bar the code would never emit:\n  "
+            + "\n  ".join(sorted(wrong))
+            + "\nThe sample is presented as captured output. Capture it.",
+        )
+
+
+class TestDocsCiteOnlyLiveIdentifiers(unittest.TestCase):
+    """A backticked constant in a doc must exist, or be a registered exception."""
+
+    _TOKEN = re.compile(r"`(_?[A-Z][A-Z0-9_]{2,})`")
+
+    def _doc_files(self) -> list[Path]:
+        skip_dirs = {".git", ".ce", "memory", "node_modules", "__pycache__"}
+        return [p for p in REPO_ROOT.rglob("*.md")
+                if not skip_dirs & set(p.relative_to(REPO_ROOT).parts)
+                and p.name not in IDENTIFIER_SCAN_SKIP]
+
+    def _undefined(self) -> dict[str, list[str]]:
+        defined = _python_identifiers()
+        out: dict[str, list[str]] = {}
+        for path in self._doc_files():
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            for token in set(self._TOKEN.findall(
+                    path.read_text(encoding="utf-8"))):
+                if token not in defined:
+                    out.setdefault(token, []).append(rel)
+        return out
+
+    def test_no_doc_cites_a_constant_that_does_not_exist(self) -> None:
+        unknown = {k: v for k, v in self._undefined().items()
+                   if k not in DOC_ONLY_IDENTIFIERS}
+        self.assertEqual(
+            unknown, {},
+            "docs cite identifiers with no definition in this repo:\n  "
+            + "\n  ".join(f"{k} in {v}" for k, v in sorted(unknown.items()))
+            + "\nEither the name is stale (rename it) or it is legitimately "
+              "doc-only (register it in DOC_ONLY_IDENTIFIERS with a reason). "
+              "Four such names were cited for twenty-three releases after "
+              "being deleted in v0.12.0.",
+        )
+
+    def test_the_exception_registry_is_not_stale(self) -> None:
+        """A registered exception that is now defined must be de-registered."""
+        present = set(self._undefined())
+        vanished = sorted(set(DOC_ONLY_IDENTIFIERS) - present)
+        self.assertEqual(
+            vanished, [],
+            f"DOC_ONLY_IDENTIFIERS registers {vanished}, which no longer "
+            f"need an exemption (either now defined in Python, or no longer "
+            f"cited). Remove them so the list stays a closed set.",
+        )
+
+
 class TestMarkdownCitationsResolve(unittest.TestCase):
     """Rule 05: a citation a reader cannot follow is not a citation.
 

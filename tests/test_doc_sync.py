@@ -55,11 +55,29 @@ Design notes (mirrors test_version_sync.py deliberately)
    entry describes the release being shipped, and exempting it as "history"
    is how five stale `378 → 474` statements passed a green gate in v0.26.
    `TestCurrentReleaseNarrative` closes that.
-4. **What this gate does NOT cover** — stated explicitly because rule 06
-   check 2b forbids letting a green gate stand in for the parts it never
+4. **Three behavioural claims ARE covered, as of v0.35.1.** Notes 1–3 were
+   written when this gate only pinned numbers and inventories, and the
+   "does NOT cover" list below said prose behaviour and citation accuracy
+   were out of reach wholesale. That is no longer true for three classes
+   that turned out to be derivable after all:
+   * an advertised *hedge trigger* must be one `_HEDGE_INNER` matches, and a
+     token the docs call excluded must be one it does not
+     (`TestHedgeExamplesAreReal`);
+   * a printed *coverage bar* must equal `editscale.coverage_bar` of the file
+     size printed beside it (`TestSampleCoverageBarMatchesEditscale`);
+   * a backticked `UPPER_SNAKE` *identifier* must be bound somewhere in this
+     repo's Python (`TestDocsCiteOnlyLiveIdentifiers`).
+
+   The lesson generalises: "prose" is not one thing. A sentence naming a
+   pattern, an arithmetic result, or an identifier is checkable; only
+   sentences making a *judgement* are not. Prefer looking for the derivable
+   sub-class over recording the whole surface as uncoverable.
+
+5. **What this gate still does NOT cover** — stated explicitly because rule
+   06 check 2b forbids letting a green gate stand in for the parts it never
    opened:
-   * prose descriptions of behaviour (how the rationale hatch decides, what
-     order bash_guard checks run in, whether a citation says what it claims);
+   * judgement prose — how the rationale hatch decides, what order
+     bash_guard's checks run in, whether an explanation is *right*;
    * unregistered numeric claims, per note 2;
    * anchors — a link to `docs/RULES.md#rule-99` resolves as long as the file
      exists;
@@ -67,8 +85,9 @@ Design notes (mirrors test_version_sync.py deliberately)
    * the Stop-layer count, the architecture-layer count, and the exact
      command/prompt/rule filename sets.
 
-   A green run means the registered numbers and inventories agree with the
-   code. It means nothing about the paragraphs around them.
+   A green run means the registered numbers, inventories, and the three
+   derivable claim classes above agree with the code. It means nothing about
+   the judgement prose around them.
 """
 
 from __future__ import annotations

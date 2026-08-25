@@ -18,6 +18,61 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.35.2] — 2026-08-25
+
+**A fourth co-update group, and the drift it immediately caused.** No code
+change; 682 tests unchanged.
+
+### The group
+
+`hooks/scripts/*_guard.py` → `README*.md`, added to this repo's own
+[`sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml) through
+[`manage_sync_gate.py`](hooks/scripts/manage_sync_gate.py) rather than by hand:
+
+```
+ok guards-readme.when     'hooks/scripts/*_guard.py' → 3 file(s)
+ok guards-readme.require  'README*.md'               → 2 file(s)
+```
+
+A guard's user-visible behaviour is enumerated row by row in both READMEs — the
+`PreToolUse` gate table and the nine-layer Stop table — and v0.35.1 is the
+release that discovered what happens when that coupling is not enforced. The
+group was **asserted by the user**, not inferred: [`repo-refresh`](skills/repo-refresh/SKILL.md)
+Step 6 forbids the scanner from guessing groups, because a heuristically
+invented co-update invariant is fabricated confidence and the entire value of
+the gate is that a person said these files move together.
+
+Scoped to all three `*_guard.py`, not the one that failed. The v0.35.1 defect
+was in `stop_guard`, but `read_guard`'s content detectors and `bash_guard`'s
+deny set are enumerated in the same two tables by the same argument — fixing
+only the one that broke is the point-patching rule 09 forbids.
+
+### The drift the group's own commit produced
+
+v0.35.1 made three behavioural claim classes derivable. Its gate's *design
+notes* were not updated, and still read:
+
+> **What this gate does NOT cover** … prose descriptions of behaviour …
+> whether a citation says what it claims
+
+That is a document describing its own tool as **weaker than it is** — the same
+shape as v0.35.1's finding, inverted, and introduced by the fix for it. Three
+surfaces carried the claim ([`tests/test_doc_sync.py`](tests/test_doc_sync.py)'s
+docstring, [`tests/README.md`](tests/README.md), [`docs/README.md`](docs/README.md))
+and all three were swept in one change.
+
+The docstring now separates two things that had been collapsed into "prose":
+
+- **derivable** — a sentence naming a *pattern*, an *arithmetic result*, or an
+  *identifier* is checkable, and now is;
+- **judgement prose** — whether an explanation is right, whether a rationale is
+  sound, what order a guard's checks run in — genuinely is not.
+
+The generalisation is recorded in the docstring itself: prefer hunting for the
+derivable sub-class over filing a whole surface as uncoverable.
+
+---
+
 ## [0.35.1] — 2026-08-25
 
 **The README advertised a detector that does not exist.** This release ran the

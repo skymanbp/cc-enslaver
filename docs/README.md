@@ -29,6 +29,10 @@ the enforcement itself: the rules are Markdown in `../rules/`, the hooks are
 Python in `../hooks/scripts/`, and the guarantee that this documentation still
 matches them is [`../tests/test_doc_sync.py`](../tests/test_doc_sync.py) — a
 CI gate that derives every pinned number and inventory from the code at test
-time. A green gate covers the registered numbers and inventories. It says
-nothing about the paragraphs around them, which is stated here for the same
-reason it is stated in the gate's own docstring.
+time. Since v0.35.1 it also derives three *behavioural* claim classes —
+advertised hedge triggers, printed coverage bars, and backticked identifiers —
+because a sentence naming a pattern, an arithmetic result, or an identifier
+turned out to be checkable even though "prose" as a whole is not. A green gate
+still says nothing about judgement prose: whether an explanation is right, or
+a rationale sound. That limit is stated here for the same reason it is stated
+in the gate's own docstring.

@@ -1,17 +1,28 @@
-# cc-enforcer — repo-wide sync gate config (rule 12, v0.23)
+# cc-enforcer — repo-wide sync gate (rule 12)
 #
-# Co-update groups for THIS repo (dogfood: the plugin's own development is
-# governed by its own gate). Semantics per group: if any file edited this
-# session matches a `when` glob, at least one edited file must match a
-# `require` glob — otherwise Stop layer (i) blocks the done-claim unless
-# the reply carries an explicit sync marker (同步核对 / sync-check /
-# rule 12) explaining why the require side needs no change.
+# Co-update groups for THIS repo. Semantics of one group: if any file
+# edited during a session matches a `when` glob, then at least one edited
+# file must match a `require` glob — otherwise Stop layer (i) blocks the
+# done-claim, unless the reply carries an explicit sync marker
+# (`同步核对:` / `sync-check:`) explaining why the require side needs no
+# change.
 #
-# Globs are matched against project-relative paths with fnmatch; `*`
-# crosses path separators (so "rules/*.md" also covers rules/zh/).
-# `mode = "any"` (default): one require-side edit satisfies the group.
-# `mode = "all"`: EVERY require glob needs an edited match — use for
-# lock-step invariants where one stale sibling is the failure mode.
+# Globs are matched with fnmatch against PROJECT-RELATIVE paths, and `*`
+# crosses path separators (so "rules/*.md" also covers "rules/zh/").
+#
+#   mode = "any"  (default) — one require-side edit satisfies the group.
+#   mode = "all"            — EVERY require glob needs an edited match.
+#                             Use for lock-step invariants where one stale
+#                             sibling is the failure mode.
+#
+# Run `/cc-enforcer:sync-gate check` after editing: a glob that matches
+# nothing is silently inert, and this config is failing-open by design.
+#
+# [[groups]]
+# name = "rules-fanout"
+# when = ["rules/*.md"]
+# require = ["docs/RULES.md", "prompts/*.md"]
+# note = "Editing a rule fans out to the index and the injected prompts."
 
 [[groups]]
 name = "rules-fanout"
@@ -31,3 +42,9 @@ when = [".claude-plugin/plugin.json"]
 require = [".claude-plugin/marketplace.json", "CHANGELOG.md"]
 mode = "all"
 note = "plugin.json is the version authority; BOTH marketplace.json AND CHANGELOG must move with it (§4.1 — updating only one of them is exactly the v0.22.1 shipping failure)."
+
+[[groups]]
+name = "guards-readme"
+when = ["hooks/scripts/*_guard.py"]
+require = ["README*.md"]
+note = "A guard script's user-visible behaviour is enumerated in both READMEs (the PreToolUse gate table and the nine-layer Stop table). v0.35.1: the layer-(b) hedge set was described in three README places that no sweep covered, because v0.34.1 scoped the same fix to prompts/ only. Widened from stop_guard to all three *_guard.py by the same argument. The gate is a floor: answering with a sync-check line is the intended escape when a change is not user-visible."

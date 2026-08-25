@@ -111,6 +111,9 @@ a literal fixture would make the module unwritable by any agent running it.
 - **Live tool denial inside Claude Code.** These tests prove each script emits
   the documented JSON for the documented stdin shape. Whether Claude Code
   honours a `deny` is Claude Code's contract, not ours.
-- **Prose accuracy.** `test_doc_sync.py` pins numbers and inventories. It says
-  nothing about whether the paragraphs around them are true — see its module
-  docstring, which lists its own blind spots.
+- **Judgement prose.** `test_doc_sync.py` pins numbers, inventories, and — as
+  of v0.35.1 — three derivable *behavioural* claim classes: advertised hedge
+  triggers, printed coverage bars, and backticked identifiers. It still says
+  nothing about whether an explanation is right, what order a guard's checks
+  run in, or whether a rationale is sound. See its module docstring, notes 4
+  and 5, which separate what became checkable from what did not.

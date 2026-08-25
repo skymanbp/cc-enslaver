@@ -1,6 +1,6 @@
 # Tests — index
 
-**691 tests, 19 files, zero dependencies.** This file is the index: every
+**712 tests, 20 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — [`CLAUDE.md`](../CLAUDE.md) used to keep a
 second, class-by-class copy of this list, and it had been wrong since v0.26.
@@ -35,7 +35,7 @@ conventions layered on top:
 
 | File | Tests | Covers |
 |---|---:|---|
-| [`_helpers.py`](_helpers.py) | — | `run_hook(...)`: launches a script as a real subprocess with a synthetic JSON stdin payload and returns `(returncode, parsed_stdout, stderr)`. Every file below imports it. |
+| [`_helpers.py`](_helpers.py) | — | `run_hook(...)`: launches a script as a real subprocess with a synthetic JSON stdin payload and returns `(returncode, parsed_stdout, stderr)`. Every file below imports it. **It serialises with `ensure_ascii=False`, and that is load-bearing** (v0.37): the `json.dumps` default escaped every non-ASCII character before the bytes existed, so the wire was pure ASCII and the encoding boundary was unreachable from any test here — which is how a defect that silently disabled every CJK detector survived 691 tests. |
 
 ### Hook entry points — black-box subprocess
 
@@ -54,6 +54,7 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
+| [`test_hookio.py`](test_hookio.py) | 21 | [`lib/hookio.py`](../hooks/scripts/lib/hookio.py) (v0.37) — the payload-decoding boundary, plus the encoding contract at all four hook entries end to end. The unit half asserts CJK markers survive **by identity** (mojibake also raises nothing, which is the whole problem) and ships the refusal twin: non-UTF-8 bytes must raise, not be rewritten into something that still parses. The end-to-end half forces `PYTHONIOENCODING=cp936:surrogateescape` so a defect that only appears on a non-UTF-8 host is reproducible on the ubuntu runner too — a gate that can only fail on one laptop is not a gate — and `TestReproductionIsLive` fails if that reproduction ever stops biting, so a future Python cannot turn the file green for the wrong reason. Five cases were verified RED pre-fix; the rest are labelled as controls, because an allow-only test cannot tell a working hatch from a deleted detector. |
 | [`test_envfile.py`](test_envfile.py) | 11 | [`lib/envfile.py`](../hooks/scripts/lib/envfile.py) (v0.34) — the pure dedupe model (last-occurrence wins, order survives, refusal twins for non-export lines and open quotes) plus black-box SessionStart runs proving a duplicated `CLAUDE_ENV_FILE` shrinks and a refused one stays byte-identical. |
 | [`test_edicts.py`](test_edicts.py) | 64 | [`lib/edicts.py`](../hooks/scripts/lib/edicts.py) loading / injection / DENY / severity gating **and** the [`manage_edicts.py`](../hooks/scripts/manage_edicts.py) CLI, including its TOML round-trip, cwd fallback, and the v0.33 single-definition pin on the `--global` path (write target must be the loader's `global_path()`, which must derive from `_PLUGIN_NAME`). |
 | [`test_sync_gate.py`](test_sync_gate.py) | 19 | [`lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py) — config resolution order, TOML tolerance, any-vs-all mode, `./` glob normalisation, project-relative boundaries. |

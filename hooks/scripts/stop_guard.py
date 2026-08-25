@@ -192,6 +192,8 @@ from lib import state as state_lib  # noqa: E402
 from lib import sync_gate as sync_gate_lib  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import mdctx  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import hookio  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -1854,7 +1856,12 @@ def _last_assistant_message_from_transcript(transcript_path: str) -> str:
 # --------------------------------------------------------------------------- #
 def main() -> int:
     try:
-        raw = sys.stdin.read()
+        # v0.37 — bytes + explicit UTF-8, never the locale codepage. This
+        # layer had the most to lose: every Chinese marker it looks for
+        # (大白话 / 同步核对 / 我觉得 / 根因 …) decoded to mojibake under the
+        # host codepage, so the CJK half of nine layers matched nothing in
+        # production while every test passed. See lib/hookio.
+        raw = hookio.read_payload_text()
         if not raw.strip():
             return 0  # nothing to inspect, fail open
         payload = json.loads(raw)

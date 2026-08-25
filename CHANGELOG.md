@@ -18,6 +18,132 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.37.0] — 2026-08-25
+
+**The guards were not reading what the agent wrote.** v0.36 shipped with one
+unexplained observation, recorded rather than guessed at: a `# noqa` line that
+`_find_unjustified_patch_marker` denies when called directly was **allowed** by
+the live hook on the same bytes. This release is the answer, and the answer is
+bigger than the symptom.
+
+### The mechanism
+
+Every hook entry point read its payload with `sys.stdin.read()`. That is a
+`TextIOWrapper` built from the **locale** codepage — `cp936` here, `cp1252` on a
+US-English Windows — and the error handler for the standard streams is
+`surrogateescape`, not `strict`. So a UTF-8 payload is decoded with the wrong
+table and the bytes that do not fit become lone surrogates **without raising
+anything**. No exception, no stderr, nothing to notice: the guard simply scans a
+different string than the one the agent is writing.
+
+Measured on this machine, `—` (U+2014, bytes `E2 80 94`) arrives as `鈥` +
+`\udc94` — one character *longer* than it left. The inline note after the marker
+grew from 10 characters to 12, cleared `read_guard._MIN_INLINE_REASON_CHARS`,
+and the marker was skipped. **The guard was defeated by punctuation.**
+
+### What it actually cost
+
+The `# noqa` was the small half. `stop_guard`'s markers are Chinese —
+`大白话`, `同步核对`, `我觉得`, `根因`, and the **done-claim patterns
+themselves**. All of them decode to mojibake under the host codepage, so on this
+repo's primary language and primary platform the CJK half of nine layers matched
+nothing in production.
+
+Demonstrated first-party, one message, two wire formats:
+
+```
+raw UTF-8 wire (what Claude Code sends) -> ALLOW (silent)
+escaped-ASCII wire (control)            -> block   Layer (b) [rule 01 — hedge…]
+```
+
+`_has_done_claim` gates **all nine layers**, and its pattern set is bilingual —
+so with the Chinese half blind, a reply that announced completion only in
+Chinese matched nothing and skipped the entire stack. Measured: a bare
+`都修好了，全部完成。` with no evidence at all came back **allowed, with not one
+layer having fired**.
+
+Stated precisely, because the looser version would be the overstatement this
+plugin exists to block: a reply that also said "done" or "fixed" in ASCII still
+reached layer (a). What it could not do was fail (b), (h) or (i) on a Chinese
+hedge, a Chinese `大白话`, or a Chinese `同步核对` — those markers were not there
+to be found.
+
+### Not a new class
+
+`lib/tomlio.py` exists (v0.25) because a GBK-saved `edicts.toml` escaped
+`edicts.load()` and switched off read-before-edit for a whole session — *a wrong
+decode silently disabling enforcement*. The emitters were hardened for the same
+reason even earlier: every one writes through `sys.stdout.buffer` with an
+explicit `.encode("utf-8")`, and `read_guard.py` carries a comment saying why.
+
+Two boundaries hardened, twelve releases apart, and the third — the one every
+single hook invocation passes through — left on the locale codepage. This is
+rule 09's unified fix arriving late rather than a defect nobody could have seen.
+
+### The fix
+
+New shared module [`hooks/scripts/lib/hookio.py`](hooks/scripts/lib/hookio.py).
+`read_payload_text()` reads stdin's **binary** buffer and decodes UTF-8
+**strictly**, because JSON interchange text is UTF-8 (RFC 8259 §8.1) and the
+hook contract negotiates no alternative. All four entry points go through it.
+
+A payload that genuinely is not UTF-8 now raises into the existing fail-open
+handler, which writes a traceback to stderr. That is the point: loud and
+diagnosable, instead of silently rewritten and scanned anyway — the same theme
+as v0.36's demo, where patching a loud failure only makes it quiet.
+
+### Why 691 tests never saw it
+
+`tests/_helpers.py` serialised payloads with `json.dumps(...)`, and
+`ensure_ascii=True` is the default: every non-ASCII character became a `\uXXXX`
+escape **before the bytes existed**, so the wire was pure ASCII and the decode
+step had nothing to get wrong. The fixtures could not reach the region of the
+input space where the defect lives — the same shape as v0.35's `editscale`
+finding, where every fixture happened to be one line long.
+
+So the fix is two things, and the second matters as much as the first:
+
+- the entry points read bytes and decode UTF-8 explicitly;
+- the harness puts **raw UTF-8** on the wire, and
+  `TestHarnessWireFormat` pins that it does. Restoring the default would
+  re-hide the entire class while leaving every other test green.
+
+### Tests — 691 → 712
+
+New [`tests/test_hookio.py`](tests/test_hookio.py) (21).
+
+The end-to-end cases force `PYTHONIOENCODING=cp936:surrogateescape`. The defect
+only appears when the host codepage is not UTF-8, which is the Windows default
+but **not** the ubuntu runner's — so without the override half the CI matrix
+would pass no matter what the code did, and a gate that can only fail on one
+developer's laptop is not a gate. `TestReproductionIsLive` asserts the forced
+codepage still corrupts text-mode stdin *and* still leaves the binary buffer
+alone, so a future Python that always decodes stdin as UTF-8 reports "the
+reproduction is stale", not "the bug is gone".
+
+Five cases were verified RED against the pre-fix tree — a Chinese done-claim
+with no evidence (layer (a)), a Chinese hedge (layer (b)), an overlong Chinese
+tldr (layer (h)), the em-dash `# noqa` (rule 09), and `--no-verify` carrying a
+CJK commit message. The rest are labelled **controls** in the source: they pass
+either way, and calling them regression tests would be the same overstatement
+this plugin blocks. Two are worth naming, because both passed before for the
+wrong reason — a Chinese rationale was allowed without `因为` ever being seen
+(the mangled text happened to look substantive), and a Chinese `大白话` satisfied
+layer (h) only because layer (h) was never reached.
+
+### Changed
+
+- `hooks/scripts/{inject_context,read_guard,bash_guard,stop_guard}.py` — all
+  four now decode through `lib/hookio`.
+- `tests/_helpers.py` — `ensure_ascii=False`, with the reason recorded where the
+  next person will read it.
+- Structure trees in `README.md`, `README.zh.md` and `CLAUDE.md`;
+  `docs/ARCHITECTURE.md` §2 + §8; `tests/README.md`. Both manifest descriptions
+  lead with this release and drop the two oldest stacked narratives, per the
+  CLAUDE.md §6.1 single-source rule.
+
+---
+
 ## [0.36.1] — 2026-08-25
 
 **The demo's images were a Windows artefact.** CI went red within minutes of

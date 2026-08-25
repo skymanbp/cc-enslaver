@@ -39,8 +39,19 @@ def run_hook(
         Command-line tail. Typically `[str(SCRIPTS_DIR / "<script>.py")]`,
         plus any extra flags like `["--event", "SessionStart"]`.
     stdin_payload
-        The JSON object Claude Code would send on stdin. Serialized as
-        UTF-8 before being piped to the subprocess.
+        The JSON object Claude Code would send on stdin. Serialized with
+        `ensure_ascii=False` and encoded UTF-8, which is what actually
+        goes over the wire in production.
+
+        **That keyword is load-bearing** (v0.37). `json.dumps` defaults
+        to `ensure_ascii=True`, so every non-ASCII character left here as
+        a `\\uXXXX` escape and the wire was pure ASCII — decodable by any
+        codepage on earth. The encoding boundary was therefore
+        unreachable from the test suite, and a defect that silently
+        disabled every CJK detector in `stop_guard` survived 691 tests
+        and 36 releases. Same shape as the `editscale` finding in v0.35:
+        the bug did not hide from the assertions, it hid from the
+        fixtures.
     env_overrides
         Extra environment variables (e.g., `CLAUDE_PLUGIN_DATA`).
         Inherits the current environment as a base.
@@ -62,7 +73,7 @@ def run_hook(
 
     proc = subprocess.run(
         [sys.executable, *script_args],
-        input=json.dumps(stdin_payload).encode("utf-8"),
+        input=json.dumps(stdin_payload, ensure_ascii=False).encode("utf-8"),
         capture_output=True,
         env=env,
     )

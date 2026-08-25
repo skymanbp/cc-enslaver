@@ -60,7 +60,12 @@ def _hook(script: str, payload: dict, data_dir: Path) -> dict | None:
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / script)],
-        input=json.dumps(payload).encode("utf-8"),
+        # `ensure_ascii=False` so the wire is raw UTF-8, which is what
+        # Claude Code actually sends (v0.37). The demo's own text is
+        # ASCII, so this changes no byte of the captured transcripts —
+        # it is here so the harness cannot quietly stop reproducing
+        # production the day someone writes a non-ASCII step.
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         capture_output=True, env=env,
     )
     out = proc.stdout.decode("utf-8", "replace").strip()

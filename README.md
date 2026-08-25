@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.36.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.37.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -184,7 +184,18 @@ cap: the contract is protected and the (unbounded) edict list is what yields,
 elided at whole-edict boundaries with a pointer — because half an edict still
 reads as a complete instruction.
 
-Ten scripts under [`hooks/scripts/`](hooks/scripts/) sit on ten shared
+Every one of those entries decodes its payload through
+[`lib/hookio.py`](hooks/scripts/lib/hookio.py) (v0.37) — stdin's binary buffer,
+UTF-8, strictly. It reads like a detail and is not: `sys.stdin.read()` uses the
+**host codepage** with the `surrogateescape` handler, so on a non-UTF-8 machine
+(the Windows default) the payload was silently rewritten and every gate below
+judged a string the agent never wrote. Non-ASCII text is what suffered — an
+em-dash turned one rule-09 DENY into an ALLOW, and the Chinese markers layers
+(b) and (h) look for decoded to mojibake, so they matched nothing at all.
+**If you write to your agent in a language other than English, this is the
+release where the Stop gate starts seeing it.**
+
+Ten scripts under [`hooks/scripts/`](hooks/scripts/) sit on eleven shared
 [`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
 registered as hooks; the other six (`register_read.py`, `manage_edicts.py`,
 `manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`, `bench_hooks.py`) back
@@ -374,7 +385,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 691 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 712 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -423,6 +434,15 @@ it has earned:
   your machine, not of the repo. The script is the citation — run it yourself.
 - The `own share` column is a subtraction of two medians, not a measured
   isolate. Treat it as an order of magnitude, not a figure.
+- **The `Stop` row was measured before v0.37**, when the benchmark's Chinese
+  payload could not match a single CJK marker on a non-UTF-8 host — so that
+  row exercised a shorter path than it does now. The table has not been
+  re-measured because the difference is regex work on a 200-character string,
+  which is below this benchmark's resolution: re-runs of the current code on
+  the same laptop under normal load put that row at 187–190 ms p50 against a
+  70–98 ms baseline, a spread wider than the change being asked about. Said
+  plainly rather than quietly re-run, because swapping a quiet-run table for a
+  loaded-run one would make the numbers worse while looking more current.
 
 ### Accuracy posture
 
@@ -604,7 +624,8 @@ cc-enforcer/
 │       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
 │       ├── bench_hooks.py       # per-hook latency benchmark (README §6)
-│       └── lib/                 # -- ten shared modules --
+│       └── lib/                 # -- eleven shared modules --
+│           ├── hookio.py        # boundary: stdin payload -> UTF-8, never the locale codepage
 │           ├── srclex.py        # judgement: code vs comment vs docstring vs literal
 │           ├── mdctx.py         # judgement: markdown fence / blockquote context
 │           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
@@ -624,7 +645,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 691 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 712 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -636,7 +657,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **691 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **712 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

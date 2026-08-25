@@ -84,6 +84,18 @@ def _measure(argv: list[str], payload: str | None, env: dict, runs: int) -> dict
     }
 
 
+def _dumps(payload: dict) -> str:
+    """Serialise a benchmark payload the way Claude Code sends one.
+
+    `ensure_ascii=False` matters here (v0.37): the Stop scenario below is
+    written in Chinese, and the `json.dumps` default would escape it to
+    `\\uXXXX` before it reached the wire. That is a shorter payload AND a
+    different code path — the layers would find no CJK markers to match —
+    so the number printed would not be the number production pays.
+    """
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _scenarios(target: str, session: str) -> list[tuple[str, str | None, str]]:
     """(label, hook script or None for the baseline, stdin payload)."""
     done = (
@@ -92,22 +104,22 @@ def _scenarios(target: str, session: str) -> list[tuple[str, str | None, str]]:
         "根因/影响/方案均已说明。\ntldr: 修好了，测试全绿。"
     )
     return [
-        ("PreToolUse(Read)", "read_guard.py", json.dumps({
+        ("PreToolUse(Read)", "read_guard.py", _dumps({
             "session_id": session, "hook_event_name": "PreToolUse",
             "tool_name": "Read", "tool_input": {"file_path": target},
         })),
-        ("PreToolUse(Edit)", "read_guard.py", json.dumps({
+        ("PreToolUse(Edit)", "read_guard.py", _dumps({
             "session_id": session, "hook_event_name": "PreToolUse",
             "tool_name": "Edit", "tool_input": {
                 "file_path": target,
                 "old_string": "# line 005\n", "new_string": "# line 005b\n",
             },
         })),
-        ("PreToolUse(Bash)", "bash_guard.py", json.dumps({
+        ("PreToolUse(Bash)", "bash_guard.py", _dumps({
             "session_id": session, "hook_event_name": "PreToolUse",
             "tool_name": "Bash", "tool_input": {"command": "git status --short"},
         })),
-        ("Stop (9 layers)", "stop_guard.py", json.dumps({
+        ("Stop (9 layers)", "stop_guard.py", _dumps({
             "session_id": session, "hook_event_name": "Stop",
             "assistant_message": done,
         })),

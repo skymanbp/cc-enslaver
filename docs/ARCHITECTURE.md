@@ -87,6 +87,27 @@ catches the lazy behaviour, often via a different signal.
     can qualify as systematic and the counter can never be reset —
     survived twenty-two releases because every test fixture happened to
     be one line long. A model with a signature can be asked directly.
+- **Payload decoding shared by all four hook entries (v0.37)**:
+  [`../hooks/scripts/lib/hookio.py`](../hooks/scripts/lib/hookio.py) —
+  `read_payload_text()` reads stdin's **binary** buffer and decodes it as
+  UTF-8 strictly, because JSON interchange text is UTF-8 (RFC 8259 §8.1)
+  and the hook contract negotiates no alternative. Every entry point used
+  `sys.stdin.read()` instead, which decodes with the *locale* codepage
+  under the `surrogateescape` error handler: on a non-UTF-8 host the
+  payload was silently rewritten and each guard then scanned a string the
+  agent never wrote. Measured on cp936, `—` (U+2014) arrived as two
+  characters instead of one — enough to push an inline note past
+  `read_guard`'s rationale floor and turn a rule-09 DENY into an ALLOW —
+  and every CJK marker `stop_guard` looks for (`大白话`, `同步核对`,
+  `我觉得`, the done-claim patterns themselves) decoded to mojibake, so
+  the Chinese half of nine layers matched nothing in production. This is
+  the same failure `tomlio` fixed one boundary over in v0.25 — *silent
+  disablement of enforcement by a wrong decode* — swept, twelve releases
+  late, to the boundary every single hook invocation goes through. It
+  survived 691 tests because `tests/_helpers.py` serialised payloads with
+  `json.dumps`'s `ensure_ascii=True` default, so the wire was pure ASCII
+  and the decode had nothing to get wrong; the harness now sends raw
+  UTF-8, and `tests/test_hookio.py` pins that it does.
 - **Project-root detection shared by both config loaders (v0.30)**: [`../hooks/scripts/lib/projroot.py`](../hooks/scripts/lib/projroot.py). Both hand-edited configs (`edicts.toml`, `sync-gate.toml`) fall back to the process cwd when `CLAUDE_PROJECT_DIR` is missing — which Claude Code's Bash tool does not reliably propagate on Windows (the v0.18.1 finding) — but only when that cwd carries a `.git` / `.claude` marker, so a session started in `~/Downloads` cannot load a stranger's hard rules. The predicate lived in both loaders until v0.30, the second copy annotated *"Same project-root heuristic as lib/edicts.py"*: a comment that names an invariant without holding it, so widening one copy leaves the other silently behind. Same answer `tomlio` gave one layer down.
 - Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session. **v0.25.1 extends this to the parsed values, not just the bytes**: `severity = ["must"]` / `mode = []` are valid TOML, and `value not in SET` raises `TypeError: unhashable type` — which escaped the same two loaders through a different door. Both now type-check before the membership test, and `manage_edicts.py` was finally routed through this module too (v0.25 wired the two hook-side loaders and never swept the tree, so `edict list / add / remove` still crashed on a file the hooks read fine — the repo-wide-sync omission rule 12 exists to catch).
 
@@ -995,6 +1016,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/lib/tomlio.py` (v0.25) | **Both** TOML config loaders — `hooks/scripts/lib/edicts.py` and `hooks/scripts/lib/sync_gate.py`. A change here changes how *every* hand-edited config degrades, so it needs both `tests/test_edicts.py` and `tests/test_sync_gate.py` re-checked. It exists precisely so the BOM / non-UTF-8 hardening is not hand-copied into two loaders that then drift apart. |
 | `hooks/scripts/manage_sync_gate.py` (v0.31) | `commands/sync-gate.md` (the slash command), `hooks/scripts/lib/sync_gate.py` (**both** resolvers — `default_project_path` for writes, `config_path` for reads; conflating them is the defect this CLI shipped with), `hooks/scripts/lib/tomlio.py` (the shared encoder), `tests/test_manage_sync_gate.py`. A change to how a group is SERIALISED needs the round-trip assertions re-checked: the writer's contract is not "produces valid TOML" but "produces groups the loader still keeps". |
 | `hooks/scripts/lib/tomlio.py` — writer half (v0.31) | **Both** config CLIs — `manage_edicts.py` and `manage_sync_gate.py` alias `basic_string`. Its escaping rules were each learned from a config that the CLI reported as written and tomllib then refused (a raw newline; DEL passing a `>= " "` guard), so a change here can silently unenforce every rule in a project's config. `tests/test_manage_sync_gate.py::TestSharedPrimitives` pins the sharing itself, not just the behaviour. |
+| `hooks/scripts/lib/hookio.py` (v0.37) | **All four** hook entry points — `inject_context.py`, `read_guard.py`, `bash_guard.py`, `stop_guard.py`. It is the single place the payload stops being bytes, so a change here changes what *every* detector in the plugin sees. Also `tests/_helpers.py` (`ensure_ascii=False` is what makes the boundary reachable at all — restoring the default re-hides the entire class while every other test stays green) and `tests/test_hookio.py`, whose end-to-end cases force `PYTHONIOENCODING=cp936:surrogateescape` so the defect is reproducible on the UTF-8 CI runner too. Its `TestReproductionIsLive` guards against the reproduction going stale: if a future Python always decodes stdin as UTF-8, those tests must report *that*, not "fixed". |
 | `hooks/scripts/lib/projroot.py` (v0.30) | **Both** config loaders again — `lib/edicts.py` and `lib/sync_gate.py` alias it. Widening what counts as a project root widens where *both* configs may be picked up, which is a security-shaped change, not a convenience one: a false positive makes another project's `must` edicts apply to this session. Re-check `tests/test_edicts.py` (`TestCwdFallback`, `TestManageCLICwdFallback`) and `tests/test_sync_gate.py` (`TestConfigPath`). |
 | `hooks/scripts/lib/mdctx.py` — fence helper (v0.30) | `mdctx.fence_marker` now has THREE consumers: `stop_guard._is_fence`, `stop_guard`'s layer-(h) context model, and `i18n_check._fence_run`. It used to be copied into all three, each with its own comment claiming they "must agree". Changing fence geometry changes which headings `i18n_check` sees AND which tldr lines layer (h) measures — re-run `python hooks/scripts/i18n_check.py` as well as the stop-guard suite. |
 | `.claude/cc-enforcer/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |

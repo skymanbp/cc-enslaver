@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import edicts as edicts_lib  # noqa: E402 — sys.path mutated above
 from lib import envfile as envfile_lib  # noqa: E402 — sys.path mutated above
+from lib import hookio  # noqa: E402 — sys.path mutated above
 from lib import state as state_lib  # noqa: E402 — sys.path mutated above
 
 # v0.18: lazy import only when auto-GC actually triggers (kept None
@@ -278,7 +279,12 @@ def main() -> int:
     # the state file of the session that is starting (see _maybe_auto_gc).
     raw_payload = ""
     try:
-        raw_payload = sys.stdin.read()
+        # v0.37 — bytes + explicit UTF-8 (lib/hookio). Text-mode stdin
+        # decodes with the host codepage under `surrogateescape`, which
+        # can pull the byte after a multi-byte sequence into the previous
+        # character — enough to break the `session_id` key out of a
+        # payload whose earlier fields carry any non-ASCII text.
+        raw_payload = hookio.read_payload_text()
     except Exception:
         # Draining stdin is best-effort; losing it only costs auto-GC its
         # exclusion hint.

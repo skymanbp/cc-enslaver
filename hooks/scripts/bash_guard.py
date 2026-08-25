@@ -53,6 +53,8 @@ from lib import state as state_lib  # noqa: E402
 from lib import edicts as edicts_lib  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import shellcmd  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import hookio  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -613,7 +615,11 @@ def _emit_register_deny(command: str, reason: str) -> None:
 # --------------------------------------------------------------------------- #
 def main() -> int:
     try:
-        raw = sys.stdin.read()
+        # v0.37 — bytes + explicit UTF-8, never the locale codepage. See
+        # lib/hookio: text-mode stdin decodes with `surrogateescape`, so a
+        # command carrying any non-ASCII argument reached the bypass
+        # catalog already rewritten, and the rewrite is silent.
+        raw = hookio.read_payload_text()
         if not raw.strip():
             return 0
         payload = json.loads(raw)

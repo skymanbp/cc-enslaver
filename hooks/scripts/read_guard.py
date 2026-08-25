@@ -85,6 +85,8 @@ from lib import edicts as edicts_lib  # noqa: E402
 from lib import srclex  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import editscale  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import hookio  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Tools this guard handles (PreToolUse matcher must include all of them).
@@ -1370,7 +1372,11 @@ def _handle_pre_tool_use(payload: dict) -> None:
 # --------------------------------------------------------------------------- #
 def main() -> int:
     try:
-        raw = sys.stdin.read()
+        # v0.37 — bytes + explicit UTF-8, never the locale codepage. See
+        # lib/hookio: text-mode stdin decodes with `surrogateescape`, so a
+        # UTF-8 payload was silently rewritten rather than rejected, and
+        # this guard scanned a string the agent never wrote.
+        raw = hookio.read_payload_text()
         if not raw.strip():
             return 0  # nothing to inspect, fail open
         payload = json.loads(raw)

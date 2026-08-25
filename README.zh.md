@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.36.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.37.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -171,7 +171,15 @@ Stop 钩子读 agent 即将收尾的那条回复。只要里面含完成声明�
 （无上界的）圣旨列表是让步的一方，按**整条圣旨**的边界省略并留一个指针——因为
 半条圣旨读起来仍像一条完整指令。
 
-[`hooks/scripts/`](hooks/scripts/) 下十个脚本，坐在十个共享
+上面每一个入口都经 [`lib/hookio.py`](hooks/scripts/lib/hookio.py)（v0.37）解码
+载荷——读 stdin 的二进制缓冲、按 UTF-8 严格解码。这看着像个细节，其实不是：
+`sys.stdin.read()` 走的是**宿主机码页**加 `surrogateescape`，所以在非 UTF-8 的
+机器上（Windows 的默认）载荷会被**静默改写**，下面每一道闸门判的都是 agent
+从没写过的那串字。遭殃的正是非 ASCII 文本——一个破折号就把一条 rule 09 的
+DENY 变成 ALLOW，而 (b)(h) 两层要找的中文标记全成了乱码，一个也匹配不上。
+**如果你用中文（或任何非英语）跟 agent 说话，从这一版起 Stop 闸门才真的看得见它。**
+
+[`hooks/scripts/`](hooks/scripts/) 下十个脚本，坐在十一个共享
 [`lib/`](hooks/scripts/lib/) 模块上。只有上表那四个注册为钩子；另外六个
 （`register_read.py`、`manage_edicts.py`、`manage_sync_gate.py`、`gc_state.py`、
 `i18n_check.py`、`bench_hooks.py`）分别服务于逃生口、slash 命令、CI 与基准测试。
@@ -344,7 +352,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 691 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 712 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -388,6 +396,12 @@ cc-enforcer 管，而且在 Windows 上明显慢于 Linux。插件自己的工�
   （第八节），而延迟不行——它是你机器的属性，不是仓库的属性。脚本本身就是那条
   引用，请自己跑。
 - "自身占比"是两个中位数相减，不是隔离测量。当量级看，别当精确值。
+- **`Stop` 那一行是 v0.37 之前测的**：当时基准脚本那条中文载荷在非 UTF-8 宿主机上
+  一个 CJK 标记都匹配不上，所以那一行走的是比现在更短的路径。没有重测，是因为差异
+  只是对一段 200 字符串多跑几次正则，**低于本基准的分辨率**——同一台笔记本在正常
+  负载下重跑现版代码，该行 p50 落在 187–190 ms，基线 70–98 ms，噪声区间比要问的
+  那点差异还宽。明说而不是偷偷重跑一遍：拿一次高负载的运行去换一张安静运行的表，
+  数字会更差，看上去却更"新"。
 
 ### 准确率姿态
 
@@ -537,7 +551,8 @@ cc-enforcer/
 │       ├── gc_state.py          # 会话状态 GC：CLI + auto-GC 被调方
 │       ├── i18n_check.py        # 骨架 ↔ 翻译的结构对齐
 │       ├── bench_hooks.py       # 逐钩子延迟基准（README 第六节）
-│       └── lib/                 # -- 十个共享模块 --
+│       └── lib/                 # -- 十一个共享模块 --
+│           ├── hookio.py        # 边界：stdin 载荷 → UTF-8，绝不走宿主机码页
 │           ├── srclex.py        # 判定：代码 vs 注释 vs docstring vs 字面量
 │           ├── mdctx.py         # 判定：markdown 围栏 / 引用块上下文
 │           ├── shellcmd.py      # 判定：分词 → 分段 → argv → 子命令
@@ -557,7 +572,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 691 个测试（python -m unittest discover tests）
+└── tests/                       # 712 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -569,7 +584,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **691 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **712 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 

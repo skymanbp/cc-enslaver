@@ -116,10 +116,14 @@ class TestInjectContextEnglish(unittest.TestCase):
             "Systematic, not reactive",
             "Read-before-edit",
             "think-before-write",
-            "Did this really solve the problem",
-            "Is there a better solution",
-            "Has the change been verified",
-            "Is the verification reasonable",
+            # v0.39 — the four self-quiz questions, in the compact
+            # phrasing the thinned contract uses. Still four distinct
+            # needles: the property is that a cold start sees all four,
+            # not that they are worded at paragraph length.
+            "really solved?",
+            "better solution?",
+            "what is unverified?",
+            "is the verification reasonable?",
             "Task fidelity",
             "rule 08",
             "rule 09",
@@ -435,6 +439,51 @@ class TestOutputCap(unittest.TestCase):
         )
         self.assertIn("elided to stay under", out)
 
+    def test_a_realistic_install_keeps_a_realistic_edict_set(self) -> None:
+        """The budget must leave room for the feature it is budgeting for.
+
+        Nothing gated this, and it eroded for nine releases: the
+        SessionStart contract went 9,009 -> 9,086 -> 9,448 bytes between
+        v0.29 and v0.38, i.e. from 991 characters of headroom to 552.
+        By v0.38.3 a real install path plus two real edicts no longer
+        fit, so a headline feature silently degraded to nothing —
+        measured at a 110-character root, which is what
+        `…/.claude/plugins/marketplaces/<market>/<plugin>` actually costs.
+
+        The parameters are the point, so they are named rather than
+        tuned: a 120-character install root and three edicts rendered by
+        the real renderer. Both are ordinary. If this fails, the contract
+        has grown again and the edicts are what will be dropped.
+        """
+        from lib import edicts as ed
+        three = [
+            ed.Edict(id=f"E{i:02d}",
+                     text=f"project rule number {i} stated in one line",
+                     severity="must")
+            for i in range(1, 4)
+        ]
+        original = ic.PLUGIN_ROOT
+        try:
+            ic.PLUGIN_ROOT = "C:" + "\\" + "x" * 117    # 120 characters
+            for lang, rel in (("en", "session-start.md"),
+                              ("zh", "zh/session-start.md")):
+                with self.subTest(lang=lang):
+                    body = (PLUGIN_ROOT / "prompts" / rel).read_text(
+                        encoding="utf-8")
+                    block = "\n" + ed.render_injection(three, lang=lang)
+                    out = ic.build_context("session-start.md", body, block)
+                    self.assertLessEqual(len(out), ic.OUTPUT_CAP)
+                    self.assertIn(
+                        "E03", out,
+                        f"the {lang} contract no longer leaves room for three "
+                        f"edicts at a 120-character install root — it is "
+                        f"{len(body)} characters against a {ic.OUTPUT_CAP} cap, "
+                        f"and the edicts are what gets dropped",
+                    )
+                    self.assertNotIn("elided", out)
+        finally:
+            ic.PLUGIN_ROOT = original
+
     def test_a_total_elision_still_reports_the_count(self) -> None:
         """The no-room branch must say every edict was dropped.
 
@@ -450,16 +499,16 @@ class TestOutputCap(unittest.TestCase):
         path, and stating that keeps the test honest about what it
         reproduces.
         """
-        body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
-            encoding="utf-8")
+        # A synthetic body sized to fill the budget, not the real prompt.
+        # The branch under test is "the contract alone leaves no room";
+        # pinning it to the live contract's current size means the test
+        # silently stops reaching the branch every time the prompt is
+        # edited, which is exactly what happened when v0.39 thinned it.
+        header = ic._HEADER.format(root=ic.PLUGIN_ROOT, fname="session-start.md")
+        body = "x" * (ic.OUTPUT_CAP - len(header) - len(ic._EDICTS_ELIDED) + 1)
         edicts = "".join(
             f"\n| `E{i:02d}` | must | rule number {i} |" for i in range(1, 9))
-        original = ic.PLUGIN_ROOT
-        try:
-            ic.PLUGIN_ROOT = "C:" + "\\" + "x" * 700
-            out = ic.build_context("session-start.md", body, edicts)
-        finally:
-            ic.PLUGIN_ROOT = original
+        out = ic.build_context("session-start.md", body, edicts)
         self.assertNotIn("E01", out, "premise: no edict survives this budget")
         self.assertIn(
             "8 edict(s) elided", out,
@@ -472,12 +521,16 @@ class TestOutputCap(unittest.TestCase):
         Without this, the fix above could be 'always drop everything and
         report it', which would pass the assertion it was written for.
         """
-        body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
-            encoding="utf-8")
-        edicts = "".join(
-            f"\n| `E{i:02d}` | must | " + "x" * 120 + " |" for i in range(1, 9))
-        out = ic.build_context("session-start.md", body, edicts)
+        # Synthetic body again, sized to leave room for a couple of
+        # edicts but not all eight — same reason as above.
+        header = ic._HEADER.format(root=ic.PLUGIN_ROOT, fname="session-start.md")
+        rows = [f"\n| `E{i:02d}` | must | " + "x" * 120 + " |"
+                for i in range(1, 9)]
+        keep = len(rows[0]) * 2
+        body = "x" * (ic.OUTPUT_CAP - len(header) - len(ic._EDICTS_ELIDED) - keep)
+        out = ic.build_context("session-start.md", body, "".join(rows))
         self.assertIn("E01", out, "the first edicts must still be kept")
+        self.assertNotIn("E08", out, "and the last ones must be cut")
         self.assertIn("elided", out, "and the cut ones still reported")
 
     def _rendered_edicts(self, n: int, payload: int = 300) -> str:

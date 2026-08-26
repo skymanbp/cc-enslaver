@@ -18,6 +18,78 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.39.0] — 2026-08-26
+
+**The contract was eating the feature it was supposed to leave room for.**
+v0.38.3 fixed the *symptom* — edicts dropped silently — by making the drop
+loud and by stopping the header from spending the install root twice. This is
+the cause: the SessionStart contract had grown to 9,262 characters against a
+10,000-character cap, and nothing gated it.
+
+Measured across releases, this had been eroding for nine of them:
+
+| release | contract | headroom |
+|---|---:|---:|
+| v0.29.0 | 9,009 B | 991 |
+| v0.32.0 | 9,086 B | 914 |
+| v0.35.0 | 9,448 B | 552 |
+| **v0.39.0** | **6,627 chars** | **3,373** |
+
+At v0.38 that headroom no longer covered a real install path plus two real
+edicts. A headline feature was degrading to nothing in the field, and every
+release had made it slightly worse with nothing to say so.
+
+### What came out
+
+Not text, but **duplication**:
+
+- **Section 2's Recovery column** — every word of it is printed at deny time
+  in the block reason's `[Recovery — …]` section. Sending it in advance, every
+  session, to be read once and forgotten, was the largest single block in the
+  file. Three tokens lived *only* there and were folded into the trigger cell
+  rather than dropped: `CC_ENFORCER_DISABLE_LAYER_G=1`, the `因为` half of the
+  bilingual why-comment hatch, and the sync marker (already in §1's row 12).
+- **Section 1's paragraph rows.** The heading calls it a "one-line index";
+  rows 03, 06, 08, 09 and 12 had grown into paragraphs, and what they had
+  grown into was §2's job. Every concept was checked against
+  `prompts/user-prompt.md` — re-injected *every* turn with 2,925 characters of
+  headroom — before being cut. The upstream ladder, Check 2b, the bulk-edit
+  survey and the unified fix are all still injected, every turn.
+- The intro blockquote, §3's two explanatory blockquotes and §4's link list,
+  compressed. The schema block itself is untouched: its field names are the
+  Stop hook's detection markers.
+
+### What went back in
+
+The first pass cut three things that lived nowhere else at cold start, and
+putting them back is the point rather than an embarrassment: the four
+self-quiz questions verbatim, and the `layer (e)` / `layer (f)` consequence
+for rules 08 and 09. §2 names the Stop gate as a whole, not which layer a
+given rule trips. Caught by the tests that assert them.
+
+The zh mirror got the same treatment (6,011 → 3,987 characters), because a
+mirror that stops mirroring is how the deny set came to differ between
+languages in v0.26.
+
+### The gate
+
+`test_a_realistic_install_keeps_a_realistic_edict_set`: a **120-character
+install root** — what `…/.claude/plugins/marketplaces/<market>/<plugin>`
+actually costs — plus **three edicts rendered by the real renderer** must
+survive in both languages, with no elision. The parameters are ordinary on
+purpose and named in the test, so a failure reads "the contract grew again and
+the edicts are what will be dropped" rather than "a number moved". Verified
+RED against the pre-thinning contract.
+
+Two elision tests were also rebuilt on synthetic bodies sized to the cap
+rather than on the live prompt. Pinning them to the real contract's current
+size meant they silently stopped reaching the branch they existed to test —
+which is exactly what this release's thinning did to them.
+
+### Tests — 741 → 742
+
+---
+
 ## [0.38.3] — 2026-08-26
 
 **Two defects found by verifying v0.38.2 in a fresh clone, not by reading the

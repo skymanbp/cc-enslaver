@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.38.2-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.3-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -182,7 +182,9 @@ Details: [`docs/EDICTS.md`](docs/EDICTS.md)
 Both injections are budgeted against Claude Code's 10,000-character hook-output
 cap: the contract is protected and the (unbounded) edict list is what yields,
 elided at whole-edict boundaries with a pointer — because half an edict still
-reads as a complete instruction.
+reads as a complete instruction. When even the contract fills the budget, the
+edicts are dropped **and the injection says so** (v0.38.3): a session governed
+by rules it was never shown, with no way to learn that, is the worse failure.
 
 Every one of those entries decodes its payload through
 [`lib/hookio.py`](hooks/scripts/lib/hookio.py) (v0.37) — stdin's binary buffer,
@@ -396,7 +398,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 738 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 741 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -662,7 +664,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 738 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 741 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -674,7 +676,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **738 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **741 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.38.2-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.3-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -169,7 +169,9 @@ Stop 钩子读 agent 即将收尾的那条回复。只要里面含完成声明�
 
 两处注入都按 Claude Code 的 10,000 字符钩子输出上限做预算：契约受保护，而
 （无上界的）圣旨列表是让步的一方，按**整条圣旨**的边界省略并留一个指针——因为
-半条圣旨读起来仍像一条完整指令。
+半条圣旨读起来仍像一条完整指令。连契约本身都填满预算时，圣旨会被全部丢弃
+**并且注入里会说出来**（v0.38.3）——被自己从没见过、也无从得知的规则管着，
+才是更坏的那种失败。
 
 上面每一个入口都经 [`lib/hookio.py`](hooks/scripts/lib/hookio.py)（v0.37）解码
 载荷——读 stdin 的二进制缓冲、按 UTF-8 严格解码。这看着像个细节，其实不是：
@@ -397,7 +399,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 738 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 741 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -622,7 +624,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 738 个测试（python -m unittest discover tests）
+└── tests/                       # 741 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -634,7 +636,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **738 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **741 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 

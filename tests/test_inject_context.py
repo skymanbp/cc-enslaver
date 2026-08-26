@@ -391,9 +391,34 @@ class TestOutputCap(unittest.TestCase):
     def test_self_locating_header_leads_the_injection(self) -> None:
         # Defense in depth: if the cap is ever breached anyway, the
         # surviving preview must still say where the full text lives.
-        head = self._ctx("SessionStart")[:200]
-        self.assertIn("cc-enforcer root:", head)
-        self.assertIn("prompts/session-start.md", head)
+        #
+        # v0.38.3 — measured against the header, not a fixed 200-character
+        # slice. That slice encoded an assumption nobody stated: that the
+        # install root is short. It is 23 characters here and 110 in a
+        # clone under a temp path, where the filename fell outside the
+        # window and this test failed on code that was working correctly.
+        # A test that passes because of the maintainer's directory layout
+        # is not testing the property it names.
+        ctx = self._ctx("SessionStart")
+        header = ctx.split("\n\n", 1)[0]
+        self.assertIn("cc-enforcer root:", header)
+        self.assertIn("prompts/session-start.md", header)
+
+    def test_the_header_names_the_root_once(self) -> None:
+        """The root is the header's only unbounded part — spend it once.
+
+        It used to be printed twice, and the repeat came out of the same
+        10,000-character budget the header exists to protect: a
+        120-character install root cut the edict allowance from 386
+        characters to 192 for nothing.
+        """
+        root = str(ic.PLUGIN_ROOT)
+        header = self._ctx("SessionStart").split("\n\n", 1)[0]
+        self.assertEqual(
+            header.count(root), 1,
+            f"the install root appears {header.count(root)} times in the "
+            f"header; every repeat is subtracted from the edict budget",
+        )
 
     def test_edicts_yield_before_the_contract(self) -> None:
         body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
@@ -409,6 +434,51 @@ class TestOutputCap(unittest.TestCase):
             msg="the contract tail must survive; only edicts may be elided",
         )
         self.assertIn("elided to stay under", out)
+
+    def test_a_total_elision_still_reports_the_count(self) -> None:
+        """The no-room branch must say every edict was dropped.
+
+        Found by running the suite from a clone at a long path, not by
+        reading the function: when the contract alone fills the budget,
+        `build_context` returned header + body and said nothing. A
+        session on a deeply-nested install was then governed by rules it
+        had never been shown, with no way to learn that. Same defect as
+        v0.34.1 (all edicts elided, notice reporting 0), one branch over.
+
+        The root is stretched rather than the body, because the body is
+        the thing budgeted to fit — the trigger in the wild is an install
+        path, and stating that keeps the test honest about what it
+        reproduces.
+        """
+        body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
+            encoding="utf-8")
+        edicts = "".join(
+            f"\n| `E{i:02d}` | must | rule number {i} |" for i in range(1, 9))
+        original = ic.PLUGIN_ROOT
+        try:
+            ic.PLUGIN_ROOT = "C:" + "\\" + "x" * 700
+            out = ic.build_context("session-start.md", body, edicts)
+        finally:
+            ic.PLUGIN_ROOT = original
+        self.assertNotIn("E01", out, "premise: no edict survives this budget")
+        self.assertIn(
+            "8 edict(s) elided", out,
+            "every edict was dropped and the injection did not say so",
+        )
+
+    def test_a_partial_elision_is_unaffected(self) -> None:
+        """The twin: the branch that had room must still clip, not dump.
+
+        Without this, the fix above could be 'always drop everything and
+        report it', which would pass the assertion it was written for.
+        """
+        body = (PLUGIN_ROOT / "prompts" / "session-start.md").read_text(
+            encoding="utf-8")
+        edicts = "".join(
+            f"\n| `E{i:02d}` | must | " + "x" * 120 + " |" for i in range(1, 9))
+        out = ic.build_context("session-start.md", body, edicts)
+        self.assertIn("E01", out, "the first edicts must still be kept")
+        self.assertIn("elided", out, "and the cut ones still reported")
 
     def _rendered_edicts(self, n: int, payload: int = 300) -> str:
         """The REAL injected shape, via the real renderer.

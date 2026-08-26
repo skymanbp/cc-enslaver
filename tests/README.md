@@ -1,6 +1,6 @@
 # Tests — index
 
-**738 tests, 21 files, zero dependencies.** This file is the index: every
+**741 tests, 21 files, zero dependencies.** This file is the index: every
 test file appears below with what it covers and why it exists. Nothing else
 in the repo enumerates the suite — the project's own instruction file used to
 keep a second, class-by-class copy of this list, and it had been wrong since
@@ -46,7 +46,7 @@ all behave differently when a script is imported instead of executed.
 
 | File | Tests | Covers |
 |---|---:|---|
-| [`test_inject_context.py`](test_inject_context.py) | 28 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, the 10,000-character output cap, and the v0.34.1 edict-clipping regression (boundary pattern coupled to the real rendered row shape; elision notice must report the true count). |
+| [`test_inject_context.py`](test_inject_context.py) | 31 | [`inject_context.py`](../hooks/scripts/inject_context.py) — SessionStart / UserPromptSubmit payload shape, language switching, UTF-8 + CJK survival, the YAML reply-schema contract, the 10,000-character output cap, and the v0.34.1 edict-clipping regression (boundary pattern coupled to the real rendered row shape; elision notice must report the true count). |
 | [`test_read_guard.py`](test_read_guard.py) | 108 | [`read_guard.py`](../hooks/scripts/read_guard.py) — read-before-edit allow/deny matrix, the rule 09 / 10 / 11 content detectors, the rolling-patch counter, path normalisation, `edited_files` recording, 12-way concurrent state writes, and fail-open. v0.35 adds the end-to-end wiring for `lib/editscale`: a sub-floor file reaching a reset, net reductions and version bumps passing at the threshold, and each of those with the twin that still denies. **Its fixture matters** — the rolling-patch cases need a target large enough that the ABSOLUTE bounds bind, because the one-line fixture used from v0.13 to v0.34 is why the small-file lock-in was invisible. |
 | [`test_bash_guard.py`](test_bash_guard.py) | 21 | [`bash_guard.py`](../hooks/scripts/bash_guard.py) — the bypass-pattern catalog, force-push spellings, the register-as-read hatch (including its chaining and command-position rules), event gating, fail-open. |
 | [`test_stop_guard.py`](test_stop_guard.py) | 148 | [`stop_guard.py`](../hooks/scripts/stop_guard.py) — all nine layers, the status-table format contract, per-layer grace, production-shape payloads (no `turn_count`), transcript fallback, tldr presence and length. v0.35 adds `TestTldrDisplayWidth`: the cap counts display columns, so 100 CJK characters (200 columns) now block while 75 (150 columns) still pass and every ASCII boundary is unmoved — the strictness increase and the no-op asserted in both directions. |

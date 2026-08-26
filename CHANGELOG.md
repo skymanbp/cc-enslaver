@@ -18,6 +18,69 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.38.3] — 2026-08-26
+
+**Two defects found by verifying v0.38.2 in a fresh clone, not by reading the
+code.** The history rewrite was checked the way it should be — clone the remote
+into a new directory and run the suite there. Five tests failed. CI was green on
+the same commit, on two platforms, so the obvious conclusion was "verification
+artefact". Both turned out to be real.
+
+The clone sat at a 110-character path. This repository lives at
+`D:\Projects\cc-enforcer` — 23.
+
+### The injection dropped every edict without saying so
+
+`build_context` protects the contract and elides edicts when the 10,000-character
+hook cap gets tight. When the contract alone fills the budget it took a different
+branch and returned **silently**:
+
+```python
+if room <= 0:
+    return header + body       # every edict gone, nothing said
+```
+
+A session on a deeply-nested install was therefore governed by rules it had never
+been shown and had no way to learn about. That is the v0.34.1 defect — all edicts
+elided while the notice reported 0 — living in the sibling branch, three releases
+after the class was supposedly closed.
+
+Reproduced first-party before the fix, across install-root lengths:
+
+```
+root  23 chars → header 177 | room  386 | edicts kept=True  | notice=False
+root 120 chars → header 371 | room  192 | edicts kept=True  | notice=False
+root 300 chars → header 731 | room -168 | edicts kept=False | notice=False   ← silent
+```
+
+The branch now reports the count, using the **same counter** `_clip_edicts`
+locates cut points with — counting twice, two ways, is how v0.34.1's notice came
+to disagree with its own clipper.
+
+### The header spent the install root twice
+
+The second copy came out of the budget the header exists to protect. Naming it
+once — the "Read `prompts/…` under that root" line sits directly beneath the
+root, so it stays just as actionable — takes the 300-character case from
+`room -168` to `room +125`, i.e. from *losing every edict* to *keeping them*.
+
+### And a test that encoded the maintainer's directory layout
+
+`test_self_locating_header_leads_the_injection` sliced the first **200
+characters** and asserted the filename was inside. True at a 23-character root,
+false at 110 — so it failed on code that was working correctly. It measures the
+header now. A test that passes because of where the repository happens to live
+is not testing the property it names.
+
+### Tests — 738 → 741
+
+`test_a_total_elision_still_reports_the_count` (with its twin, so the fix cannot
+degenerate into "always drop everything and report it") and
+`test_the_header_names_the_root_once`. Both verified RED against the pre-fix
+code.
+
+---
+
 ## [0.38.2] — 2026-08-26
 
 **`CLAUDE.md` leaves the repository.** It is the project instruction file

@@ -150,10 +150,16 @@ def load_prompt(filename: str) -> str:
 # (which the static markdown cannot know) so the agent can Read the
 # full contract instead of working from a fragment.
 # --------------------------------------------------------------------------- #
+# v0.38.3 — the root is named ONCE. It used to appear twice, and the
+# second copy was spent out of the same 10,000-character budget this
+# header exists to protect: measured, a 120-character install root cut
+# the edict allowance from 386 characters to 192 purely on the repeat.
+# The line below sits directly under the root, so "under that root"
+# stays as actionable as an absolute path while costing nothing.
 _HEADER = (
     "<!-- cc-enforcer root: {root} -->\n"
     "Truncated (a `<persisted-output>` preview)? Read "
-    "`{root}/prompts/{fname}` in full before replying.\n\n"
+    "`prompts/{fname}` under that root before replying.\n\n"
 )
 
 # Claude Code's documented cap on hook output, in CHARACTERS (not bytes;
@@ -197,6 +203,21 @@ def build_context(prompt_filename: str, body: str, edict_block: str = "") -> str
         # rather than emit a truncated contract. Over-cap here is the
         # lesser failure — the harness persists it and the header (first
         # thing in the payload) still says where to read the full text.
+        #
+        # v0.38.3 — but SAY that every edict was dropped. This branch used
+        # to return silently, so a session on a deeply-nested install was
+        # governed by rules it had never been shown and had no way to
+        # learn about. That is exactly the v0.34.1 defect (all edicts
+        # elided while the notice reported 0) living in the sibling
+        # branch, and it was found by running the suite from a clone at a
+        # long path rather than by reading this function. The notice
+        # costs one more line on a payload that is already over cap;
+        # silence costs the user their own hard rules.
+        total = _count_edicts(edict_block)
+        if total:
+            return header + body + _EDICTS_ELIDED.format(
+                n=total, cap=OUTPUT_CAP,
+            )
         return header + body
     kept, dropped = _clip_edicts(edict_block, room)
     return header + body + kept + _EDICTS_ELIDED.format(
@@ -220,7 +241,7 @@ def _clip_edicts(block: str, room: int) -> tuple[str, int]:
     exactly the unfounded-claim shape this plugin exists to block.
     """
     lines = block.splitlines(keepends=True)
-    starts = [i for i, line in enumerate(lines) if _EDICT_ENTRY.match(line)]
+    starts = _entry_starts(lines)
     total = len(starts)
     if not total:
         return ("", 0)
@@ -239,6 +260,22 @@ def _clip_edicts(block: str, room: int) -> tuple[str, int]:
 # render_injection). The table header row (`| ID |`) and the separator
 # (`|----|`) carry no backtick, so neither counts as an entry.
 _EDICT_ENTRY = re.compile(r"^\|\s*`")
+
+
+def _entry_starts(lines: list[str]) -> list[int]:
+    """Indices of the lines that begin a rendered edict row."""
+    return [i for i, line in enumerate(lines) if _EDICT_ENTRY.match(line)]
+
+
+def _count_edicts(block: str) -> int:
+    """How many edicts a rendered block contains.
+
+    One definition, two callers: `_clip_edicts` locates the cut points
+    with it, and `build_context`'s no-room branch reports the total with
+    it. Counting twice, two ways, is how v0.34.1's notice came to report
+    a number the clipper did not agree with.
+    """
+    return len(_entry_starts(block.splitlines(keepends=True)))
 
 
 def emit(event_name: str, additional_context: str) -> None:

@@ -67,7 +67,7 @@ self-quiz questions verbatim, and the `layer (e)` / `layer (f)` consequence
 for rules 08 and 09. §2 names the Stop gate as a whole, not which layer a
 given rule trips. Caught by the tests that assert them.
 
-The zh mirror got the same treatment (6,011 → 3,987 characters), because a
+The zh mirror got the same treatment (6,011 → 3,998 characters), because a
 mirror that stops mirroring is how the deny set came to differ between
 languages in v0.26.
 

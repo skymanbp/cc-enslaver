@@ -129,6 +129,44 @@ catches the lazy behaviour, often via a different signal.
 - **Project-root detection shared by both config loaders (v0.30)**: [`../hooks/scripts/lib/projroot.py`](../hooks/scripts/lib/projroot.py). Both hand-edited configs (`edicts.toml`, `sync-gate.toml`) fall back to the process cwd when `CLAUDE_PROJECT_DIR` is missing — which Claude Code's Bash tool does not reliably propagate on Windows (the v0.18.1 finding) — but only when that cwd carries a `.git` / `.claude` marker, so a session started in `~/Downloads` cannot load a stranger's hard rules. The predicate lived in both loaders until v0.30, the second copy annotated *"Same project-root heuristic as lib/edicts.py"*: a comment that names an invariant without holding it, so widening one copy leaves the other silently behind. Same answer `tomlio` gave one layer down.
 - Hardened TOML reader shared by both config loaders (v0.25): [`../hooks/scripts/lib/tomlio.py`](../hooks/scripts/lib/tomlio.py) — strips a UTF-8 BOM and turns a non-UTF-8 config into a stderr diagnostic instead of an uncaught `UnicodeDecodeError`. Both configs drive hard guards, and in both the failure was *silent disablement* of enforcement: a GBK-saved `edicts.toml` escaped `edicts.load()` and unwound past every downstream check in `read_guard`, switching off read-before-edit for the whole session. **v0.25.1 extends this to the parsed values, not just the bytes**: `severity = ["must"]` / `mode = []` are valid TOML, and `value not in SET` raises `TypeError: unhashable type` — which escaped the same two loaders through a different door. Both now type-check before the membership test, and `manage_edicts.py` was finally routed through this module too (v0.25 wired the two hook-side loaders and never swept the tree, so `edict list / add / remove` still crashed on a file the hooks read fine — the repo-wide-sync omission rule 12 exists to catch).
 
+### The injection budget (v0.29, gated v0.39)
+
+Claude Code caps hook output — `additionalContext` included — at **10,000
+characters**, and replaces anything longer with a file path plus a short
+preview. A contract the agent can only see the first two kilobytes of is not a
+contract: the field failure was a session where §3, the mandatory reply schema,
+sat past the preview boundary and went unread from start to finish.
+
+`inject_context.build_context` therefore splits the payload into two parts with
+different rights. The **contract is protected**; the **edict block is what
+yields**, elided at whole-edict boundaries — half an edict still reads as a
+complete instruction — with a pointer to `/cc-enforcer:edict list` in its place.
+Every payload also leads with a self-locating header naming the plugin root, so
+a truncated preview still says where the full text lives.
+
+Two things about it were wrong until v0.38.3, and both were found by cloning
+the repository to a long path rather than by reading the function:
+
+- When the contract *alone* filled the budget, the function returned **without
+  saying so**. Every edict vanished and nothing reported it, so a session on a
+  deeply-nested install was governed by rules it had never been shown. That is
+  the v0.34.1 defect — all edicts elided, notice reporting 0 — living in the
+  sibling branch. It now reports the count, through the same counter
+  `_clip_edicts` uses to place its cuts.
+- The header printed the install root **twice**, and the repeat came out of the
+  budget the header exists to protect. Naming it once took a 300-character root
+  from losing every edict to keeping them.
+
+The deeper problem was that **nothing gated the split**. The contract had eaten
+its own headroom over nine releases — 991 characters spare at v0.29, 914 at
+v0.32, 552 at v0.35 — until a real install path plus two real edicts no longer
+fit. v0.39 thinned it to 6,627 characters (3,373 spare) by removing duplication
+rather than content: §2's Recovery column is printed at deny time anyway, and
+§1's paragraph rows had grown into §2's job. `test_inject_context`'s
+`test_a_realistic_install_keeps_a_realistic_edict_set` now holds the line with
+deliberately ordinary parameters — a 120-character install root and three
+edicts through the real renderer, in both languages.
+
 Five hook entries across four events:
 
 | Event | Matcher | Script | Purpose |
@@ -1023,7 +1061,7 @@ the release checklist is in the README's Contributing section.
 | If you edit… | Also re-check… |
 |---|---|
 | `rules/<n>-*.md` (English skeleton) | `rules/zh/<n>-*.md` (Chinese translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/zh/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
-| `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (Chinese translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
+| `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (Chinese translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc, and `tests/test_inject_context.py` — both its content assertions AND the budget gate. **Growing a prompt spends the edict allowance**: the contract and the user's own edicts share one 10,000-character cap, and the edicts are what yields. The gate fails when a 120-character install root plus three edicts no longer fit, which is the only thing that noticed nine releases of erosion. |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/lib/envfile.py` (v0.34) | `hooks/scripts/inject_context.py` (the SessionStart call site beside auto-GC), `tests/test_envfile.py`. Changing what the line model ACCEPTS changes what can be rewritten in a harness-owned file every other plugin appends to — the refusal twins must be re-checked in both directions (still collapses the field shape, still refuses anything it cannot represent byte-identically). |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |

@@ -407,15 +407,16 @@ calls. Reproduce with:
 python hooks/scripts/bench_hooks.py --runs 60
 ```
 
-Measured on Windows 11, Python 3.13.3, 60 runs each after 3 discarded warm-ups:
+Measured on v0.37.0 — Windows 11, Python 3.13.3, 60 runs each after 3 discarded
+warm-ups:
 
 | Scenario | p50 | p95 | max | cc-enforcer's own share |
 |---|---:|---:|---:|---:|
-| `PreToolUse(Read)` | 108.2 ms | 152.5 ms | 176.3 ms | **+52.5 ms** |
-| `PreToolUse(Edit)` | 115.4 ms | 148.5 ms | 160.6 ms | **+59.7 ms** |
-| `PreToolUse(Bash)` | 137.1 ms | 162.9 ms | 173.3 ms | **+81.4 ms** |
-| `Stop` (all nine layers) | 137.2 ms | 161.2 ms | 176.1 ms | **+81.5 ms** |
-| *baseline:* `python -c pass` | 55.7 ms | 63.6 ms | 69.5 ms | — |
+| `PreToolUse(Read)` | 135.2 ms | 149.9 ms | 178.4 ms | **+73.7 ms** |
+| `PreToolUse(Edit)` | 137.4 ms | 152.5 ms | 161.5 ms | **+75.9 ms** |
+| `PreToolUse(Bash)` | 151.9 ms | 181.4 ms | 192.5 ms | **+90.4 ms** |
+| `Stop` (all nine layers) | 157.3 ms | 171.6 ms | 182.1 ms | **+95.8 ms** |
+| *baseline:* `python -c pass` | 61.5 ms | 70.5 ms | 74.1 ms | — |
 
 **The baseline row is the point.** Roughly half of every figure is the Python
 interpreter starting up, which cc-enforcer does not control and which is
@@ -427,22 +428,24 @@ column: **tens of milliseconds**, against an LLM turn measured in seconds.
 it has earned:
 
 - They are **one machine under normal desktop load**, not a controlled
-  environment. Repeated runs on this same laptop produced p50s from 108 ms to
-  252 ms for the same scenario; the table above is a quiet run.
+  environment — and the median is not as robust to that as it sounds. Measured
+  on this same laptop, `PreToolUse(Read)` p50 ranged from **129 ms to 479 ms**
+  purely with what else was running. Every row above comes from one run taken
+  after the bare-interpreter baseline had returned to 62 ms; a second
+  independent 60-run measurement agreed within **9 ms on every row**, which is
+  the only reason these are quoted at all.
 - **Nothing in CI pins them.** Every other number in this README is derived from
   the code by a drift gate (§8); latency cannot be, because it is a property of
   your machine, not of the repo. The script is the citation — run it yourself.
 - The `own share` column is a subtraction of two medians, not a measured
   isolate. Treat it as an order of magnitude, not a figure.
-- **The `Stop` row was measured before v0.37**, when the benchmark's Chinese
-  payload could not match a single CJK marker on a non-UTF-8 host — so that
-  row exercised a shorter path than it does now. The table has not been
-  re-measured because the difference is regex work on a 200-character string,
-  which is below this benchmark's resolution: re-runs of the current code on
-  the same laptop under normal load put that row at 187–190 ms p50 against a
-  70–98 ms baseline, a spread wider than the change being asked about. Said
-  plainly rather than quietly re-run, because swapping a quiet-run table for a
-  loaded-run one would make the numbers worse while looking more current.
+- **Re-measured for v0.37.** The previous table predated the encoding fix, so
+  its `Stop` row was timing a path where the benchmark's Chinese payload matched
+  no markers at all. Every row is now 15–25 ms higher than that table — **and so
+  is the bare-interpreter baseline**, which does none of this plugin's work. The
+  shift is the machine, not the change, and the `Stop` row's share of it is not
+  separable from the rest at this resolution. Said rather than implied, because
+  a table that quietly moved would invite exactly the wrong reading.
 
 ### Accuracy posture
 

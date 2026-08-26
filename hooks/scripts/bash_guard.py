@@ -55,6 +55,8 @@ from lib import edicts as edicts_lib  # noqa: E402
 from lib import shellcmd  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import hookio  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import messages  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -171,117 +173,36 @@ def _is_catastrophic_rm(argv: list[str]) -> bool:
     return any(_is_dangerous_rm_target(op) for op in operands)
 
 
+# v0.38 — the user-facing halves (`name`, `explanation`) come from the
+# message catalog so they can be translated; the `match` predicate and the
+# `rule` number are behaviour and stay here. Slugs are the catalog keys and
+# must stay in step with `lib/messages_en.py` — `i18n_check.py` fails if a
+# slug names no message.
+_PATTERN_SPECS = [
+    ("no_verify", lambda argv: _has_flag(argv, "--no-verify"), "03"),
+    ("no_gpg_sign", lambda argv: _has_flag(argv, "--no-gpg-sign"), "03"),
+    ("chmod_777", _is_chmod_777, "03"),
+    # v0.14 added the next three. Each has a narrow predicate so the
+    # false-positive rate stays low; `git reset --hard` was deliberately
+    # NOT added, because deciding "with uncommitted changes" needs a
+    # `git status` call, which is too invasive for a synchronous hook.
+    ("rebase_skip", _is_git_rebase_skip, "03"),
+    ("break_system_packages",
+     lambda argv: _has_flag(argv, "--break-system-packages"), "03"),
+    # The catalog entry for this one names the home-path spellings in its
+    # deny text; see the essential-note beside it in messages_en.py.
+    ("rm_rf_root", _is_catastrophic_rm, "03"),
+]
+
 STATIC_PATTERNS = [
     {
-        "name": "--no-verify (skipping commit hooks)",
-        "match": lambda argv: _has_flag(argv, "--no-verify"),
-        "rule": "03",
-        "explanation": (
-            "The `--no-verify` flag skips git/commit hooks. Hooks exist to "
-            "catch broken code; bypassing them ships broken code. Per rule 03 "
-            "(rules/03-root-cause.md), fix the hook-failure root cause "
-            "instead of bypassing the hook. If the user has explicitly "
-            "instructed you to bypass, ask them to run the command manually "
-            "rather than acting on their behalf."
-        ),
-    },
-    {
-        "name": "--no-gpg-sign (skipping commit signature)",
-        "match": lambda argv: _has_flag(argv, "--no-gpg-sign"),
-        "rule": "03",
-        "explanation": (
-            "Skipping GPG signing strips commit verification. If signing is "
-            "broken, fix the signing setup. Per rule 03 "
-            "(rules/03-root-cause.md), do not bypass verification to make a "
-            "command go through."
-        ),
-    },
-    {
-        "name": "chmod 777 (world-writable)",
-        "match": _is_chmod_777,
-        "rule": "03",
-        "explanation": (
-            "World-writable permissions (777) almost never solve the "
-            "underlying access issue and introduce security risk. Per rule 03 "
-            "(rules/03-root-cause.md), identify the actual user or process "
-            "that needs access and grant it specifically (e.g., `chown` + "
-            "a restrictive mode like 750 or 640)."
-        ),
-    },
-    # ----------------------------------------------------------------- #
-    # v0.14 — three additional bypass patterns.
-    #
-    # Selected from the v0.12 / v0.13 CHANGELOG roadmap. Each one has a
-    # narrow regex so false-positive rate stays low; `git reset --hard`
-    # was deliberately NOT added because reliably detecting "with
-    # uncommitted changes" requires `git status` invocation which is too
-    # invasive for a synchronous hook.
-    # ----------------------------------------------------------------- #
-    {
-        "name": "git rebase --skip (silently abandoning a conflict)",
-        "match": _is_git_rebase_skip,
-        "rule": "03",
-        "explanation": (
-            "`git rebase --skip` abandons the conflicting commit silently "
-            "rather than resolving the conflict. Per rule 03 "
-            "(rules/03-root-cause.md), conflicts arise from real semantic "
-            "divergence — skipping them loses code or hides design issues "
-            "that surface for a reason. Either: (1) resolve the conflict "
-            "(`git status` to see what's in conflict, edit, `git add`, "
-            "`git rebase --continue`), (2) abort and pick a different "
-            "rebase strategy (`git rebase --abort`), or (3) if you are "
-            "absolutely sure the skipped commit is unnecessary, ask the "
-            "user to run --skip manually."
-        ),
-    },
-    {
-        "name": "pip install --break-system-packages (bypassing PEP 668)",
-        "match": lambda argv: _has_flag(argv, "--break-system-packages"),
-        "rule": "03",
-        "explanation": (
-            "`--break-system-packages` bypasses the PEP 668 protection "
-            "added in Python 3.11+ to prevent pip from modifying the "
-            "system Python and breaking package-manager-installed "
-            "software. Per rule 03 (rules/03-root-cause.md), the fix "
-            "is to install into a venv (`python -m venv .venv && source "
-            ".venv/bin/activate && pip install …`), pipx for tools, or "
-            "the system package manager (`apt install python3-X`). "
-            "Breaking the system Python to make one install succeed is "
-            "the canonical symptom-over-root-cause anti-pattern."
-        ),
-    },
-    {
-        # essential: the home-variable spellings below are this detector's
-        # SUBJECT MATTER, not a path this script itself depends on — rule
-        # 11's detector would otherwise flag its own sibling guard. (See
-        # read_guard's `_PATH_DEP_PATTERNS`, which splits its home-var
-        # literal across concatenation for the same self-scan reason.)
-        "name": "rm -rf on root / $HOME / ~",
-        # Catches the catastrophic forms:
-        #   rm -rf /
-        #   rm -rf /<system-dir>
-        # essential (detector subject matter, not a real path dependency):
-        #   rm -rf $HOME[/...]
-        #   rm -rf ~  / rm -rf ~/...
-        # while still allowing rm -rf /tmp/foo, rm -rf ./node_modules,
-        # rm -rf relative paths.
-        "match": _is_catastrophic_rm,
-        "rule": "03",
-        "explanation": (
-            # essential: names the spellings in the user-facing deny text.
-            "Recursive force-deletion against system root, $HOME, or ~ "
-            "is catastrophic and almost never the right tool. Per rule "
-            "03 (rules/03-root-cause.md), if you need to clean a build "
-            "artifact use the project's clean target (`make clean`, "
-            "`npm run clean`, etc.) or remove a more specific path; if "
-            "you need to reset the workspace, use git (`git clean -fdx` "
-            "scoped to the worktree, or `git reset --hard HEAD` after "
-            "stashing). If the user truly asked for a destructive root-"
-            "level rm, surface the deny and let them run the command "
-            "manually — do not act on their behalf for irrecoverable "
-            "operations."
-        ),
-    },
+        "slug": slug,
+        "name": messages.text(f"bash.pattern.{slug}.name"),
+        "match": match,
+        "rule": rule,
+        "explanation": messages.text(f"bash.pattern.{slug}.explanation"),
+    }
+    for slug, match, rule in _PATTERN_SPECS
 ]
 
 
@@ -379,13 +300,7 @@ def _detect_force_push(cmd: str) -> dict | None:
 # Deny output helper (same shape as read_guard's deny; duplicated rather
 # than imported to keep this script's failure modes independent).
 # --------------------------------------------------------------------------- #
-DENY_TEMPLATE = """cc-enforcer · rule {rule} violation (bypass pattern)
-
-Pattern matched: {name}
-Command: {command}
-
-{explanation}
-"""
+DENY_TEMPLATE = messages.text("bash.deny")
 
 
 def _emit_raw_deny(reason: str) -> None:
@@ -536,22 +451,26 @@ def _handle_register_invocation(command: str, session_id: str):
     if not fpath.is_absolute():
         _emit_register_deny(
             command,
-            "register_read needs an absolute --file path "
-            "(got " + repr(parsed["file"]) + ").",
+            messages.text("bash.register.needs_absolute").format(
+                got=repr(parsed["file"]),
+            ),
         )
         return False
     if not fpath.is_file():
         _emit_register_deny(
             command,
-            "register_read: file does not exist on disk: " + str(fpath),
+            messages.text("bash.register.missing_file").format(
+                path=fpath,
+            ),
         )
         return False
     if not (len(claimed_hash) == 64
             and all(c in "0123456789abcdef" for c in claimed_hash)):
         _emit_register_deny(
             command,
-            "register_read: --hash must be 64 lowercase hex chars (SHA-256). "
-            "Got: " + repr(parsed["hash"]),
+            messages.text("bash.register.bad_hash").format(
+                got=repr(parsed["hash"]),
+            ),
         )
         return False
 
@@ -559,11 +478,9 @@ def _handle_register_invocation(command: str, session_id: str):
     if actual_hash != claimed_hash:
         _emit_register_deny(
             command,
-            "register_read: hash mismatch.\n"
-            "  --hash:  " + claimed_hash + "\n"
-            "  on-disk: " + actual_hash + "\n"
-            "Either you have not actually read the file, or it changed since "
-            "you computed the hash. Re-Read with fresh content and retry.",
+            messages.text("bash.register.hash_mismatch").format(
+                claimed=claimed_hash, actual=actual_hash,
+            ),
         )
         return False
 
@@ -580,11 +497,7 @@ def _handle_register_invocation(command: str, session_id: str):
     if not state_lib.add_read(session_id, str(fpath)):
         _emit_register_deny(
             command,
-            "register_read: the registration could not be persisted to "
-            "session state (another process is holding the state file).\n"
-            "Nothing was recorded — retry in a moment, or simply Read the "
-            "file again, which is the primary path this hatch exists to "
-            "work around.",
+            messages.text("bash.register.not_persisted"),
         )
         return False
     return True
@@ -594,8 +507,9 @@ def _emit_register_deny(command: str, reason: str) -> None:
     """Deny output specific to register-flow failures (different template
     from the bypass-pattern deny so the agent sees the actual diagnostic)."""
     msg = (
-        "cc-enforcer · register_read rejected\n\n"
-        "Command: " + command + "\n\n"
+        messages.text("bash.register.header") + "\n\n"
+        + messages.text("bash.register.command_label")
+        + ": " + command + "\n\n"
         + reason + "\n"
     )
     payload = {

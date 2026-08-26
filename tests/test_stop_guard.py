@@ -843,9 +843,12 @@ class TestTldrLayerH(_StopBase):
         self.assertIsNone(out, msg="no done-claim → (h) must not fire")
 
     def test_block_reason_carries_plain_language_line(self) -> None:
-        # cc-enforcer's OWN block output also ends with a 大白话 line.
+        # cc-enforcer's OWN block output also ends with a plain-language
+        # line — it holds itself to the layer it is enforcing. v0.38: the
+        # English copy says so in English; `messages_zh` restores 大白话
+        # and TestCatalogChineseOutput pins that.
         rc, out, _ = self._stop(self._compliant_non_edit(), turn_count=5)
-        self.assertIn("大白话:", out["reason"])
+        self.assertIn("In plain words:", out["reason"])
 
     def test_edit_turn_missing_tldr_blocks_at_h(self) -> None:
         # Full a-g compliance on an edit turn, but no tldr → (h) blocks.
@@ -1107,9 +1110,17 @@ class TestTldrDisplayWidth(_StopBase):
         self.assertIn("columns", out["reason"])
 
     def test_recovery_names_the_cjk_equivalent(self) -> None:
+        # The cap is in columns, so a CJK writer needs it restated in the
+        # unit they actually count in. v0.38 moved this text into the
+        # message catalog and made the English copy English, so the
+        # assertion follows the spelling — the property under test (the
+        # recovery states the CJK-side equivalent, derived, not guessed)
+        # is unchanged. `messages_zh` states the same thing in 汉字, and
+        # TestCatalogChineseOutput pins that separately.
         msg = self._compliant_non_edit() + "\ntldr: " + "字" * 90
         rc, out, _ = self._stop(msg, turn_count=5)
-        self.assertIn("80 汉字", out["reason"])
+        self.assertIn("all-CJK", out["reason"])
+        self.assertIn("80", out["reason"])
 
     def test_mixed_script_item_is_measured_per_character(self) -> None:
         # 60 汉字 (120 cols) + 45 ASCII (45 cols) = 165 > 160. Neither
@@ -1321,7 +1332,11 @@ class TestSyncGateLayerI(_StopBase):
         self._seed_edit_turn_and_edited(5, edited)
         rc, out, _ = self._stop(self._full_compliance_message(), turn_count=5)
         self.assertIn("prompts/*.md", out["reason"])
-        self.assertIn("同步核对", out["reason"])
+        # The block must hand the agent a marker it can actually use.
+        # v0.38: the English copy offers the English spelling; both are
+        # live in SYNC_MARKERS, and `test_english_sync_check_marker_escapes`
+        # below proves this one settles the group.
+        self.assertIn("sync-check:", out["reason"])
 
     # -- v0.23.1 hardening (adversarial-review findings) ------------------ #
 

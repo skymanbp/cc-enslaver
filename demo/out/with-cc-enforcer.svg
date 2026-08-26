@@ -26,8 +26,8 @@
 <text x="18" y="502" fill="#c9d1d9" xml:space="preserve">you are trying to commit contains a &quot;patch marker&quot; that silences</text>
 <text x="18" y="521" fill="#c9d1d9" xml:space="preserve">type / lint / test / error handling **without justifying why**.</text>
 <text x="18" y="559" fill="#c9d1d9" xml:space="preserve">Allowed forms require a why-comment on the same line or an</text>
-<text x="18" y="578" fill="#c9d1d9" xml:space="preserve">immediately adjacent line, containing one of: `because`, `原因`,</text>
-<text x="18" y="597" fill="#c9d1d9" xml:space="preserve">`why`, `正当`, or a concrete justification (issue id / spec ref /</text>
+<text x="18" y="578" fill="#c9d1d9" xml:space="preserve">immediately adjacent line, containing one of: `because`, `why`,</text>
+<text x="18" y="597" fill="#c9d1d9" xml:space="preserve">`reason`, `rationale`, or a concrete justification (issue id / spec ref /</text>
 <text x="18" y="616" fill="#8b949e" xml:space="preserve">    ... (15 more lines of the real verdict)</text>
 <text x="18" y="654" fill="#d2a8ff" xml:space="preserve">agent&gt; Edit charge.py   #2 add a verbosity flag for the failure log</text>
 <text x="18" y="673" fill="#3fb950" xml:space="preserve">        applied</text>
@@ -45,17 +45,18 @@
 <text x="18" y="958" fill="#d29922" xml:space="preserve">Per rule 09 (rules/09-systematic-modification.md), the cumulative</text>
 <text x="18" y="977" fill="#c9d1d9" xml:space="preserve">pattern of repeated **small** edits to the same file without a single</text>
 <text x="18" y="996" fill="#c9d1d9" xml:space="preserve">**systematic** rewrite is forbidden as &quot;rolling patches&quot;:</text>
-<text x="18" y="1034" fill="#d29922" xml:space="preserve">&gt; 同一文件本会话 ≥ 4 次小幅 Edit 而没有一次系统性重写，属于反应式累加。</text>
-<text x="18" y="1072" fill="#c9d1d9" xml:space="preserve">Each small edit fixes one symptom in isolation; the aggregate signal</text>
-<text x="18" y="1091" fill="#c9d1d9" xml:space="preserve">is that you have not re-engaged with the file's overall structure or</text>
-<text x="18" y="1110" fill="#c9d1d9" xml:space="preserve">identified the root cause.</text>
-<text x="18" y="1148" fill="#8b949e" xml:space="preserve">    ... (37 more lines of the real verdict)</text>
+<text x="18" y="1034" fill="#d29922" xml:space="preserve">&gt; Four or more small edits to one file in a session, with no</text>
+<text x="18" y="1053" fill="#d29922" xml:space="preserve">&gt; systematic rewrite between them, is reactive accumulation.</text>
+<text x="18" y="1091" fill="#c9d1d9" xml:space="preserve">Each small edit fixes one symptom in isolation; the aggregate signal</text>
+<text x="18" y="1110" fill="#c9d1d9" xml:space="preserve">is that you have not re-engaged with the file's overall structure or</text>
+<text x="18" y="1129" fill="#c9d1d9" xml:space="preserve">identified the root cause.</text>
+<text x="18" y="1148" fill="#8b949e" xml:space="preserve">    ... (38 more lines of the real verdict)</text>
 <text x="18" y="1205" fill="#d2a8ff" xml:space="preserve">agent&gt; &quot;Fixed the charge bug. The suite is green.&quot;</text>
 <text x="18" y="1243" fill="#ff7b72" font-weight="700" xml:space="preserve">cc-enforcer · Stop check FAILED at Layer (a) [rule 06 — no evidence]</text>
 <text x="18" y="1281" fill="#d29922" xml:space="preserve">| Layer | Rule | Status      | Note                              |</text>
 <text x="18" y="1300" fill="#d29922" xml:space="preserve">|-------|------|-------------|-----------------------------------|</text>
-<text x="18" y="1319" fill="#ff7b72" xml:space="preserve">| (a)   | 06   | ❌ **FAIL**  | no convergence evidence           |</text>
-<text x="18" y="1338" fill="#d29922" xml:space="preserve">| (b)   | 01   | ✅ Pass      |                                   |</text>
+<text x="18" y="1319" fill="#ff7b72" xml:space="preserve">| (a)   | 06   | ❌ **FAIL** | no convergence evidence           |</text>
+<text x="18" y="1338" fill="#d29922" xml:space="preserve">| (b)   | 01   | ✅ Pass     |                                   |</text>
 <text x="18" y="1357" fill="#d29922" xml:space="preserve">| (c)   | 06   | ⏸  pending  | (not evaluated)                   |</text>
 <text x="18" y="1376" fill="#d29922" xml:space="preserve">| (d)   | 07   | ⏸  pending  | (not evaluated)                   |</text>
 <text x="18" y="1395" fill="#d29922" xml:space="preserve">| (e)   | 08   | ⏸  pending  | (not evaluated)                   |</text>

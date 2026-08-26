@@ -194,6 +194,8 @@ from lib import sync_gate as sync_gate_lib  # noqa: E402
 from lib import mdctx  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import hookio  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import messages  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -1362,92 +1364,44 @@ def _verify_claims(
 # "n/a (non-edit turn)" instead of pending — they would not have fired
 # anyway. On an edit turn they show "pending".
 # --------------------------------------------------------------------------- #
+# v0.38 — the layer tables' TEXT moved to the message catalog so it can
+# be translated; the ids and rule numbers are behaviour and stay here.
+_LAYER_IDS = "abcdefghi"
+_LAYER_RULE = {
+    "a": "06",
+    "b": "01",
+    "c": "06",
+    "d": "07",
+    "e": "08",
+    "f": "09",
+    "g": "01+06",
+    "h": "—",
+    "i": "12",
+}
+
 LAYER_META: list[dict[str, str]] = [
     {
-        "id": "(a)",
-        "rule": "06",
-        "label": "rule 06 — no evidence",
-        "recovery_keyword": "rule 06",
-    },
-    {
-        "id": "(b)",
-        "rule": "01",
-        "label": "rule 01 — hedge near done-claim",
-        "recovery_keyword": "rule 01 + hedge",
-    },
-    {
-        "id": "(c)",
-        "rule": "06",
-        "label": "rule 06 — self-quiz missing",
-        "recovery_keyword": "rule 06 self-quiz",
-    },
-    {
-        "id": "(d)",
-        "rule": "07",
-        "label": "rule 07 — task fidelity missing",
-        "recovery_keyword": "rule 07 fidelity",
-    },
-    {
-        "id": "(e)",
-        "rule": "08",
-        "label": "rule 08 — read-before-edit / think-before-write",
-        "recovery_keyword": "rule 08",
-    },
-    {
-        "id": "(f)",
-        "rule": "09",
-        "label": "rule 09 — systematic-modification triplet",
-        "recovery_keyword": "rule 09",
-    },
-    {
-        "id": "(g)",
-        "rule": "01+06",
-        "label": "rule 01+06 — file-claim verification (v0.16)",
-        "recovery_keyword": "rule 01 + 06 file-claim",
-    },
-    {
-        "id": "(h)",
-        # Not a numbered rule — a closing readability convention (v0.20).
-        "rule": "—",
-        "label": "TL;DR — 大白话总结 missing",
-        "recovery_keyword": "TL;DR 大白话",
-    },
-    {
-        "id": "(i)",
-        "rule": "12",
-        "label": "rule 12 — repo-wide sync gate (v0.23)",
-        "recovery_keyword": "rule 12 sync-gate",
-    },
+        "id": f"({c})",
+        "rule": _LAYER_RULE[c],
+        "label": messages.text(f"stop.layer_label.{c}"),
+        "recovery_keyword": messages.text(f"stop.layer_keyword.{c}"),
+    }
+    for c in _LAYER_IDS
 ]
 
 # Per-layer short "note" rendered in the status table when that layer is
 # the FAIL row. Keep these to a single short line each.
 _LAYER_FAIL_NOTE = {
-    "(a)": "no convergence evidence",
-    "(b)": "hedge near done-claim",
-    "(c)": "self-quiz / marker absent",
-    "(d)": "fidelity marker / quiz absent",
-    "(e)": "rule-08 marker / 3+ keywords absent",
-    "(f)": "rule-09 marker / triplet incomplete",
-    "(g)": "file-edit claim contradicts disk state",
-    "(h)": "tldr / 大白话 absent",
-    "(i)": "sync-gate group unmet",
+    f"({c})": messages.text(f"stop.fail_note.{c}") for c in _LAYER_IDS
+}
+
+_LAYER_TLDR = {
+    f"({c})": messages.text(f"stop.tldr.{c}") for c in _LAYER_IDS
 }
 
 # v0.20 — per-layer one-line plain-language takeaway ("大白话"). Appended to
 # every block reason so cc-enforcer's OWN output also ends with a readable
 # summary, symmetric with the layer-(h) requirement it imposes on the agent.
-_LAYER_TLDR = {
-    "(a)": "你说做完了但没贴证据——补一段「命令 + 输出」就放行。",
-    "(b)": "你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。",
-    "(c)": "有证据但没答收敛 4 题——把「真解决 / 更好方案 / 哪些没验 / 验证合理」写出来。",
-    "(d)": "没回看用户原始请求——逐项列「做了哪些 / 有没有降级或遗漏」。",
-    "(e)": "改了文件但没写「改前必读 / 写前必想」——补「根因 / 架构 / 方案」≥ 3 项。",
-    "(f)": "改了文件但缺「根因 + 影响 + 方案」三件套——补全再收尾。",
-    "(g)": "你说改了某文件但磁盘没变——要么真去改，要么撤回这句声明。",
-    "(h)": "结尾少了一句大白话——加一行 tldr: \"...\" 就放行。",
-    "(i)": "改了 A 类文件但没动它的连带 B 类——要么一起改，要么写一行「同步核对: 为什么不用改」。",
-}
 
 
 # The order `main()` actually evaluates the layers in — NOT the display
@@ -1464,6 +1418,17 @@ _LAYER_TLDR = {
 _EVAL_ORDER: tuple[str, ...] = (
     "(b)", "(a)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)",
 )
+
+
+
+def _pad(text: str, width: int) -> str:
+    """Left-align `text` in `width` DISPLAY columns.
+
+    `f"{x:<11s}"` counts code points, so a translated status word renders
+    at half its declared width and the table goes ragged. Same measure as
+    the tldr cap uses — see `_display_width`.
+    """
+    return text + " " * max(0, width - _display_width(text))
 
 
 def _render_status_table(
@@ -1497,33 +1462,27 @@ def _render_status_table(
         # non-edit (h) failure, e/f/g would otherwise be mislabelled "Pass"
         # despite never being evaluated.)
         if lid in ("(e)", "(f)", "(g)", "(i)") and not edit_turn:
-            status = "—  n/a"
-            note = "(non-edit turn)"
+            status = messages.text("stop.status.na")
+            note = messages.text("stop.note.non_edit_turn")
         elif rank < fail_rank:
-            status = "✅ Pass"
+            status = messages.text("stop.status.pass")
             note = ""
         elif rank == fail_rank:
-            status = "❌ **FAIL**"
+            status = messages.text("stop.status.fail")
             note = fail_note or _LAYER_FAIL_NOTE.get(lid, "")
         else:
             # Layer not evaluated (gated by the failure above).
-            status = "⏸  pending"
-            note = "(not evaluated)"
+            status = messages.text("stop.status.pending")
+            note = messages.text("stop.note.not_evaluated")
         rows.append(
-            f"| {lid:5s} | {rule:4s} | {status:<11s} | {note:<33s} |"
+            "| " + _pad(lid, 5) + " | " + _pad(rule, 4) + " | "
+            + _pad(status, 11) + " | " + _pad(note, 33) + " |"
         )
-    header = (
-        "| Layer | Rule | Status      | Note                              |\n"
-        "|-------|------|-------------|-----------------------------------|"
-    )
+    header = messages.text("stop.table_header")
     return header + "\n" + "\n".join(rows)
 
 
-_ONE_SHOT_FOOTER = (
-    "(One-shot guard: this is the only block in the current sequence — "
-    "the next Stop is allowed even if this layer still fails. Use the "
-    "next turn well.)"
-)
+_ONE_SHOT_FOOTER = messages.text("stop.one_shot_footer")
 
 
 def _build_block_reason(
@@ -1544,26 +1503,31 @@ def _build_block_reason(
     the tldr length check to distinguish "overlong" from "absent").
     """
     meta = next(m for m in LAYER_META if m["id"] == fail_layer_id)
-    headline = (
-        f"cc-enforcer · Stop check FAILED at Layer {fail_layer_id} "
-        f"[{meta['label']}]"
+    headline = messages.text("stop.headline").format(
+        layer=fail_layer_id, label=meta["label"],
     )
     table = _render_status_table(fail_layer_id, edit_turn, fail_note)
     parts: list[str] = [headline, "", table, ""]
     if matched_phrase is not None:
-        parts.append(f"Done-claim matched: {matched_phrase!r}")
+        parts.append(
+            f'{messages.text("stop.matched_prefix")}: {matched_phrase!r}'
+        )
     if extra_kv:
         for k, v in extra_kv.items():
             parts.append(f"{k}: {v}")
     if matched_phrase is not None or extra_kv:
         parts.append("")
-    parts.append(f"[Recovery — {meta['recovery_keyword']}]")
+    parts.append(messages.text("stop.recovery_header").format(
+        keyword=meta["recovery_keyword"],
+    ))
     parts.append(recovery.rstrip())
     parts.append("")
     # v0.20: one-line plain-language takeaway before the footer.
     tldr_line = _LAYER_TLDR.get(fail_layer_id)
     if tldr_line:
-        parts.append(f"大白话: {tldr_line}")
+        parts.append(
+            f'{messages.text("stop.tldr_prefix")}: {tldr_line}'
+        )
         parts.append("")
     parts.append(_ONE_SHOT_FOOTER)
     return "\n".join(parts) + "\n"
@@ -1574,203 +1538,25 @@ def _build_block_reason(
 # live in rules/*.md (and the headline + status table link the agent there
 # implicitly via the rule number).
 # --------------------------------------------------------------------------- #
-_RECOVERY_A = """Your reply claims completion but the message contains no
-convergence evidence — no `$ ` shell prompt, no test counts, no
-"重触发原症状" demonstration, no fenced output block.
+_RECOVERY_A = messages.text("stop.recovery.a")
 
-Per rule 06 (rules/06-verify-convergence.md), surface either:
-  • The original failing command + its now-passing output, or
-  • A `pytest` / `unittest` / `npm test` run with counts, or
-  • An explicit 重触发 / boundary / negative-case write-up.
+_RECOVERY_B = messages.text("stop.recovery.b")
 
-If you actually verified mentally but skipped writing it down, write
-it down now with the concrete commands + outputs."""
+_RECOVERY_C = messages.text("stop.recovery.c")
 
-_RECOVERY_B = """Your reply pairs a completion claim with hedged language
-within ~50 characters. Per rule 01 (rules/01-verify-dont-guess.md),
-confident verification cannot coexist with "我觉得 / I think /
-probably / maybe / 应该是" near the done-claim.
+_RECOVERY_D = messages.text("stop.recovery.d")
 
-Pick one:
-  • Drop the hedge and state the result with concrete output, or
-  • Drop the done-claim and say explicitly "尚未确认 / not yet
-    verified" so the user decides whether to ship.
+_RECOVERY_E = messages.text("stop.recovery.e")
 
-A hedge marker is not a rhetorical flourish — it signals you are not
-sure. If you are sure, write so; if you are not, say so."""
+_RECOVERY_F = messages.text("stop.recovery.f")
 
-_RECOVERY_C = """Your reply has evidence but does not surface the rule-06
-self-quiz. Pass condition is either:
+_RECOVERY_G = messages.text("stop.recovery.g")
 
-  (a) an explicit marker — `rule 06`, `自答`, `收敛`, `重触发`,
-      `边界用例`, `反向用例`, `convergence`, `self-quiz`; OR
-  (b) ≥ 2 of the 4 self-quiz questions:
-        1. 真解决?  Specific evidence, not just "no error"
-        2. 更好方案?  Compared with alternatives
-        3. 哪些没验?  Explicitly enumerate what wasn't tested
-        4. 验证合理?  Verification exercises the root-cause chain
+_RECOVERY_H = messages.text("stop.recovery.h")
 
-Tests passing alone is not convergence. Surface the self-quiz now."""
+_RECOVERY_H_LONG = messages.text("stop.recovery.h_long")
 
-_RECOVERY_D = """You passed rule-06 convergence on the part you edited, but
-your reply does not surface rule-07 task fidelity (a different axis:
-"did I deliver everything the user asked for, at the standard
-requested?").
-
-Pass condition is either:
-  (a) an explicit marker — `rule 07`, `任务忠实`, `请求覆盖`,
-      `原始请求`, `无降级`, `无遗漏`, `task fidelity`,
-      `request coverage`, `no degradation`, `no omission`,
-      `no scope creep`, `covered all`, `all requested`; OR
-  (b) ≥ 2 of 3 fidelity questions:
-        1. 覆盖性 — decompose original request, list which sub-items
-           you did vs. didn't and why
-        2. 标准性 — for each modifier word (强制 / 必须 / 完整 /
-           严格 / 所有 / mandatory / strict / all): did it land
-           as a hard action or stay soft doc?
-        3. 忠实性 — any concept swap / scope creep / buried TODO?
-
-Re-read the user's *original* message, not your in-flight restatement."""
-
-_RECOVERY_E = """You modified a file this turn but did not surface the
-rule-08 (read-before-edit / think-before-write) closing markers.
-
-Pass condition is either:
-  (a) an explicit marker — `rule 08`, `改前必读`, `写前必想`,
-      `read-before-edit`, `think-before-write`, `系统式自答`; OR
-  (b) ≥ 3 of 6 rule-02 keywords:
-        架构 / architecture
-        职责 / responsibility
-        根源 / 根因 / root cause
-        方案 / solution
-        连带 / 影响 / downstream / impact
-        风险 / 不变量 / invariant / risk
-
-If you did the rule-08 work in chain-of-thought but didn't surface it
-in the final reply, surface it now."""
-
-_RECOVERY_F = """You modified a file this turn but did not surface the
-rule-09 systematic-modification triplet (root cause + impact + solution).
-
-Pass condition is either:
-  (a) an explicit marker — `rule 09`, `系统式修改`, `打补丁`,
-      `systematic modification`, `patch-style`, `反补丁`,
-      `non-patch`, `root cause`; OR
-  (b) **all three** of the triplet keywords in the same reply:
-        • 根源 / 根因 / root cause
-        • 连带 / 影响范围 / impact / blast radius / downstream
-        • 方案 / solution / approach / alternative
-
-If the edit was actually patch-style (one local suppression, no impact
-analysis, no alternative considered), redo it systematically or flag
-the half-finish to the user."""
-
-_RECOVERY_G = """Your reply claims to have edited / created / modified one or
-more files, but the on-disk state contradicts at least one of those
-claims:
-
-{contradictions}
-
-Per rule 01 (verify don't guess) + rule 06 (verify convergence), a
-claim about your own actions must be true. If you said "I edited
-X.py" but X.py's content/mtime matches what it was when you first
-encountered it this session, you either:
-
-  (1) did not actually run the Edit (it was DENIED by another hook;
-      check earlier in the transcript), or
-  (2) ran Edit on a different file than the one you claimed, or
-  (3) the Edit produced no net change (old_string == new_string).
-
-In any of these cases the claim is false and the user is being
-misled. Fix the reply:
-
-  • If (1): retry the Edit, or surface the deny to the user.
-  • If (2): correct the path in your reply.
-  • If (3): retract the claim — describe what you actually did.
-
-This layer is **only** triggered when the on-disk evidence
-**contradicts** a claim. If we don't have a baseline for the claimed
-file (you never Read it) we can't verify it — those claims pass
-through silently. If the file actually changed but you forgot to
-mention it, that's also fine — we only catch claimed-but-didn't.
-
-If this fires falsely (you DID edit the file via another tool /
-external editor / etc.), surface the discrepancy and let the user
-decide whether to override."""
-
-_RECOVERY_H = """Your reply claims completion but does not end with a
-plain-language TL;DR (大白话总结).
-
-Per the v0.20 canonical reply schema, every done-claim reply must close
-with a one-sentence takeaway the user can read at a glance. Add either:
-
-  • The schema's final field:  tldr: "<一句大白话>"
-  • A line starting with `大白话:` / `一句话总结:` / `TL;DR:`
-
-The sentence should say, in plain words: what you actually did, what the
-result was, and whether the user needs to do anything next. Not a restate
-of the rule checks — a human takeaway.
-
-Example:
-  tldr: "改完了 Stop hook 加了 tldr 强制层，203 个测试全绿，可以直接 ship。"
-"""
-
-_RECOVERY_H_LONG = """Your reply has a TL;DR, but at least one of its items is
-too long to be a TL;DR:
-
-  item ({length} columns > {cap} cap): {snippet!r}
-
-Per the v0.23 length contract, each tldr item is ONE sentence — cause,
-action, outcome — within {cap} display columns:
-
-  tldr: "<前因 + 做了什么 + 结果如何，一句话>"
-
-If you have several things to report, report them one per line, each a
-single short sentence within the cap:
-
-  tldr:
-    - "修了 X：根因是 A，现在测试全绿。"
-    - "顺带把 B 的引用同步了，无行为变化。"
-
-Do not compress by dropping the outcome — drop the process detail
-instead; the body of the reply already carries the detail.
-
-Why COLUMNS and not characters (v0.35): a CJK character occupies two
-terminal columns, so measuring code points made this cap mean two
-different things in two languages — about one sentence in English and
-about two paragraphs in Chinese. The unit is now the same on both sides
-of the contract. In practice:
-
-  • an all-ASCII item  — the cap is unchanged at {cap} characters;
-  • an all-Chinese item — roughly {cjk_cap} 汉字, which is what a single
-    spoken sentence actually is;
-  • a mixed item — each ASCII character costs 1, each 汉字 costs 2,
-    combining marks cost 0.
-
-The number quoted above is that column count, not a character count, so
-it is directly comparable to the cap. If your item is only slightly
-over, the usual cause is two sentences joined by a comma or a 顿号 —
-split them into two items rather than trimming words out of one."""
-
-_RECOVERY_I = """One or more of this project's co-update groups
-(.claude/cc-enforcer/sync-gate.toml) are unmet for this session's edits:
-
-{violations}
-
-Per rule 12 (rules/12-repo-wide-sync.md), editing a file that has
-registered downstream/reference siblings requires either:
-
-  (1) editing at least one file matching the group's `require` globs in
-      the same session (co-update the references, docs, tests,
-      translations that depend on what you changed), or
-  (2) explicitly acknowledging the check in your reply with a sync
-      marker — e.g. a line like:
-        同步核对: <require 侧为什么无需变更>
-        sync-check: <why the require side needs no change>
-
-Silently editing only the `when` side is exactly the stale-reference
-laziness rule 12 exists to stop. Check each listed group now: update
-the co-files, or say out loud why they are already correct."""
+_RECOVERY_I = messages.text("stop.recovery.i")
 
 
 def _emit_block(reason_text: str) -> None:
@@ -1973,7 +1759,8 @@ def main() -> int:
                 "(b)", edited_this_turn,
                 _RECOVERY_B,
                 matched_phrase=matched,
-                extra_kv={"Hedge matched": repr(hedge_phrase)},
+                extra_kv={messages.text("stop.extra.hedge_matched"):
+                         repr(hedge_phrase)},
             ))
             return 0
 

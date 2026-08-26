@@ -18,6 +18,121 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.38.0] — 2026-08-26
+
+**The READMEs mixed languages because the product did.** The request was to
+separate them — Chinese in the Chinese README, English in the English one. The
+survey said the prose was already clean: zero English prose in `README.zh.md`
+outside code fences, and three Chinese fragments in `README.md`, one of which
+was a decorative gloss.
+
+The mixing was *inside the fenced samples*, and those samples are real hook
+output. Rewriting them into one language would have fabricated output — the
+exact defect v0.35.1 was about. So the fix had to happen where the mixing
+actually was.
+
+### What the guards were printing
+
+Every user-facing string a guard emitted was bilingual by construction: an
+English body, a Chinese `大白话:` line appended to every block reason, Chinese
+phrasings offered inline (`"尚未确认 / not yet verified"`), and marker lists
+that named the Chinese spellings alongside the English ones. `CC_ENFORCER_LANG`
+did not reach any of it — it switched the injected prompts and nothing else.
+
+### The catalog
+
+Every string now lives in a catalog, on the contract `rules/` and `prompts/`
+already use ([`docs/I18N.md`](docs/I18N.md)):
+
+- [`lib/messages_en.py`](hooks/scripts/lib/messages_en.py) — the **skeleton**
+  and source of truth, 86 keys.
+- [`lib/messages_zh.py`](hooks/scripts/lib/messages_zh.py) — its translation,
+  same keys, same `str.format` fields.
+- [`lib/messages.py`](hooks/scripts/lib/messages.py) — resolves **per key**, so
+  a partial translation degrades to English rather than blanking a deny.
+
+A dict rather than markdown beside `prompts/`, for two measured reasons: these
+strings are read on every hook invocation, which sits in the critical path
+§6 publishes the cost of; and a dict can be gated on exact key sets and
+per-key placeholder sets, where markdown can only be gated on heading shape.
+
+**The English half was generated mechanically** from the constants the guards
+carried through v0.37 — verified byte-identical before anything else changed —
+so the move could not alter behaviour. 733 tests then passed unchanged, which
+is the evidence that it didn't.
+
+### Then the English was made English
+
+A separate, deliberate contract change. An English message now names the
+**English** spellings of the markers it describes. Each replacement was checked
+against the live pattern sets (`CONVERGENCE_MARKERS`, `FIDELITY_MARKERS`,
+`RULE_08_MARKERS`, `RULE_09_MARKERS`, `TLDR_MARKERS`, `SYNC_MARKERS`,
+`_HEDGE_INNER`), all of which accept both languages — so naming only one stays
+true. `大白话:` became `In plain words:`; the nine per-layer one-liners, which
+were Chinese-only, were written in English for the skeleton and kept in Chinese
+for the translation.
+
+Measured, not asserted: default output contains **zero CJK**, and
+`CC_ENFORCER_LANG=zh` produces a fully Chinese deny across **all seven** deny
+and block paths.
+
+### What the first pass missed
+
+Found by running each path in `zh` and reading the output, not by grep: the
+coverage-bar renderers in `read_guard`, the `Hedge matched` label, and
+`bash_guard`'s entire register-deny path were built by functions and f-strings
+rather than held as constants, so they came through in English inside an
+otherwise-Chinese message. Ten more keys.
+
+### Gates
+
+`i18n_check` gained `check_message_catalogs()`, wired into CI through
+`tests/test_i18n_sync.py`:
+
+- **key-set parity**, both directions;
+- **per-key `str.format` field parity** — the one that bites at runtime, since
+  a dropped field silently says less and an invented one raises inside the
+  hook while the user is already being denied;
+- **every key a guard asks for exists** — including the two computed families
+  (per-layer, per-bash-pattern), because a renamed key would otherwise appear
+  as `<<missing message: …>>` inside a deny.
+
+The last check caught its own docstring on first run (`messages.text("a.b")`
+read as a real request), and then caught itself again: the filter that was
+supposed to skip non-consumers spelled out the import phrase it searched for,
+which made this module look like a consumer. Split across concatenation, the
+way `read_guard` and `bash_guard` already handle their own literals.
+
+### Also
+
+- The Stop status table pads by **display columns**, not code points. It never
+  mattered while every value was ASCII; a translated status word rendered at
+  half its declared width and the table came out ragged. Same `_display_width`
+  the tldr cap has used since v0.35.
+- `README.zh.md`'s two samples were re-captured under `CC_ENFORCER_LANG=zh`;
+  `README.md`'s layer-(b) sample was re-captured too — it still carried the
+  pre-v0.38 bilingual text, so it was both mixed *and* stale.
+- Three decorative Chinese glosses removed from `README.md`. The Chinese that
+  stays is data: the language-switcher link, and the hedge tokens the detector
+  literally matches (`test_doc_sync` derives that list from `_HEDGE_INNER`, so
+  removing them would make the doc false *and* fail the gate).
+- The demo images were re-rendered — the rule-09 deny wording changed, and
+  `tests/test_demo.py` said so before anything else did.
+
+### Tests — 712 → 733
+
+New [`tests/test_messages.py`](tests/test_messages.py) (17): the English
+catalog asserted CJK-free on every value (the user-visible requirement, stated
+as an assertion rather than a review pass), the Chinese catalog asserted
+actually translated rather than copied, loader resolution and both fallbacks,
+and `TestCatalogChineseOutput` — the language switch proven end to end through
+real hook subprocesses, each case with its English twin, because "the output is
+Chinese" means nothing without "and the default is not". Plus 4 in
+`test_i18n_sync.py` for the new parity gate, including the boundary case that
+proves it can return clean.
+
+---
+
 ## [0.37.0] — 2026-08-25
 
 **The guards were not reading what the agent wrote.** v0.36 shipped with one

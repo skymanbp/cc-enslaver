@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.37.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -118,7 +118,7 @@ next attempt — you can never be blocked twice for the same row — but a
 *different* layer you are still violating will still fire. Escalation is bounded
 by the layer count, and any clean reply resets it.
 
-### Feature 4 — Imperial Edicts (圣旨): your own hard rules
+### Feature 4 — Imperial Edicts: your own hard rules
 
 Most "custom rules" features are just more text in a prompt. Here your rule
 becomes a regex a hook matches against the literal content of every Edit, Write
@@ -195,7 +195,18 @@ em-dash turned one rule-09 DENY into an ALLOW, and the Chinese markers layers
 **If you write to your agent in a language other than English, this is the
 release where the Stop gate starts seeing it.**
 
-Ten scripts under [`hooks/scripts/`](hooks/scripts/) sit on eleven shared
+**Guard output is translatable as of v0.38.** Everything a guard *prints* —
+deny reasons, the nine-layer status table, recovery blurbs — lives in
+[`lib/messages_en.py`](hooks/scripts/lib/messages_en.py) (the skeleton) with
+translations beside it, resolved **per key** through `CC_ENFORCER_LANG` on the
+same contract as `rules/` and `prompts/` ([`docs/I18N.md`](docs/I18N.md)). It
+was bilingual before that — an English body with a Chinese plain-language line
+stapled on — which is why both READMEs used to quote mixed-language samples:
+they were accurate. What the guards *match* is unchanged and still bilingual;
+only what they *say* follows the switch. The samples on this page are English
+because English is the default.
+
+Ten scripts under [`hooks/scripts/`](hooks/scripts/) sit on fourteen shared
 [`lib/`](hooks/scripts/lib/) modules. Only the four in the table above are
 registered as hooks; the other six (`register_read.py`, `manage_edicts.py`,
 `manage_sync_gate.py`, `gc_state.py`, `i18n_check.py`, `bench_hooks.py`) back
@@ -339,7 +350,7 @@ cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim
 | Layer | Rule | Status      | Note                              |
 |-------|------|-------------|-----------------------------------|
 | (a)   | 06   | ⏸  pending  | (not evaluated)                   |
-| (b)   | 01   | ❌ **FAIL**  | hedge near done-claim             |
+| (b)   | 01   | ❌ **FAIL** | hedge near done-claim             |
 | (c)   | 06   | ⏸  pending  | (not evaluated)                   |
 …
 Done-claim matched: 'Fixed'
@@ -351,10 +362,10 @@ within ~50 characters. …
 
 Pick one:
   • Drop the hedge and state the result with concrete output, or
-  • Drop the done-claim and say explicitly "尚未确认 / not yet
-    verified" so the user decides whether to ship.
+  • Drop the done-claim and say explicitly "not yet verified" so
+    the user decides whether to ship.
 
-大白话: 你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。
+In plain words: You claimed it works and hedged in the same breath — drop the hedge, or say plainly that it is unverified.
 ```
 
 The hedge set is **first-person uncertainty only** — `我记得` / `我觉得` /
@@ -385,7 +396,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 712 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 733 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -450,7 +461,7 @@ it has earned:
 ### Accuracy posture
 
 There is no precision/recall table here, and that absence is deliberate. The
-detectors are tuned to **prefer false negatives** (`宁可漏报不误报`): a missed
+detectors are tuned to **prefer false negatives**: a missed
 violation costs one lazy edit, while a false alarm costs a turn and teaches the
 user to distrust the gate. Where a detector's reach is known to stop short, the
 limit is written into the rule file and pinned by a test asserting the
@@ -590,7 +601,7 @@ mode it exists to prevent:
   small-edit definition still binds, and a 30-line file still denies its fourth
   two-line patch. Intended — "you have not re-engaged with the file's overall
   structure" is not a claim anyone can make about a five-line file.
-- **Detectors prefer misses to false alarms** — `宁可漏报不误报`. Documented gaps
+- **Detectors prefer misses to false alarms.** Documented gaps
   live in each rule file rather than being quietly patched.
 
 ### Roadmap
@@ -627,8 +638,11 @@ cc-enforcer/
 │       ├── gc_state.py          # session-state GC: CLI + auto-GC callee
 │       ├── i18n_check.py        # skeleton ↔ translation structural parity
 │       ├── bench_hooks.py       # per-hook latency benchmark (README §6)
-│       └── lib/                 # -- eleven shared modules --
+│       └── lib/                 # -- fourteen shared modules --
 │           ├── hookio.py        # boundary: stdin payload -> UTF-8, never the locale codepage
+│           ├── messages.py      # boundary: resolve guard text for CC_ENFORCER_LANG
+│           ├── messages_en.py   #   the English skeleton — every string a guard prints
+│           ├── messages_zh.py   #   its Chinese translation (same keys, same fields)
 │           ├── srclex.py        # judgement: code vs comment vs docstring vs literal
 │           ├── mdctx.py         # judgement: markdown fence / blockquote context
 │           ├── shellcmd.py      # judgement: tokenise → segments → argv → subcommand
@@ -648,7 +662,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 712 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 733 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -660,7 +674,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **712 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **733 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift

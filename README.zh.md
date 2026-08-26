@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.37.0-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -179,7 +179,19 @@ Stop 钩子读 agent 即将收尾的那条回复。只要里面含完成声明�
 DENY 变成 ALLOW，而 (b)(h) 两层要找的中文标记全成了乱码，一个也匹配不上。
 **如果你用中文（或任何非英语）跟 agent 说话，从这一版起 Stop 闸门才真的看得见它。**
 
-[`hooks/scripts/`](hooks/scripts/) 下十个脚本，坐在十一个共享
+**本页的守卫输出样例是在 `CC_ENFORCER_LANG=zh` 下实跑捕获的。** 默认仍是英文
+骨架——与 `rules/` / `prompts/` 同一套契约（[`docs/I18N.md`](docs/I18N.md)）。
+v0.38 起守卫**打印**的每一句话也进了这套体系：文案住在
+[`lib/messages_en.py`](hooks/scripts/lib/messages_en.py)（骨架）与
+[`lib/messages_zh.py`](hooks/scripts/lib/messages_zh.py)（翻译），**逐键**解析、
+缺键回落英文。在此之前守卫输出是**双语混排**的——英文正文缀一行中文 `大白话`
+——所以两个 README 都只能如实展示混排，改成单一语言就成了伪造输出。切换：
+
+```bash
+setx CC_ENFORCER_LANG zh          # Windows；POSIX 用 export
+```
+
+[`hooks/scripts/`](hooks/scripts/) 下十个脚本，坐在十四个共享
 [`lib/`](hooks/scripts/lib/) 模块上。只有上表那四个注册为钩子；另外六个
 （`register_read.py`、`manage_edicts.py`、`manage_sync_gate.py`、`gc_state.py`、
 `i18n_check.py`、`bench_hooks.py`）分别服务于逃生口、slash 命令、CI 与基准测试。
@@ -264,29 +276,52 @@ green」的收尾直接结束回合](demo/out/without-cc-enforcer.svg)
 第五次编辑根本没落地：
 
 ```text
-cc-enforcer · rule 09 violation (rolling-patch interception)
+cc-enforcer · rule 09 违规（滚动补丁拦截）
 
-Tool: Edit
-Target: auth.py
-Rolling-patch counter: 3 small edit(s) already applied
-this session; this would be attempt #4 — at or above the
-threshold of 4.
-…
-Classification used here:
-  small      = max(|old_string|, |new_string|) < 200 chars
-               AND max line count ≤ 10
-  systematic = max chars ≥ 1500 OR max line count ≥ 50
-               OR the change spans ≥ 30% of this file — here, 37 of 122 lines or 1102 of 3672 chars
-               (resets the counter to 0)
-  medium     = anything in between (does not count, does not reset)
+工具：Edit
+目标：auth.py
+滚动补丁计数器：本会话对该文件已落地 3 次小幅编辑；
+这一次将是第 #4 次 —— 达到或超过阈值 4。
 
-Never counted, at any counter value (v0.35):
-  net reduction — new_string is SHORTER than old_string. A rolling patch
-                  is an accretion; an edit that leaves the file smaller
-                  than it found it cannot be one.
-  bookkeeping   — only version / ISO-date literals differ and every other
-                  byte is identical (in prose documents, bare integers
-                  count too). Bumping a version number is not a fix.
+按 rule 09（rules/09-systematic-modification.md），对同一文件反复做**小幅**
+编辑、中间却没有一次**系统式**重写，这种累积模式被禁止，称为「滚动补丁」：
+
+> 同一文件本会话 ≥ 4 次小幅 Edit 而没有一次系统性重写，属于反应式累加。
+
+每次小编辑都只孤立地修掉一个症状；这个总量信号说明你没有重新面对这个文件
+的整体结构，也没有找到根因。
+
+这里用的分类：
+  小幅    = max(|old_string|, |new_string|) < 200 字符
+            **且** 最大行数 ≤ 10
+  系统式  = 最大字符数 ≥ 1500 或 最大行数 ≥ 50
+            或 该改动跨越了本文件的 ≥ 30% —— 这里是 37/121 行，或 396/1320 字符
+            （把计数器清 0）
+  中等    = 介于两者之间（不计数，也不重置）
+
+任何计数值下都**永不计数**（v0.35）：
+  净减少   —— new_string 比 old_string **更短**。滚动补丁是一种累加；
+             一次让文件比原来更小的编辑不可能是它。
+  记账类   —— 只有版本号 / ISO 日期字面量不同、其余每个字节都相同
+             （散文文档里，纯整数也算）。升个版本号不是修 bug。
+
+继续的方式，三选一：
+
+  (1) **系统式重写**：把你手上待办的几处小修合并成一次 Edit（或 Write），
+      让 `new_string` / `content` 达到 ≥ 50 行 / ≥ 1500
+      字符，或 ≥ 37 行 / ≥ 396 字符 —— 先够到哪条算哪条。这算系统式，会把该文件的计数器清 0。
+
+  (2) **把多处错别字类修改批量做掉**：如果你确实有好几处互不相关的小改动，
+      就把周边上下文一起带上，让每一次 Edit 都越过小幅阈值
+      （≥ 10 行 / ≥ 200 字符），或者干脆用 Write
+      整体替换这个文件。
+
+  (3) **停下来上报**：告诉用户「这个文件需要一次系统式重写，请先看我的方案
+      再让我继续」。让他决定是放宽约束还是换个思路。
+
+注意：这**不是**补丁标记检查 —— 你的 new_string 里没有 try/except: pass、
+# noqa、@ts-ignore 之类。这是**累积模式**检查：太多小修说明的是理解不足，
+不是屏蔽。
 ```
 
 这不是事后打印的忠告 —— **那次编辑根本没有发生**。它印出来的那条按文件的门槛
@@ -305,27 +340,37 @@ Never counted, at any counter value (v0.35):
 会得到：
 
 ```text
-cc-enforcer · Stop check FAILED at Layer (b) [rule 01 — hedge near done-claim]
+cc-enforcer · Stop 检查在 Layer (b) 未通过 [rule 01 —— 完成声明旁的含糊词]
 
-| Layer | Rule | Status      | Note                              |
-|-------|------|-------------|-----------------------------------|
-| (a)   | 06   | ⏸  pending  | (not evaluated)                   |
-| (b)   | 01   | ❌ **FAIL**  | hedge near done-claim             |
-| (c)   | 06   | ⏸  pending  | (not evaluated)                   |
-…
-Done-claim matched: '修好了'
-Hedge matched: '我觉得'
+| 层 | 规则 | 状态 | 说明 |
+|------|------|------|------|
+| (a)   | 06   | ⏸  待评     | （未求值）                        |
+| (b)   | 01   | ❌ **未过** | 完成声明旁有含糊词                |
+| (c)   | 06   | ⏸  待评     | （未求值）                        |
+| (d)   | 07   | ⏸  待评     | （未求值）                        |
+| (e)   | 08   | —  不适用   | （非编辑轮）                      |
+| (f)   | 09   | —  不适用   | （非编辑轮）                      |
+| (g)   | 01+06 | —  不适用   | （非编辑轮）                      |
+| (h)   | —    | ⏸  待评     | （未求值）                        |
+| (i)   | 12   | —  不适用   | （非编辑轮）                      |
 
-[Recovery — rule 01 + hedge]
-Your reply pairs a completion claim with hedged language
-within ~50 characters. …
+命中的完成声明: '修好了'
+命中的含糊词: '我觉得'
 
-Pick one:
-  • Drop the hedge and state the result with concrete output, or
-  • Drop the done-claim and say explicitly "尚未确认 / not yet
-    verified" so the user decides whether to ship.
+[恢复指引 —— rule 01 + hedge]
+你的回复把完成声明和含糊措辞放在了 50 字符以内。
+按 rule 01（rules/01-verify-dont-guess.md），有把握的验证不可能与
+「我觉得 / 我相信 / 应该是 / 大概 / 可能就」这类词共存于同一句断言旁。
+
+二选一：
+  • 删掉含糊词，用具体输出把结果说死，或
+  • 删掉完成声明，明说「尚未确认」，让用户自己决定要不要发。
+
+含糊词不是修辞客套 —— 它表示你自己也没底。有底就写清楚；没底就直说。
 
 大白话: 你一边说修好了一边又「应该 / 可能」——删掉含糊词，或明说还没验。
+
+（一次性宽限：这是当前序列里唯一的一次拦截 —— 即使这一层仍然不过，下一次 Stop 也会放行。把下一轮用好。）
 ```
 
 hedge 集合**只收第一人称的不确定**——`我记得` / `我觉得` / `我相信` / `可能就` /
@@ -352,7 +397,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 712 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 733 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -553,8 +598,11 @@ cc-enforcer/
 │       ├── gc_state.py          # 会话状态 GC：CLI + auto-GC 被调方
 │       ├── i18n_check.py        # 骨架 ↔ 翻译的结构对齐
 │       ├── bench_hooks.py       # 逐钩子延迟基准（README 第六节）
-│       └── lib/                 # -- 十一个共享模块 --
+│       └── lib/                 # -- 十四个共享模块 --
 │           ├── hookio.py        # 边界：stdin 载荷 → UTF-8，绝不走宿主机码页
+│           ├── messages.py      # 边界：按 CC_ENFORCER_LANG 解析守卫文案
+│           ├── messages_en.py   #   英文骨架 —— 守卫会打印的每一句话
+│           ├── messages_zh.py   #   它的中文翻译（同键集、同占位符）
 │           ├── srclex.py        # 判定：代码 vs 注释 vs docstring vs 字面量
 │           ├── mdctx.py         # 判定：markdown 围栏 / 引用块上下文
 │           ├── shellcmd.py      # 判定：分词 → 分段 → argv → 子命令
@@ -574,7 +622,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 712 个测试（python -m unittest discover tests）
+└── tests/                       # 733 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -586,7 +634,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **712 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **733 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 

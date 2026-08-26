@@ -87,6 +87,8 @@ from lib import srclex  # noqa: E402
 from lib import editscale  # noqa: E402
 # because the sys.path bootstrap above must run before this import
 from lib import hookio  # noqa: E402
+# because the sys.path bootstrap above must run before this import
+from lib import messages  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Tools this guard handles (PreToolUse matcher must include all of them).
@@ -96,45 +98,7 @@ HANDLED_TOOLS = {"Read", "Write", "Edit"}
 # --------------------------------------------------------------------------- #
 # Deny messages.
 # --------------------------------------------------------------------------- #
-UNREAD_DENY_TEMPLATE = """cc-enforcer · rule 04 + 08 violation (read-before-edit)
-
-Tool: {tool_name}
-Target: {file_path}
-
-This file already exists on disk but has not been Read (or Written) in
-this session. Per rule 04 (rules/04-full-context.md) + rule 08
-(rules/08-read-before-edit-think-before-write.md), edits must be
-preceded by a complete reading of the target file so you understand
-the surrounding architecture and downstream impact.
-
-To proceed:
-  1. Call Read on this file (the entire file, not just the diff context).
-  2. After reading, retry the {tool_name}.
-
-If you are intentionally creating a NEW file, this guard would not have
-fired -- it triggers only when the target already exists. The fact that
-it fired means there is content here you have not yet examined.
-
-If you have already Read this file in this session but the guard still
-denies (Claude Code occasionally short-circuits Read to a result cache
-without firing the hook -- a known issue), you can register the file
-as read via the v0.4.0 escape hatch. Run it as TWO SEPARATE Bash tool
-calls -- the guard grants read credit only when the registration is the
-ENTIRE command of a single unconditional segment, so any chained form
-(`&&`, `||`, `;`, a pipe, a command substitution) earns no credit while
-the script still prints "register_read: ok".
-
-  Bash call 1 -- compute SHA-256 of the file currently on disk:
-  python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' PATH
-
-  Bash call 2 -- register, with NOTHING chained before or after it.
-  Paste the hex digest printed by call 1 in place of HEX:
-  python "${{CLAUDE_PLUGIN_ROOT}}/hooks/scripts/register_read.py" --file PATH --hash HEX
-
-The PreToolUse(Bash) hook recomputes the hash from disk and only
-registers if it matches your claim, so the escape hatch cannot itself
-be used to bypass the read requirement.
-"""
+UNREAD_DENY_TEMPLATE = messages.text("read.deny.unread")
 
 
 # --------------------------------------------------------------------------- #
@@ -168,9 +132,9 @@ def _scale_note(scale: tuple[int, int] | None) -> str:
         return ""
     chars_bar, lines_bar = bar
     file_chars, file_lines = scale
-    return (
-        f" — here, {lines_bar} of {file_lines} lines"
-        f" or {chars_bar} of {file_chars} chars"
+    return messages.text("read.scale_note").format(
+        lines_bar=lines_bar, file_lines=file_lines,
+        chars_bar=chars_bar, file_chars=file_chars,
     )
 
 
@@ -180,180 +144,21 @@ def _cover_hint(scale: tuple[int, int] | None) -> str:
     if bar is None:
         return ""
     chars_bar, lines_bar = bar
-    return (
-        f", or ≥ {lines_bar} lines / ≥ {chars_bar} chars"
-        " — whichever bar you clear first"
+    return messages.text("read.cover_hint").format(
+        lines_bar=lines_bar, chars_bar=chars_bar,
     )
 
 
-ROLLING_PATCH_DENY_TEMPLATE = """cc-enforcer · rule 09 violation (rolling-patch interception)
-
-Tool: {tool_name}
-Target: {file_path}
-Rolling-patch counter: {current_count} small edit(s) already applied
-this session; this would be attempt #{attempt_count} — at or above the
-threshold of {threshold}.
-
-Per rule 09 (rules/09-systematic-modification.md), the cumulative
-pattern of repeated **small** edits to the same file without a single
-**systematic** rewrite is forbidden as "rolling patches":
-
-> 同一文件本会话 ≥ 4 次小幅 Edit 而没有一次系统性重写，属于反应式累加。
-
-Each small edit fixes one symptom in isolation; the aggregate signal
-is that you have not re-engaged with the file's overall structure or
-identified the root cause.
-
-Classification used here:
-  small      = max(|old_string|, |new_string|) < {small_chars} chars
-               AND max line count ≤ {small_lines}
-  systematic = max chars ≥ {sys_chars} OR max line count ≥ {sys_lines}
-               OR the change spans ≥ {ratio_pct}% of this file{scale_note}
-               (resets the counter to 0)
-  medium     = anything in between (does not count, does not reset)
-
-Never counted, at any counter value (v0.35):
-  net reduction — new_string is SHORTER than old_string. A rolling patch
-                  is an accretion; an edit that leaves the file smaller
-                  than it found it cannot be one.
-  bookkeeping   — only version / ISO-date literals differ and every other
-                  byte is identical (in prose documents, bare integers
-                  count too). Bumping a version number is not a fix.
-
-To proceed, do one of:
-
-  (1) **Systematic rewrite**: combine your pending small fixes into a
-      single Edit (or Write) of ≥ {sys_lines} lines / ≥ {sys_chars}
-      chars on `new_string` / `content`{cover_hint}. This counts as
-      systematic and resets the counter to 0 for this file.
-
-  (2) **Batch multiple typo-class fixes**: if you genuinely have several
-      independent small unrelated changes, expand the surrounding context
-      so each individual Edit clears the small-edit threshold (≥ {small_lines}
-      lines / ≥ {small_chars} chars), or use Write to replace the whole
-      file at once.
-
-  (3) **Stop and surface**: tell the user "this file needs a systematic
-      rewrite; please review my plan before I continue". Let them
-      decide whether to relax the constraint or refactor the approach.
-
-Note: this is NOT the patch-marker check — your new_string is clean of
-try/except: pass, # noqa, @ts-ignore, etc. It is the AGGREGATE PATTERN
-check: too many small fixes signal a comprehension gap, not a
-suppression.
-"""
+ROLLING_PATCH_DENY_TEMPLATE = messages.text("read.deny.rolling")
 
 
-PATCH_DENY_TEMPLATE = """cc-enforcer · rule 09 violation (patch-style new_string)
-
-Tool: {tool_name}
-Target: {file_path}
-Pattern matched: {pattern_label}
-
-Snippet (the offending segment in your new_string):
-{snippet}
-
-Per rule 09 (rules/09-systematic-modification.md), the modification
-you are trying to commit contains a "patch marker" that silences
-type / lint / test / error handling **without justifying why**.
-
-Allowed forms require a why-comment on the same line or an
-immediately adjacent line, containing one of: `because`, `原因`,
-`why`, `正当`, or a concrete justification (issue id / spec ref /
-clear technical rationale). Bare suppressions are not allowed.
-
-Examples of acceptable forms:
-
-  # noqa: E501  -- URL string exceeds 100 chars; splitting hurts readability
-  LONG_URL = "https://..."
-
-  // @ts-ignore: third-party lib has incomplete type, see issue #1234
-  const result = legacy.foo();
-
-If you actually meant to fix the underlying issue (rule 03), do that
-instead of suppressing the signal. If the suppression is truly
-warranted, add the rationale comment and retry. If you genuinely need
-to bypass this guard, surface the deny to the user and let them edit
-manually -- the discipline exists to flag laziness, not block you.
-"""
+PATCH_DENY_TEMPLATE = messages.text("read.deny.patch")
 
 
-HARDCODE_DENY_TEMPLATE = """cc-enforcer · rule 10 violation (non-essential hardcoding)
-
-Tool: {tool_name}
-Target: {file_path}
-Pattern matched: {pattern_label}
-
-Snippet (the offending segment in your content):
-{snippet}
-
-Per rule 10 (rules/10-no-hardcoding.md), a value that by design should
-be externalized -- read from configuration, an environment variable, a
-secret manager, or a function parameter -- has been lazily inlined as a
-literal. This is the "设计上应该是变量却被偷懒塞成硬编码" antipattern:
-credentials, API keys, tokens, and private-key material must never be
-baked into source.
-
-To proceed, do one of:
-
-  (1) **Externalize it** (preferred, rule 03 root cause): read the value
-      from the environment or a config / secret store, e.g.
-        api_key = os.environ["API_KEY"]          # not a literal
-      and keep the real value only in an untracked .env / secret store.
-
-  (2) **If this is genuinely a non-secret placeholder / example / test
-      fixture**, make it distinguishable: use an obvious placeholder
-      value (containing `example`, `changeme`, `your-`, `<...>`,
-      `${{...}}`, `dummy`, `redacted`) OR add an adjacent why-comment
-      stating it is essential / a fixture / an example (a token from:
-      essential / 必须 / example / fixture / placeholder / 占位 /
-      sample / test data).
-
-  (3) **Stop and surface**: if you believe the hardcoding is truly
-      unavoidable, tell the user and let them decide -- do not silently
-      commit a secret.
-
-Note: prose docs (.md / .rst / .txt / .adoc) and lockfiles are exempt
-from this detector; it targets freshly authored *code*.
-"""
+HARDCODE_DENY_TEMPLATE = messages.text("read.deny.hardcode")
 
 
-PATHDEP_DENY_TEMPLATE = """cc-enforcer · rule 11 violation (non-essential path dependency)
-
-Tool: {tool_name}
-Target: {file_path}
-Pattern matched: {pattern_label}
-
-Snippet (the offending segment in your content):
-{snippet}
-
-Per rule 11 (rules/11-no-path-dependency.md), a machine-specific
-absolute filesystem path -- a user-home directory, a hardcoded drive
-root, or a shell home variable baked into a string literal -- has been
-committed into code. This breaks portability the moment the code runs on
-another machine, another OS, or in CI. (This repo itself shipped v0.21.1
-to fix exactly such a Windows path-portability bug in its own hook.)
-
-To proceed, do one of:
-
-  (1) **Derive the path at runtime** (preferred, rule 03 root cause):
-        from pathlib import Path
-        base = Path(__file__).resolve().parent          # module-relative
-        base = Path(os.environ["CLAUDE_PLUGIN_DATA"])    # from a config var
-      Use a project-root marker, an env var, tempfile, or a passed-in
-      argument instead of a literal user directory.
-
-  (2) **If the path is genuinely essential** (a fixed OS location that is
-      identical on every target machine), add an adjacent why-comment
-      saying so (a token from: essential / 必须 / 必需 / example /
-      fixture / sample).
-
-  (3) **Stop and surface**: if portability truly cannot be achieved, tell
-      the user rather than silently hardcoding your own machine.
-
-Note: prose docs (.md / .rst / .txt / .adoc) and lockfiles are exempt
-from this detector; it targets freshly authored *code*.
-"""
+PATHDEP_DENY_TEMPLATE = messages.text("read.deny.pathdep")
 
 
 def _emit_deny(template: str, **fields: object) -> None:

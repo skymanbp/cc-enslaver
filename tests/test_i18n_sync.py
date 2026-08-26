@@ -26,7 +26,10 @@ from pathlib import Path
 # cannot sit at module top — E402 (import-not-at-top) is silenced because
 # the path bootstrap is a precondition of the import, not dead code.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "hooks" / "scripts"))
-from i18n_check import check_sync  # noqa: E402 -- see path-bootstrap note above
+from i18n_check import (  # noqa: E402 -- see path-bootstrap note above
+    check_message_catalogs,
+    check_sync,
+)
 
 
 class TestRepoInSync(unittest.TestCase):
@@ -190,6 +193,69 @@ class TestDriftDetection(unittest.TestCase):
                 any(d.lang == "ja" and d.kind == "header_structure" for d in drifts),
                 msg=f"ja drift not discovered: {[str(d) for d in drifts]}",
             )
+
+
+class TestMessageCatalogParity(unittest.TestCase):
+    """v0.38 — the same contract, applied to the guard message catalogs.
+
+    `rules/` and `prompts/` are markdown, so the strongest available
+    comparison is heading structure. The catalogs are dicts, so the
+    comparison can be exact: the key set, and the `str.format` fields each
+    value carries. The placeholder half is the one that bites at runtime —
+    a translation that drops a field silently says less than the skeleton,
+    and one that invents a field raises inside `str.format`, in the hook,
+    while the user is already being denied.
+    """
+
+    def test_real_repo_catalogs_in_sync(self) -> None:
+        drifts = check_message_catalogs()
+        self.assertEqual(
+            drifts, [],
+            msg="message-catalog drift:\n"
+                + "\n".join(str(d) for d in drifts),
+        )
+
+    def _catalog_tree(self, base: Path, zh_body: str) -> None:
+        lib = base / "hooks" / "scripts" / "lib"
+        lib.mkdir(parents=True)
+        (lib / "messages_en.py").write_text(
+            'MESSAGES = {"a.b": "hello {name}", "c.d": "plain"}\n',
+            encoding="utf-8",
+        )
+        (lib / "messages_zh.py").write_text(zh_body, encoding="utf-8")
+
+    def test_detects_a_dropped_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self._catalog_tree(
+                base, 'MESSAGES = {"a.b": "你好", "c.d": "白"}\n')
+            drifts = check_message_catalogs(base)
+            self.assertTrue(
+                any(d.kind == "placeholder_fields" for d in drifts),
+                msg=f"dropped field not detected: {[str(d) for d in drifts]}",
+            )
+
+    def test_detects_an_untranslated_key(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self._catalog_tree(
+                base, 'MESSAGES = {"a.b": "你好 {name}"}\n')
+            drifts = check_message_catalogs(base)
+            self.assertTrue(
+                any(d.kind == "missing_key" and "c.d" in d.detail
+                    for d in drifts),
+                msg=f"missing key not detected: {[str(d) for d in drifts]}",
+            )
+
+    def test_a_matching_pair_reports_nothing(self) -> None:
+        # The boundary: the checker must be able to return clean, or the
+        # two assertions above would also pass on one that always reports.
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self._catalog_tree(
+                base,
+                'MESSAGES = {"a.b": "你好 {name}", "c.d": "白"}\n')
+            self.assertEqual(check_message_catalogs(base), [])
 
 
 if __name__ == "__main__":

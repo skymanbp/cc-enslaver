@@ -18,6 +18,72 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.38.1] — 2026-08-26
+
+**The same class, in the documents v0.38.0 did not look at.** v0.38.0 fixed
+the language mixing at its source and cleaned the two READMEs, because the
+READMEs were what the request named. Asked afterwards whether the project was
+closed, the honest answer was no: a repo-wide scan found the same defect —
+a Chinese phrase sitting beside its own English translation — in **6 more
+English documents**, `rules/` among them.
+
+`rules/` is the English **skeleton** and the LLM-agnostic product, so a gloss
+there ships to every consumer that never reads this repo's docs.
+
+### The rule, applied uniformly
+
+In an English document, CJK is allowed **only inside a backtick code span** —
+where it is a literal token the reader must type or that a detector literally
+matches. Everything else is English. That splits the 65 surviving occurrences
+three ways:
+
+- **DATA (14)** — a detector token or trigger phrase that simply was not
+  marked up as one: the rule-02 keyword table, the rule-09 triplet table, the
+  rationale tokens in rule 09, `全库更新` in rule 12, the hedge list in
+  `README.md`. Backticked, not removed: deleting them would make the document
+  false, and `test_doc_sync`'s own hedge gate would fail on the next run.
+- **GLOSS (43 + 8 in fenced blocks)** — removed or translated. `圣旨` beside
+  "Imperial Edicts", `宁可漏报不误报` beside "prefer false negatives",
+  `代码门禁`, `语言版本控制`, `(陈旧)` / `(过时)` / `(冗余)` beside their
+  English names, `中文 translation` beside "Chinese translation", and
+  `docs/EDICTS.md`'s Chinese sample edicts — which read, in an English doc,
+  as if the feature only accepts Chinese.
+- **ALLOWED (1)** — the language-switcher link in `README.md`. An English
+  reader needs the Chinese document labelled in Chinese to recognise it.
+
+The second half of the sweep went **inside** the fenced blocks, which the
+first pass skipped. A fence in an English doc is a file tree (its comments are
+prose) or a config sample (its values are what a user would type).
+
+### The gate
+
+Correcting the words would decay on the next release, so
+`TestEnglishDocsAreEnglish` now enforces it (4 cases):
+
+- English docs carry no CJK outside a code span;
+- **every markdown file is classified** — English, Chinese-by-project-decision
+  (CLAUDE.md section 5: commands / skills / this document), or deliberately
+  unscanned with a stated reason. Without this, adding an English doc and
+  forgetting to register it means the gate silently does not cover it, which
+  is how the READMEs kept their glosses through v0.37;
+- the allowlist must still be needed — an exemption list that only grows
+  eventually covers a real defect;
+- and a document registered as Chinese must actually be Chinese, so the
+  registry cannot be used to dodge the first check.
+
+Two files are unscanned, each with its reason recorded in the source:
+`CHANGELOG.md`, a dated record whose entries quote the wording of the release
+they describe — rewriting them to read better today is the falsification the
+v0.33.0 rename entry refused to commit; and `prompts/*.md`, injected payloads
+budgeted against Claude Code's 10,000-character cap, where backticks for
+tidiness have a real cost.
+
+Verified RED against the pre-sweep tree before being committed.
+
+### Tests — 733 → 737
+
+---
+
 ## [0.38.0] — 2026-08-26
 
 **The READMEs mixed languages because the product did.** The request was to

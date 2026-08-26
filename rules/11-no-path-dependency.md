@@ -23,7 +23,8 @@ user-home path" a write-time, root-cause discipline (rule 03).
 
 ## What is hard-enforced (and what is not)
 
-Faithful to the conservative-detector philosophy ("宁可漏报不误报"), only
+Faithful to the conservative-detector philosophy (prefer false
+negatives to false positives), only
 paths anchored at a **user-specific root** are hard-enforced — the class
 that is almost never legitimately portable:
 

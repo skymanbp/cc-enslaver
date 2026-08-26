@@ -29,7 +29,7 @@ explicitly clearing) them after.
 | Half | Trigger | Mechanism |
 |---|---|---|
 | **Passive** — per-edit co-update | every Edit / Write session | co-update discipline + the project **sync gate** (Stop layer (i), hard) |
-| **Active** — whole-repo refresh | on demand ("全库更新" / "repo refresh" / "stale scan") | the `repo-refresh` skill: systematic sweep for stale / outdated / redundant / wrong / drifted content |
+| **Active** — whole-repo refresh | on demand (`全库更新` / `repo refresh` / `stale scan`) | the `repo-refresh` skill: systematic sweep for stale / outdated / redundant / wrong / drifted content |
 
 ## Passive half — per-edit co-update discipline
 
@@ -54,7 +54,7 @@ must close with a reference sweep:
 ### The sync gate (project-level hard layer)
 
 Each project can register its known co-update invariants in a committed
-config — the "代码门禁" that makes the passive half physical:
+config — the code-level gate that makes the passive half physical:
 
 ```toml
 # .claude/cc-enforcer/sync-gate.toml
@@ -95,17 +95,17 @@ the rest.
 ## Active half — whole-repo refresh
 
 The passive half keeps each edit honest; it cannot retire rot that is
-already there. The `repo-refresh` skill (auto-invoked on "全库更新" /
+already there. The `repo-refresh` skill (auto-invoked on `全库更新` /
 "stale scan" / "audit the repo" language) sweeps the entire repository
 — docs and code — against five defect categories:
 
 | Category | What it looks like |
 |---|---|
-| **Stale (陈旧)** | references to files / symbols / paths that no longer exist; long-dead TODOs; instructions for removed workflows |
-| **Outdated (过时)** | counts, versions, dates, behavior descriptions that were true at some commit and are false at HEAD |
-| **Redundant (冗余)** | the same fact stated in N places with no single source; dead code; superseded docs kept "just in case" |
-| **Wrong (错误)** | claims contradicted by the current code — wrong defaults, wrong CLI flags, wrong file:line |
-| **Drifted (漂移)** | pairs that must mirror each other (doc ↔ code, skeleton ↔ translation, config ↔ consumer) that have diverged |
+| **Stale** | references to files / symbols / paths that no longer exist; long-dead TODOs; instructions for removed workflows |
+| **Outdated** | counts, versions, dates, behavior descriptions that were true at some commit and are false at HEAD |
+| **Redundant** | the same fact stated in N places with no single source; dead code; superseded docs kept "just in case" |
+| **Wrong** | claims contradicted by the current code — wrong defaults, wrong CLI flags, wrong file:line |
+| **Drifted** | pairs that must mirror each other (doc ↔ code, skeleton ↔ translation, config ↔ consumer) that have diverged |
 
 Every finding must carry `file:line` evidence and be either fixed or
 explicitly reported — a scan that only produces vibes is a rule 01

@@ -1,26 +1,26 @@
-# 圣旨 — User-Defined Imperial Edicts
+# Imperial Edicts — user-defined hard rules
 
 > Project-specific hard rules that ride on top of cc-enforcer's built-in
 > 12 rules. v0.12 introduces this as a layer-0 customisation mechanism.
 
 ---
 
-## 1. Why 圣旨
+## 1. Why Imperial Edicts
 
 The built-in 12 rules cover general AI laziness patterns (verify don't
 guess, root cause not symptom, etc.). But every project has its own red
 lines that no general rule can cover:
 
-- "禁止使用 mongoose，统一用 prisma"
-- "所有 API 必须经过 `src/api/client.ts`"
-- "禁止在 React 组件里直接调用 fetch"
-- "不允许在 .map 里 await"
-- "数据库迁移文件必须配对一份 rollback"
+- "No mongoose — this project uses prisma."
+- "Every API call goes through `src/api/client.ts`."
+- "No direct fetch inside a React component."
+- "No await inside .map."
+- "Every migration file ships a matching rollback."
 
 These are **per-project**, **user-defined**, and ideally **physically
-enforced** (not just soft reminders that get ignored). 圣旨 is that.
+enforced** (not just soft reminders that get ignored). An edict is that.
 
-The metaphor: built-in rules are constitutional law; 圣旨 is project
+The metaphor: built-in rules are constitutional law; an edict is project
 royal decree — more specific, top priority, can override default
 suggestions, but cannot override constitutional safeguards (the built-in
 hooks still run first).
@@ -37,15 +37,15 @@ Format: TOML, array of tables.
 ```toml
 [[edicts]]
 id = "E01"                                  # required: unique short id
-text = "禁止使用 mongoose，统一用 prisma"   # required: imperative text shown to the agent
+text = "No mongoose — this project uses prisma"  # required: imperative text shown to the agent
 severity = "must"                           # "must" (default) | "should"
 deny_edit = ['''from ["']mongoose["']''']   # optional: regex list, matched against Edit/Write content
 deny_bash = ['''npm (i|install) mongoose''']  # optional: regex list, matched against Bash commands
-note = "已统一到 prisma；mongoose 在 PR #142 移除"  # optional: rationale shown in deny reason
+note = "Standardised on prisma; mongoose removed in PR #142"  # optional: rationale shown in deny reason
 
 [[edicts]]
 id = "E02"
-text = "所有 API 必须经过 src/api/client.ts"
+text = "Every API call goes through src/api/client.ts"
 severity = "should"                         # soft layer only: injected as reminder, NOT physically enforced
 ```
 
@@ -105,7 +105,7 @@ framing language switches.
 2. patch-style marker guard (rule 09)
 3. hardcoded-secret guard (rule 10)
 4. path-dependency guard (rule 11)
-5. **圣旨 scan**
+5. **Edict scan**
 6. rolling-patch frequency guard (rule 09, v0.13) — the one built-in layer
    that runs *after* the edict scan, because it is a counter over the
    session rather than a content check, and it must not increment for a
@@ -118,7 +118,7 @@ escape hatch first):
    `git rebase --skip` / `--break-system-packages` / `rm -rf` on a root
    path (rule 03 + 09)
 2. force-push detection (parsed through `lib/shellcmd`, not a regex)
-3. **圣旨 scan**
+3. **Edict scan**
 4. `register_read.py` escape hatch (v0.4.0)
 
 The v0.25.0 inversion is observable, which is why the old ordering above
@@ -140,7 +140,7 @@ hook fires before reaching the edict layer.
 
 ```
 /cc-enforcer:edict list
-/cc-enforcer:edict add E01 "禁止 mongoose" --must --deny-edit 'mongoose' --deny-bash 'npm i mongoose'
+/cc-enforcer:edict add E01 "No mongoose" --must --deny-edit 'mongoose' --deny-bash 'npm i mongoose'
 /cc-enforcer:edict remove E01
 /cc-enforcer:edict path
 ```
@@ -185,7 +185,7 @@ invocation).
 ```toml
 [[edicts]]
 id = "E01"
-text = "禁止使用 mongoose，统一用 prisma（PR #142 已迁移）"
+text = "No mongoose — this project uses prisma (migrated in PR #142)"
 severity = "must"
 deny_edit = [
     '''from ["']mongoose["']''',
@@ -204,7 +204,7 @@ note = "see PR #142 / RFC 0007"
 ```toml
 [[edicts]]
 id = "E02"
-text = "所有 HTTP 调用必须通过 src/api/client.ts；不要直接用 fetch / axios"
+text = "Every HTTP call goes through src/api/client.ts; no bare fetch or axios"
 severity = "should"  # soft -- complex to regex perfectly, prefer reminder
 ```
 
@@ -213,12 +213,12 @@ severity = "should"  # soft -- complex to regex perfectly, prefer reminder
 ```toml
 [[edicts]]
 id = "E03"
-text = "禁止在 .map / .forEach 内 await（用 Promise.all + map）"
+text = "No await inside .map / .forEach — use Promise.all with map"
 severity = "must"
 deny_edit = [
     '''\.(map|forEach)\s*\(\s*(?:async\b[^)]*=>|\([^)]*\)\s*=>\s*\{[^}]*\bawait\b)''',
 ]
-note = "并发会被串行化；用 Promise.all(arr.map(async ...))"
+note = "It serialises what should be concurrent; use Promise.all(arr.map(async ...))"
 ```
 
 ---

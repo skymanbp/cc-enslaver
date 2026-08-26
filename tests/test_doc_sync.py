@@ -973,5 +973,173 @@ class TestMarkdownCitationsResolve(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #
+# v0.38 — one document, one language.
+#
+# The repo writes some documents in English and some in Chinese, on purpose
+# (CLAUDE.md section 5). What it must not do is mix them *inside* one file:
+# a Chinese phrase sitting beside its own English translation for flavour.
+#
+# CJK is still allowed where it is DATA — inside a backtick code span, where
+# it is a literal token the reader must type or that a detector literally
+# matches. Removing those would make the document false; `test_doc_sync`'s
+# own hedge gate would fail on the very next run.
+#
+# Correcting the words alone would decay on the next release, which is why
+# this is a gate rather than a cleanup.
+# --------------------------------------------------------------------------- #
+ENGLISH_DOCS: tuple[str, ...] = (
+    "README.md",
+    "demo/README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/EDICTS.md",
+    "docs/I18N.md",
+    "docs/README.md",
+    "tests/README.md",
+) + tuple(f"rules/{p.name}" for p in sorted((REPO_ROOT / "rules").glob("*.md")))
+
+# Documents written in Chinese by project decision (CLAUDE.md section 5:
+# commands / skills / this document are written in Chinese). Registered so
+# the completeness check below can prove nothing is simply unclassified.
+CHINESE_DOCS: tuple[str, ...] = (
+    "CLAUDE.md",
+    "README.zh.md",
+    "docs/RULES.md",
+    "agents/verifier.md",
+) + tuple(
+    f"commands/{q.name}"
+    for q in sorted((REPO_ROOT / "commands").glob("*.md"))
+) + tuple(
+    d.relative_to(REPO_ROOT).as_posix()
+    for d in sorted((REPO_ROOT / "skills").rglob("SKILL.md"))
+)
+
+# Neither, each for a stated reason.
+UNSCANNED_DOCS: dict[str, str] = {
+    "CHANGELOG.md": (
+        "a dated record. Entries quote the output and wording of the release "
+        "they describe; rewriting them to read better today is the same "
+        "falsification the v0.33.0 rename entry refused to commit."
+    ),
+    "prompts/session-start.md": (
+        "an injected payload, not documentation — budgeted against Claude "
+        "Code's 10,000-character cap, so adding backticks for tidiness has a "
+        "real cost. Its CJK is detector tokens quoted as examples."
+    ),
+    "prompts/user-prompt.md": "same as prompts/session-start.md",
+}
+
+# CJK outside a code span that is nonetheless correct. Closed set, reason each.
+CJK_PROSE_ALLOWED: dict[str, str] = {
+    "README.md": (
+        "the language-switcher link `[中文文档 →](README.zh.md)` — an English "
+        "reader needs the Chinese doc labelled in Chinese to recognise it"
+    ),
+}
+
+_CODE_SPAN_RE = re.compile(r"`[^`]*`")
+
+
+def _cjk_outside_code(text: str) -> list[tuple[int, str]]:
+    """Lines carrying CJK outside a backtick span. Fences are scanned too.
+
+    A fenced block in an English document is a file tree or a config
+    sample: its comments are prose, and its sample VALUES are what a user
+    would type. A Chinese sample rule in an English doc reads as if the
+    feature only accepts Chinese.
+    """
+    out: list[tuple[int, str]] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("```"):
+            continue
+        stripped = _CODE_SPAN_RE.sub("", line)
+        if _CJK_CHAR.search(stripped):
+            out.append((i, line.strip()[:100]))
+    return out
+
+
+_CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
+
+
+class TestEnglishDocsAreEnglish(unittest.TestCase):
+    """No Chinese prose in an English document, and vice versa."""
+
+    def test_every_markdown_file_is_classified(self) -> None:
+        """The registries above must cover every tracked markdown file.
+
+        Without this, adding a new English doc and forgetting to register
+        it means the gate silently does not cover it — which is how the
+        READMEs kept their glosses through v0.37 while the class was
+        supposedly closed.
+        """
+        tracked = set()
+        for path in REPO_ROOT.rglob("*.md"):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if rel.startswith((".git/", "memory/", "node_modules/",
+                                ".pytest_cache/")):
+                continue
+            if "/zh/" in rel:
+                continue          # translations, by definition Chinese
+            tracked.add(rel)
+        classified = set(ENGLISH_DOCS) | set(CHINESE_DOCS) | set(UNSCANNED_DOCS)
+        unclassified = sorted(tracked - classified)
+        self.assertEqual(
+            unclassified, [],
+            "markdown files not registered as English, Chinese or "
+            f"deliberately unscanned: {unclassified}",
+        )
+        stale = sorted(classified - tracked)
+        self.assertEqual(stale, [], f"registered but absent: {stale}")
+
+    def test_english_docs_carry_no_cjk_prose(self) -> None:
+        offenders: dict[str, list[tuple[int, str]]] = {}
+        for rel in ENGLISH_DOCS:
+            if rel in CJK_PROSE_ALLOWED:
+                continue
+            hits = _cjk_outside_code(
+                (REPO_ROOT / rel).read_text(encoding="utf-8"))
+            if hits:
+                offenders[rel] = hits
+        self.assertEqual(
+            offenders, {},
+            "Chinese prose in an English document — backtick it if it is a "
+            "detector token, translate it if it is prose:\n" + "\n".join(
+                f"  {rel}:{ln} {txt}"
+                for rel, hits in sorted(offenders.items()) for ln, txt in hits),
+        )
+
+    def test_the_allowlist_is_still_needed(self) -> None:
+        """A registered exemption that no longer has CJK must be dropped.
+
+        The twin of the check above: an exemption list that only grows
+        eventually covers a real defect.
+        """
+        unnecessary = sorted(
+            rel for rel in CJK_PROSE_ALLOWED
+            if not _cjk_outside_code((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        )
+        self.assertEqual(
+            unnecessary, [],
+            f"CJK_PROSE_ALLOWED exempts file(s) with no CJK prose left: "
+            f"{unnecessary}. De-register them.",
+        )
+
+    def test_chinese_docs_are_still_chinese(self) -> None:
+        """The other direction, so the registry cannot be used to dodge.
+
+        Registering an English document as Chinese would exempt it from
+        the check above; this makes that lie visible.
+        """
+        wrong = []
+        for rel in CHINESE_DOCS:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            if len(_CJK_CHAR.findall(text)) < 50:
+                wrong.append(rel)
+        self.assertEqual(
+            wrong, [],
+            f"registered as Chinese but barely contains any: {wrong}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

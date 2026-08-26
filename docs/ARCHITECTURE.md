@@ -302,7 +302,7 @@ the last assistant entry in `payload.transcript_path`).
 | 7 | edit turn AND no rule-09 marker AND triplet (root-cause + impact + solution) incomplete (rule 09, **v0.11**) | **Block** (layer (f)) |
 | 8 | edit turn AND a file-edit/create claim is **definitively contradicted** by the on-disk mtime baseline (rule 01 + 06, **v0.16**; `CC_ENFORCER_DISABLE_LAYER_G=1` to skip) | **Block** (layer (g)) |
 | 9 | No TL;DR marker (`tldr:` / `大白话` / `一句话总结` / `TL;DR`) — fires on **every** done-claim turn, not just edit turns (**v0.20**) | **Block** (layer (h)) |
-| 10 | A tldr item wider than `TLDR_MAX_ITEM_COLUMNS` (160 **display columns**, **v0.35** — a CJK character costs 2, so ≈ 80 汉字; ASCII is unchanged at 160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
+| 10 | A tldr item wider than `TLDR_MAX_ITEM_COLUMNS` (160 **display columns**, **v0.35** — a CJK character costs 2, so ≈ 80 of them; ASCII is unchanged at 160) — one sentence per item, cause + action + outcome; several things → one short line each (**v0.23**) | **Block** (layer (h), "overlong" note + dedicated recovery) |
 | 11 | edit turn AND a sync-gate group's `when` glob matched an edited file with its `require` side unsatisfied (per the group's `mode`: any-of by default, all-of for lock-step invariants) AND the group is not in the session's `sync_acked_groups` AND no sync marker (`同步核对` / `sync-check` / `rule 12` / `全库同步` / `连带核对` / `repo-wide sync` — deliberately NOT `sync-gate`, which is the config file's name, not a claim) in the reply (rule 12, **v0.23**; per-project opt-in via `.claude/cc-enforcer/sync-gate.toml` — no config, never fires). A marker escape records the acknowledged groups for the session, so one explicit answer per group suffices. **v0.27**: the marker settles only groups the session has actually been SHOWN (`last_blocked_groups`) — the primary path used to ack every pending group while the grace path acked only the presented set, and that inconsistency was itself the bypass (outlast the grace window, reach the looser path). A group is therefore named by one block, then settled by the next reply's marker: one *informed* answer per group. | **Block** (layer (i)) |
 | 12 | All gates passed | Allow |
 
@@ -377,12 +377,12 @@ fallback; ≥ 3 of 6 must match):
 
 | # | Keyword (CN / EN) |
 |---|-------------------|
-| 1 | 架构 / architecture / architectural |
-| 2 | 职责 / responsibility |
-| 3 | 根源 / 根因 / root-cause |
-| 4 | 方案 / solution / approach |
-| 5 | 连带 / 下游 / 影响范围 / downstream / impact / connected |
-| 6 | 风险 / 不变量 / invariant / risk |
+| 1 | `架构` / `architecture` / `architectural` |
+| 2 | `职责` / `responsibility` |
+| 3 | `根源` / `根因` / `root-cause` |
+| 4 | `方案` / `solution` / `approach` |
+| 5 | `连带` / `下游` / `影响范围` / `downstream` / `impact` / `connected` |
+| 6 | `风险` / `不变量` / `invariant` / `risk` |
 
 **v0.11.0 rule-09 closing markers** (layer (f); single match
 suffices to pass the gate): `rule 09` / `系统式修改` / `打补丁` /
@@ -393,9 +393,9 @@ three** must match):
 
 | # | Triplet axis (CN / EN) |
 |---|-------------------------|
-| 1 | 根源 / 根因 / root-cause |
-| 2 | 连带 / 影响范围 / impact / blast-radius / downstream |
-| 3 | 方案 / solution / approach / alternative |
+| 1 | `根源` / `根因` / `root-cause` |
+| 2 | `连带` / `影响范围` / `impact` / `blast-radius` / `downstream` |
+| 3 | `方案` / `solution` / `approach` / `alternative` |
 
 **v0.20.0 TL;DR markers** (layer (h); single match suffices to pass
 the gate): `tldr:` (the canonical YAML schema field) / `大白话` /
@@ -406,9 +406,9 @@ final gate (reached only after all discipline checks pass) and is
 enforced as a closing readability convention, deliberately **not**
 promoted to a tenth numbered rule (which would require the full
 `rules/*.md` + `rules/zh/` + `00-index` + docs fan-out). The v0.20
-canonical reply schema is a YAML block whose field names (`改前 / 改中 /
-收敛 / 忠实 / 收尾 / 同步核对 / tldr`, English: `before / edits /
-convergence / fidelity / closing / sync-check / tldr`) ARE the layer
+canonical reply schema is a YAML block whose field names
+(`before` / `edits` / `convergence` / `fidelity` / `closing` /
+`sync-check` / `tldr`, and their Chinese equivalents) ARE the layer
 markers above — so a
 schema-conformant reply passes (a)-(h) with no detector changes.
 
@@ -437,7 +437,7 @@ is pinned by its own test**: vacuous *prose* (`sync-check: checked it`) is not
 detected and is not claimed to be — over-reaching would refuse honest reports,
 which is the worse error.
 
-**v0.20.0 block-reason 大白话 line**: every block reason now appends a
+**v0.20.0 block-reason plain-language line**: every block reason now appends a
 one-line plain-language takeaway (`大白话: ...`) before the one-shot
 footer, so cc-enforcer's own output is symmetric with the layer-(h)
 requirement it imposes on the agent.
@@ -595,7 +595,7 @@ hardcoding) and rule 11 (no non-essential path dependency):
 | `_find_path_dependency` | machine-specific **user-home** absolute paths (`C:\Users\…` / `/home/…` / `/Users/…`) with **raw or escaped** separators (v0.25.1), plus `$HOME` / `%USERPROFILE%` / quoted `~/…` inside a string literal | 11 |
 
 Two scoping refinements keep false positives low, honouring the repo's
-"宁可漏报不误报" detector philosophy:
+prefer-false-negatives detector philosophy:
 
 - **Escape hatch = how "non-essential" is operationalized.** A flagged
   literal / path *with* an adjacent rationale comment (the extended
@@ -617,7 +617,7 @@ Two scoping refinements keep false positives low, honouring the repo's
 - **Prose-doc + lockfile targets are exempt** (`_is_scannable_target`
   returns False for `.md` / `.markdown` / `.rst` / `.txt` / `.adoc` /
   `.asciidoc` and `*.lock` / `package-lock.json` / `yarn.lock` /
-  `poetry.lock` / `Cargo.lock`). The user framed this as "写完**代码**后"
+  `poetry.lock` / `Cargo.lock`). The user framed this as "after the **code** is written"
   detection, and this repo's own docs are full of example paths and
   values — scanning them would self-trip. The rule-09 patch check keeps
   its all-files behaviour; only these two new detectors are gated.
@@ -738,7 +738,7 @@ The agent should surface the deny reason to the user and let the user run the
 command manually — that is the intended discipline (no AI-mediated bypassing).
 
 **Check order (v0.25).** All deny checks — static patterns, force-push,
-圣旨 — run **before** the register-as-read handling below, and a file is
+Imperial Edicts — run **before** the register-as-read handling below, and a file is
 registered only once the whole command is known clean. Until v0.24 the
 registration was processed first and returned immediately on success, on
 the assumption that such a command simply *was* a registration. But a
@@ -881,7 +881,7 @@ the agent through the seven systematic-thinking questions from
 [`../rules/02-systematic-not-reactive.md`](../rules/02-systematic-not-reactive.md)
 **before** proposing any code change.
 
-`repo-refresh` (v0.23) triggers on whole-repo audit language ("全库更新",
+`repo-refresh` (v0.23) triggers on whole-repo audit language (`全库更新`,
 "repo refresh", "stale scan", "audit the repo") and executes rule 12's
 active half: a systematic sweep of the entire repository — docs and code
 — for stale / outdated / redundant / wrong / drifted content, every
@@ -894,7 +894,7 @@ pairs as sync-gate groups.
 ## 6. Layer 5 — LLM-agnostic core
 
 **Source of truth:** [`../rules/`](../rules/) (English — the **skeleton** /
-source of truth, at the root) + [`../rules/zh/`](../rules/zh/) (中文
+source of truth, at the root) + [`../rules/zh/`](../rules/zh/) (Chinese
 translation). The skeleton↔translation contract is version-controlled — see
 [`I18N.md`](./I18N.md).
 
@@ -914,7 +914,7 @@ directly:
 # OpenAI / generic — English skeleton (default):
 cat rules/*.md > /tmp/cc-enforcer-system-prompt.txt
 
-# OpenAI / generic — 中文 translation:
+# OpenAI / generic — Chinese translation:
 cat rules/zh/*.md > /tmp/cc-enforcer-system-prompt.txt
 
 # Cursor / Cline / Aider — symlink rules/ or rules/zh/ into the project's
@@ -962,7 +962,7 @@ PreToolUse hook fires (matcher Read|Edit|Write) → read_guard.py
            patch marker (rule 09)      → DENY
            hardcoded secret (rule 10)  → DENY
            path dependency (rule 11)   → DENY
-           圣旨 deny_edit regex        → DENY
+           edict deny_edit regex       → DENY
            rolling-patch counter       → DENY on the 4th small edit
          all clear → record read + edit-turn signal + edited_files, ALLOW
 
@@ -986,7 +986,7 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
     ├─ command matches rm -rf on root / $HOME / ~ (v0.14)→ DENY (rule 03)
     ├─ a git push segment force-updates (--force / -f cluster / +refspec /
     │        --mirror, but not --force-with-lease)       → DENY (rule 03)
-    ├─ command matches a must 圣旨 deny_bash regex       → DENY (edict)
+    ├─ command matches a must edict deny_bash regex      → DENY (edict)
     │        (v0.25: every deny check above runs BEFORE the step below, so a
     │         registration can no longer shield the rest of a compound command)
     ├─ command is a register_read.py invocation          → verify SHA-256:
@@ -1020,8 +1020,8 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 
 | If you edit… | Also re-check… |
 |---|---|
-| `rules/<n>-*.md` (English skeleton) | `rules/zh/<n>-*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/zh/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
-| `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (中文 translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
+| `rules/<n>-*.md` (English skeleton) | `rules/zh/<n>-*.md` (Chinese translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `prompts/session-start.md`, `prompts/user-prompt.md`, `docs/RULES.md`, `commands/checklist.md`, `rules/00-index.md` + `rules/zh/00-index.md` (program-readable index), `tests/test_inject_context.py` (the prompt-content assertion list) |
+| `prompts/*.md` (English skeleton) | `prompts/zh/*.md` (Chinese translation — keep header structure identical, then `python hooks/scripts/i18n_check.py`), `hooks/scripts/inject_context.py` (filename mapping), `docs/I18N.md`, this doc |
 | `hooks/scripts/inject_context.py` | `hooks/hooks.json` (registration), `.claude-plugin/plugin.json` (hooks pointer), `tests/test_inject_context.py` |
 | `hooks/scripts/lib/envfile.py` (v0.34) | `hooks/scripts/inject_context.py` (the SessionStart call site beside auto-GC), `tests/test_envfile.py`. Changing what the line model ACCEPTS changes what can be rewritten in a harness-owned file every other plugin appends to — the refusal twins must be re-checked in both directions (still collapses the field shape, still refuses anything it cannot represent byte-identically). |
 | `hooks/scripts/read_guard.py` | `hooks/hooks.json` (event registration + matcher), `hooks/scripts/lib/state.py` (state contract + `record_edit_turn`), this doc §2 (deny output contract + patch-style table + hardcoding/path-dependency table), `rules/10-no-hardcoding.md` + `rules/11-no-path-dependency.md` (the rules these detectors enforce), `tests/test_read_guard.py` (read-before-edit cases + patch-style + hardcoded-secret + path-dependency positive/negative/prose-doc-exempt cases + record_edit_turn cases) |

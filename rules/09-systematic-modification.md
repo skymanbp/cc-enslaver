@@ -264,7 +264,7 @@ in v0.25.1 left the markers as bare substrings, so `# noquality`,
 `@ts-ignore-generated` and `eslint-disablement` were each read as the
 suppression they merely start with, and DENIED.
 
-**Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing "because" / "原因" / "因为" / "why" / a concrete justification, e.g.:
+**Acceptable form**: every suppression marker must carry a rationale on the same line, or on an immediately adjacent line, containing `because` / `原因` / `因为` / `why` / a concrete justification, e.g.:
 
 ```python
 # noqa: E501  -- URL string exceeds 100 chars; splitting hurts readability

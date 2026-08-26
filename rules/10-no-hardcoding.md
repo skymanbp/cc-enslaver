@@ -12,8 +12,8 @@ severity: must
 > configuration, an environment variable, a secret manager, or a passed-in
 > argument — must not be lazily inlined as a source literal.**
 
-The canonical laziness this rule intercepts is "设计上应该是变量却被偷懒
-塞成硬编码内容" — the class of literals that are unambiguously *supposed*
+The canonical laziness this rule intercepts is the
+should-have-been-a-variable class — literals that are unambiguously *supposed*
 to live outside the code:
 
 - credentials: passwords, API keys, access keys, auth tokens, client
@@ -28,8 +28,8 @@ code change. Externalizing it is the root-cause fix (rule 03).
 
 ## What is hard-enforced (and what is not)
 
-Faithful to the repo's own conservative-detector philosophy ("宁可漏报不
-误报" — prefer false negatives to false positives), only the unambiguous
+Faithful to the repo's own conservative-detector philosophy
+(prefer false negatives to false positives), only the unambiguous
 should-be-config classes are **hard-enforced** at write time:
 
 | Class | Hard-enforced? |

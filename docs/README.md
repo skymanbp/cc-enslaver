@@ -8,14 +8,14 @@ the answer lives in exactly one of them.
 |---|---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Developers extending or auditing the plugin | How the five layers fit together, every hook's input/output contract, the Stop decision tree layer by layer, the detector inventory, and §8's **connected-files map** — the table you must consult before editing anything here. |
 | [`RULES.md`](RULES.md) | Anyone looking a rule up | The catalog of all 12 rules: id, title, severity, full-text link, and which situations each one governs. An index, not the rules themselves. |
-| [`EDICTS.md`](EDICTS.md) | Users writing their own hard rules | The Imperial Edicts (圣旨) system: the TOML schema, `must` vs `should`, project vs global scope, how a regex becomes a `PreToolUse` DENY, and how to debug one that is not firing. |
+| [`EDICTS.md`](EDICTS.md) | Users writing their own hard rules | The Imperial Edicts system: the TOML schema, `must` vs `should`, project vs global scope, how a regex becomes a `PreToolUse` DENY, and how to debug one that is not firing. |
 | [`I18N.md`](I18N.md) | Translators and CI | The skeleton↔translation contract. English at the root is the source of truth; what `i18n_check.py` compares, what it deliberately does not, and what to do when it goes red. |
 
 ## Where everything else lives
 
 | You want… | Go to |
 |---|---|
-| The rules themselves | [`../rules/`](../rules/) (English skeleton) · [`../rules/zh/`](../rules/zh/) (中文) |
+| The rules themselves | [`../rules/`](../rules/) (English skeleton) · [`../rules/zh/`](../rules/zh/) (Chinese) |
 | What the agent is actually told each turn | [`../prompts/`](../prompts/) |
 | Install steps, the 30-second pitch, the enforcement tables | [`../README.md`](../README.md) · [`../README.zh.md`](../README.zh.md) |
 | Project-level development rules (this repo governs itself) | [`../CLAUDE.md`](../CLAUDE.md) |

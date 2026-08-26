@@ -18,6 +18,73 @@ v0.32.1 for why its last two entries were retired rather than carried.
 
 ---
 
+## [0.38.2] — 2026-08-26
+
+**`CLAUDE.md` leaves the repository.** It is the project instruction file
+Claude Code loads — written *for an agent*, not for a reader — and its metadata
+section carries the maintainer's mail address and machine paths. Claude Code
+reads it from the working tree regardless of git, so untracking costs a local
+session nothing; a clone simply does not get one.
+
+Removing a file is the small half. It was load-bearing in fourteen places.
+
+### What it was holding up
+
+- **Four registered claims** in `test_doc_sync` (rule count, command count,
+  test count ×2), plus the module-inventory tree, the Bash-deny surface list,
+  and the current-release narrative scan.
+- **Six published links** that would have 404'd on the front page — two in
+  `docs/ARCHITECTURE.md`, one in `docs/README.md`, one in `tests/README.md`,
+  and one in each README's Contributing section.
+- **Five links in `CHANGELOG.md`**, which is a dated record.
+- The **release checklist**, which both READMEs told contributors to go read
+  there and which existed nowhere else.
+
+### One rule, not fourteen conditionals
+
+The first attempt made each registry tolerate the file's absence. That produced
+a suite behaving one way locally and another on CI — the trap `test_hookio`
+names from the other side ("a gate that can only fail on one laptop is not a
+gate"). Replaced with a single rule: **the doc gates scan the tracked
+repository.** `UNTRACKED_LOCAL_DOCS` is consulted by every scanner, by the
+claims loop, by the surface lists, *and by link resolution* — so a link to
+`CLAUDE.md` fails here exactly as it would in a clone, even though the file is
+sitting on this disk. Verified by running the gate in both states: identical.
+
+The cost is stated where the constant is defined rather than left implied:
+CLAUDE.md's own numbers are no longer pinned by anything. It is a working note
+now, and everything it asserted is asserted by `README.md` and `README.zh.md`
+too, which are still gated on every push.
+
+### What moved rather than vanished
+
+The **release checklist** is now in both READMEs' Contributing sections, in
+their own language — a contributor already there needs it, and it was the only
+part of `CLAUDE.md` written for anyone but the agent.
+
+`CHANGELOG.md`'s five references were **de-linked, not de-worded**: the text is
+byte-identical, only the link target is gone. The v0.33.0 rename entry set the
+precedent that rewriting what a past entry *says* is falsification; a link is
+navigation, and navigation to a file that is no longer in the repository is
+simply broken.
+
+`prompts/session-start.md` and its zh mirror keep their `CLAUDE.md` link and are
+registered as example links with the reason: an injected prompt is read inside
+whatever repository cc-enforcer is installed into, so that link resolves against
+the *consuming* project's instruction file. It never referred to this one.
+
+### The gate
+
+`test_untracked_local_docs_are_actually_untracked` asserts both halves hold:
+out of the index **and** ignored. `git rm --cached` alone leaves the file
+untracked but not ignored, so the next `git add -A` re-commits it — mail address
+included — while every gate above keeps skipping a file that *is* in the
+repository. Verified to bite by re-adding the file and watching it fail.
+
+### Tests — 737 → 738
+
+---
+
 ## [0.38.1] — 2026-08-26
 
 **The same class, in the documents v0.38.0 did not look at.** v0.38.0 fixed
@@ -579,7 +646,7 @@ that reports only its hits is not reporting its accuracy:
 - **Both manifest descriptions trimmed** (user ruling). They had accumulated
   **nine stacked release narratives** — `marketplace.json` at 18,496 characters
   of which ~1,050 was the actual pitch — duplicating `CHANGELOG.md` verbatim.
-  This is the second-source defect [`CLAUDE.md`](CLAUDE.md) §6.1 diagnosed and
+  This is the second-source defect `CLAUDE.md` §6.1 diagnosed and
   fixed for itself in v0.30; `plugin.json` carried the identical copy, so both
   were swept rather than only the one that was noticed.
 - Clean on this pass: dead code (0), stale TODOs (0), the 16 `PreToolUse`
@@ -2733,7 +2800,7 @@ Second, separate defect found the same way: **a git tag is not a release**. The
   set (`EXPECTED_VERSION_POINTERS`). A version field added to a manifest later fails
   the test until it is registered — with a checklist of two paths, that new field
   would have escaped silently, which is the same shape as the original bug.
-- **Release checklist** in [`CLAUDE.md`](CLAUDE.md) §4.1, ending at
+- **Release checklist** in `CLAUDE.md` §4.1, ending at
   `gh release create` rather than `git push --tags`, with the version-drift gate as
   its first step.
 
@@ -2868,7 +2935,7 @@ Stop twin either).
   [`prompts/user-prompt.md`](prompts/user-prompt.md), and their `zh/` translations),
   [`rules/00-index.md`](rules/00-index.md), [`docs/RULES.md`](docs/RULES.md),
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`README.md`](README.md), and
-  [`CLAUDE.md`](CLAUDE.md) (new §2.12 / §2.13). The numbering range is now `01–11`;
+  `CLAUDE.md` (new §2.12 / §2.13). The numbering range is now `01–11`;
   new rules start at 12.
 
 ### Tests
@@ -2991,7 +3058,7 @@ enforcement machinery and every human doc's prose language exactly as they were.
 
 - Reconciled the *structural* facts (source-of-truth designation, `rules/en/` ↔
   `rules/` ↔ `rules/zh/` paths, on-drift winner) across
-  [`README.md`](README.md), [`CLAUDE.md`](CLAUDE.md),
+  [`README.md`](README.md), `CLAUDE.md`,
   [`docs/RULES.md`](docs/RULES.md), and
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the Chinese prose bodies of the
   human docs were **kept Chinese** ("content can be any language").
@@ -3053,7 +3120,7 @@ space-separated English markers.
 
 ### Fixed (doc drift)
 
-- [`CLAUDE.md`](CLAUDE.md) §6 was stuck at v0.18.0 with a stale
+- `CLAUDE.md` §6 was stuck at v0.18.0 with a stale
   "未实现" list (auto-GC / rolling-patch / english-prompts /
   deep-file-claim were all already shipped) and test count 135 →
   updated to v0.20.0, 216 tests, accurate roadmap.

@@ -6,7 +6,7 @@
 > by intercepting the agent's own tool calls, not by asking it nicely.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.38.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.2-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -396,7 +396,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 737 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 738 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -662,7 +662,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 737 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 738 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -674,7 +674,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **737 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **738 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the three drift
@@ -685,13 +685,40 @@ gates.
 ## Contributing
 
 The plugin enforces its own rules on its own development — expect to be denied
-by it while working on it. Read [`CLAUDE.md`](CLAUDE.md) §4 before opening a PR:
+by it while working on it. Before opening a PR:
 
 1. Read every related file end-to-end before editing.
 2. Trace downstream impact — editing a rule means updating the prompt, the docs,
-   the checklist and the translation in the same change.
+   the checklist and the translation in the same change. The registered
+   invariants live in [`.claude/cc-enforcer/sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml);
+   the full connected-files map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8.
 3. Cite `file:line`; never "I think" / "should be".
 4. Fix root causes. No `--no-verify`, no swallowed errors.
+
+### Release checklist
+
+The end of a release is the **GitHub Release object**, not the tag. v0.22.1
+shipped twice-broken on exactly that: `marketplace.json`'s version fields never
+followed `plugin.json`, so installs still reported the previous version; and the
+tag was pushed while no Release was ever created, so the repository front page
+kept showing the old one as Latest. Walk it, do not recall it:
+
+1. `python -m unittest discover -s tests -p "test_version_sync.py" -v` — the
+   version drift gate. `.claude-plugin/plugin.json` is the single authority;
+   **every** `"version"` key in both manifests (a closed set, not a path
+   allowlist), the badge in both READMEs, and the newest CHANGELOG release
+   heading must equal it. Bump `plugin.json` **first** and let the gate tell
+   you red who has not caught up.
+2. Write the `## [X.Y.Z] — date` entry in `CHANGELOG.md`; the gate checks it is
+   the newest released heading.
+3. `python hooks/scripts/i18n_check.py` — zero skeleton/translation drift,
+   message catalogs included.
+4. `python -m unittest discover -s tests -v` — the whole suite.
+5. `git commit` → `git tag -a vX.Y.Z -m "..."` → `git push origin main --follow-tags`.
+6. `gh release create vX.Y.Z --title "..." --notes-file <file>`. Without this
+   step the front page and the releases page still show the previous version to
+   every user. Confirm with `gh release list` that the new tag carries `Latest`
+   before calling it done.
 
 Earlier releases: [`CHANGELOG.md`](CHANGELOG.md).
 

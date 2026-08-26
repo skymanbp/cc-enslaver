@@ -2,7 +2,7 @@
 
 > Audience: developers extending or auditing the plugin.
 > Doc index: [`./README.md`](./README.md). Companion docs:
-> [`../CLAUDE.md`](../CLAUDE.md) (project-level rules),
+> the repository's Contributing section (project-level rules),
 > [`./RULES.md`](./RULES.md) (catalog of every rule),
 > [`../tests/README.md`](../tests/README.md) (the suite, file by file).
 
@@ -846,7 +846,7 @@ paths against the project root, not against the file's own directory. So
 `[rules/03-root-cause.md](rules/03-root-cause.md)` inside `commands/checklist.md`
 is correct as written, and `test_doc_sync.py` resolves links from either base for
 exactly this reason. Documents meant for a human reader on GitHub —
-`README*.md`, `docs/`, `rules/`, `CLAUDE.md` — use file-relative links instead.
+`README*.md`, `docs/`, `rules/` — use file-relative links instead.
 
 ---
 
@@ -1016,7 +1016,9 @@ PreToolUse hook fires (matcher Bash) → bash_guard.py
 ## 8. Editing this plugin — connected-files map
 
 When you change one component, these are the files that must be re-checked
-in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
+in the same change. The registered invariants are in
+[`../.claude/cc-enforcer/sync-gate.toml`](../.claude/cc-enforcer/sync-gate.toml);
+the release checklist is in the README's Contributing section.
 
 | If you edit… | Also re-check… |
 |---|---|
@@ -1038,7 +1040,7 @@ in the same change. This is enforced by [`../CLAUDE.md`](../CLAUDE.md) §4.
 | `hooks/scripts/lib/hookio.py` (v0.37) | **All four** hook entry points — `inject_context.py`, `read_guard.py`, `bash_guard.py`, `stop_guard.py`. It is the single place the payload stops being bytes, so a change here changes what *every* detector in the plugin sees. Also `tests/_helpers.py` (`ensure_ascii=False` is what makes the boundary reachable at all — restoring the default re-hides the entire class while every other test stays green) and `tests/test_hookio.py`, whose end-to-end cases force `PYTHONIOENCODING=cp936:surrogateescape` so the defect is reproducible on the UTF-8 CI runner too. Its `TestReproductionIsLive` guards against the reproduction going stale: if a future Python always decodes stdin as UTF-8, those tests must report *that*, not "fixed". |
 | `hooks/scripts/lib/projroot.py` (v0.30) | **Both** config loaders again — `lib/edicts.py` and `lib/sync_gate.py` alias it. Widening what counts as a project root widens where *both* configs may be picked up, which is a security-shaped change, not a convenience one: a false positive makes another project's `must` edicts apply to this session. Re-check `tests/test_edicts.py` (`TestCwdFallback`, `TestManageCLICwdFallback`) and `tests/test_sync_gate.py` (`TestConfigPath`). |
 | `hooks/scripts/lib/mdctx.py` — fence helper (v0.30) | `mdctx.fence_marker` now has THREE consumers: `stop_guard._is_fence`, `stop_guard`'s layer-(h) context model, and `i18n_check._fence_run`. It used to be copied into all three, each with its own comment claiming they "must agree". Changing fence geometry changes which headings `i18n_check` sees AND which tldr lines layer (h) measures — re-run `python hooks/scripts/i18n_check.py` as well as the stop-guard suite. |
-| `.claude/cc-enforcer/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), CLAUDE.md §4 (the co-update map the groups encode) |
+| `.claude/cc-enforcer/sync-gate.toml` | `hooks/scripts/lib/sync_gate.py` (schema), `rules/12-repo-wide-sync.md` (documented example), the README's Contributing section (the co-update map the groups encode) |
 | `skills/repo-refresh/SKILL.md` | `rules/12-repo-wide-sync.md` (active half), `rules/06-verify-convergence.md` + `rules/09-systematic-modification.md` (the disciplines its steps invoke), this doc §5, **and `commands/sync-gate.md` + `hooks/scripts/manage_sync_gate.py` (v0.32.2)** — Step 6 tells the agent to register findings as sync-gate groups, so it must name the CLI that does it and the `check` that verifies it. This pair drifted for two releases in one direction only: `commands/sync-gate.md` asserted the skill would call it while the skill still said hand-edit the TOML. A cross-document claim is a coupling; verify it from **both** ends. |
 | `hooks/scripts/bash_guard.py` | `hooks/hooks.json` (matcher entry), this doc §2 (bypass-pattern table + register-flow), `tests/test_bash_guard.py` (positive + nearby negative for every new pattern; register-flow regression cases) |
 | `hooks/scripts/stop_guard.py` | `hooks/hooks.json` (event registration; no matcher), `hooks/scripts/lib/state.py` (one-shot guard helpers + `did_edit_this_turn`), this doc §2 ("`Stop` guard" subsection), `tests/test_stop_guard.py` (every new done-claim or evidence pattern needs both directions; one-shot guard regression cases; rule 08 / rule 09 layer (e)+(f) cases) |

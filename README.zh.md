@@ -5,7 +5,7 @@
 > 而不是"好言相劝"的方式——终结反应式打补丁、编造引用、表面修复和过早宣告完成。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Plugin Version](https://img.shields.io/badge/version-0.38.1-blue.svg)](CHANGELOG.md)
+[![Plugin Version](https://img.shields.io/badge/version-0.38.2-blue.svg)](CHANGELOG.md)
 [![Tests](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml/badge.svg)](https://github.com/skymanbp/cc-enforcer/actions/workflows/test.yml)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://code.claude.com/docs/en/plugins.md)
 
@@ -397,7 +397,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 737 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 738 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -622,7 +622,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 737 个测试（python -m unittest discover tests）
+└── tests/                       # 738 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -634,7 +634,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **737 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **738 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与三道漂移门。
 
@@ -642,13 +642,33 @@ stdout 缓冲与退出码全都不同），外加共享模型的单元件与三�
 
 ## 参与开发
 
-本插件用自己的规则管自己的开发 —— 在改它的时候，预期会被它拒绝。开 PR 前请读
-[`CLAUDE.md`](CLAUDE.md) §4：
+本插件用自己的规则管自己的开发 —— 在改它的时候，预期会被它拒绝。开 PR 前：
 
 1. 编辑前把每个相关文件从头读到尾。
 2. 追踪下游影响 —— 改一条规则意味着在同一次改动里更新注入文案、文档、检查清单和翻译。
+   已登记的连带不变量在
+   [`.claude/cc-enforcer/sync-gate.toml`](.claude/cc-enforcer/sync-gate.toml)，
+   完整的连带文件表在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8。
 3. 引用 `file:line`；不要写"我觉得" / "应该是"。
 4. 修根因。不用 `--no-verify`，不吞异常。
+
+### 发布清单
+
+**发布的终点是 GitHub Release 对象，不是 tag。** v0.22.1 就是在这一点上栽了两次：
+`marketplace.json` 的版本字段没跟着 `plugin.json` 走，用户装到的仍显示上一版；
+tag 推了却从未创建 Release 对象，仓库首页对所有人还是旧版本。逐条走，别凭记忆：
+
+1. `python -m unittest discover -s tests -p "test_version_sync.py" -v` ——
+   版本漂移门。`.claude-plugin/plugin.json` 是唯一权威；两份清单里**每一个**
+   `"version"` 键（封闭集，不是路径白名单）、两个 README 的徽章、CHANGELOG 最新
+   发布标题，都必须与它相等。**先改 `plugin.json` 再跑**，让门红着告诉你谁没跟上。
+2. 写 `CHANGELOG.md` 的 `## [X.Y.Z] — 日期` 条目；门会检查它是最新的已发布标题。
+3. `python hooks/scripts/i18n_check.py` —— 骨架与翻译零漂移，含消息目录。
+4. `python -m unittest discover -s tests -v` —— 全量套件。
+5. `git commit` → `git tag -a vX.Y.Z -m "..."` → `git push origin main --follow-tags`。
+6. `gh release create vX.Y.Z --title "..." --notes-file <文件>`。没有这一步，首页和
+   releases 页面对每个用户都还是上一版。用 `gh release list` 确认新 tag 带上了
+   `Latest` 再收工。
 
 更早的版本记录：[`CHANGELOG.md`](CHANGELOG.md)。
 

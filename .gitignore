@@ -43,3 +43,13 @@ dist/
 *.log
 *.tmp
 .tmp/
+
+# --- Agent instructions, not repository documentation (v0.38.2) ---
+# CLAUDE.md is the project instruction file Claude Code loads from disk. It
+# is written FOR an agent, not for a reader, and section 5 carries the
+# maintainer's mail address and machine paths. Claude Code reads it from the
+# working tree regardless of git, so untracking costs the local session
+# nothing; a clone simply does not get one. The doc gates in
+# tests/test_doc_sync.py treat it as absent even when it is on disk, so the
+# suite behaves the same here and on CI.
+CLAUDE.md

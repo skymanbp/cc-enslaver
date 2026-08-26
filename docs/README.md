@@ -18,7 +18,6 @@ the answer lives in exactly one of them.
 | The rules themselves | [`../rules/`](../rules/) (English skeleton) · [`../rules/zh/`](../rules/zh/) (Chinese) |
 | What the agent is actually told each turn | [`../prompts/`](../prompts/) |
 | Install steps, the 30-second pitch, the enforcement tables | [`../README.md`](../README.md) · [`../README.zh.md`](../README.zh.md) |
-| Project-level development rules (this repo governs itself) | [`../CLAUDE.md`](../CLAUDE.md) |
 | Release history — the only copy of it | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | The test suite, file by file | [`../tests/README.md`](../tests/README.md) |
 

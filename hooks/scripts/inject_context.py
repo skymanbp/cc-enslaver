@@ -281,9 +281,19 @@ def main() -> int:
     try:
         # v0.37 — bytes + explicit UTF-8 (lib/hookio). Text-mode stdin
         # decodes with the host codepage under `surrogateescape`, which
-        # can pull the byte after a multi-byte sequence into the previous
-        # character — enough to break the `session_id` key out of a
-        # payload whose earlier fields carry any non-ASCII text.
+        # silently rewrites any payload the codepage cannot represent.
+        #
+        # Unlike the other three entries, this one is swept for the CLASS,
+        # not for a reproduced symptom: 216 byte alignments (CJK values of
+        # every length placed immediately before the key) were measured
+        # against the pre-fix decode and `_session_id_from` recovered the
+        # id in all of them. The reason is structural — a dangling GBK
+        # lead byte only swallows a following byte >= 0x40, and JSON's
+        # separators (`"` 0x22, `:` 0x3A, `,` 0x2C) all sit below that,
+        # so the shape this function parses cannot be broken that way.
+        # Recorded rather than left as an implied bug: one boundary
+        # reading bytes and three reading text is the state that let the
+        # class hide in the first place.
         raw_payload = hookio.read_payload_text()
     except Exception:
         # Draining stdin is best-effort; losing it only costs auto-GC its

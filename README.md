@@ -26,7 +26,7 @@ each reply is allowed to end. A violation returns a real `deny` / `block`
 verdict, so the agent cannot reason, apologise, or "just this once" its way past
 it.
 
-Twelve rules. Eight of them backed by a hook. Zero dependencies, standard
+Twelve rules. Ten of them backed by a hook. Zero dependencies, standard
 library only, and every guard fails **open** — a bug in the discipline can never
 brick your agent.
 
@@ -58,9 +58,9 @@ fails to* — never one that quietly skips a step and reports success.
 
 ### Feature 1 — Twelve rules as a portable contract
 
-The reasoning contract, as plain Markdown in [`rules/`](rules/). Roughly half
-are backed by a hook; the rest are text-level discipline the Stop gate grades
-indirectly.
+The reasoning contract, as plain Markdown in [`rules/`](rules/). Ten of the
+twelve are backed by a hook; rules 02 and 05 are text-level discipline the Stop
+gate grades indirectly.
 
 | # | Rule | What it demands | Enforcement |
 |---|---|---|---|
@@ -679,7 +679,7 @@ cc-enforcer/
 All scripts are covered by **742 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
-imported instead), plus unit tests for the shared models and the three drift
+imported instead), plus unit tests for the shared models and the four drift
 gates.
 
 ---

@@ -43,7 +43,7 @@ catches the lazy behaviour, often via a different signal.
 - Bash guard (bypass patterns + register-as-read): [`../hooks/scripts/bash_guard.py`](../hooks/scripts/bash_guard.py)
 - Register stub (v0.4.0): [`../hooks/scripts/register_read.py`](../hooks/scripts/register_read.py)
 - Stop guard (v0.6.0 → … → v0.23.0, rule 01 + 06 + 07 + 08 + 09 + 12 + TL;DR enforcement): [`../hooks/scripts/stop_guard.py`](../hooks/scripts/stop_guard.py) + [`../hooks/scripts/lib/sync_gate.py`](../hooks/scripts/lib/sync_gate.py)
-- **Shared judgement models (v0.26.0)** — three modules that exist because
+- **Shared judgement models (v0.26.0)** — four modules that exist because
   every guard had been answering a *structural* question with a *textual*
   test, and each audit round regenerated the same defect class:
   - [`../hooks/scripts/lib/srclex.py`](../hooks/scripts/lib/srclex.py) —

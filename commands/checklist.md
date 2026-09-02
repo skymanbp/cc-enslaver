@@ -1,5 +1,5 @@
 ---
-description: 打印 cc-enforcer 十二条核心规则的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改 / 全库同步）。
+description: 打印 cc-enforcer 十二条核心规则中十条的可勾选检查清单（改前 / 改后 / 收敛验证 / 任务忠实 / 改前必读·写前必想 / 系统式修改 / 全库同步）。
 argument-hint: "[before|after|converge|fidelity|pre-edit|systematic|tldr|sync] (可选；默认 all)"
 ---
 

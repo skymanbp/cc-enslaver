@@ -171,7 +171,7 @@
 |------|---------|
 | [`../prompts/session-start.md`](../prompts/session-start.md) | 全部 12 条规则的浓缩版（v0.11 加入 rule 08 / 09；v0.20 标准回答骨架改为 YAML 回复 schema + `tldr` 大白话收尾；v0.23 加 tldr 长度硬约定 + rule 12） |
 | [`../prompts/user-prompt.md`](../prompts/user-prompt.md) | 12 条规则的结构化每轮自检清单（v0.11 重构；v0.20 收尾骨架改 YAML schema；v0.23 加 tldr 长度 + rule 12 触发行）|
-| [`../commands/checklist.md`](../commands/checklist.md) | 把 12 条规则映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实 / E 改前必读·写前必想 / F 系统式修改 / G 大白话 TL;DR 收尾 / H 全库同步） |
+| [`../commands/checklist.md`](../commands/checklist.md) | 把 12 条规则中的 10 条映射成可勾选的检查项（A 改前 / B 改后 / C 收敛验证 / D 任务忠实 / E 改前必读·写前必想 / F 系统式修改 / G 大白话 TL;DR 收尾 / H 全库同步）；规则 10 / 11 是纯内容层 PreToolUse DENY，无可自证项，故无对应清单项 |
 | [`../agents/verifier.md`](../agents/verifier.md) | 主要执行规则 05（引用可追溯）+ 规则 01 的事后验证；同时尊重规则 07 + 08 |
 | [`../skills/systematic-debug/SKILL.md`](../skills/systematic-debug/SKILL.md) | 主要执行规则 02 + 03 + 06 + 08 + 09 |
 | [`../skills/repo-refresh/SKILL.md`](../skills/repo-refresh/SKILL.md) | 规则 12 主动半区：全库陈旧 / 过时 / 冗余 / 错误 / 漂移扫描（v0.23）|

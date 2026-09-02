@@ -53,3 +53,5 @@ dist/
 # tests/test_doc_sync.py treat it as absent even when it is on disk, so the
 # suite behaves the same here and on CI.
 CLAUDE.md
+# cc-enforcer index / cc-memory state: machine-local, never content
+.ccm/

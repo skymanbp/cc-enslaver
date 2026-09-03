@@ -13,7 +13,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-Shipped to `main`, not yet cut as a release.
+Nothing planned. The roadmap is empty by decision, not by neglect — see
+v0.32.1 for why its last two entries were retired rather than carried.
+
+---
+
+## [0.39.1] — 2026-09-03
+
+**A documentation release with one gate behind it, and the gate's first
+finding closed.** Four commits landed on `main` after v0.39.0. The one that
+matters extends the version gate from the newest CHANGELOG heading to every
+released heading, and the first thing it named was this repository's own
+**0.38.2** — an entry and a `release:` commit with no tag underneath them.
 
 ### The version gate reads every released heading, not just the newest
 
@@ -23,13 +34,15 @@ gets its CHANGELOG entry and its `release:` commit while the tag is never cut
 sits in the file with every gate green.
 
 `tests/test_version_sync.py` compares the whole released set against `git tag`.
-It names **0.38.2**: a heading, a `release:` commit (`b5eb47e`) and a paragraph
-of the plugin description, while `git tag -l v0.38.2` is empty and
-`gh release view v0.38.2` answers "release not found". That is the v0.22.1
+It named **0.38.2**: a heading, a `release:` commit (`b5eb47e`) and a paragraph
+of the plugin description, while `git tag -l v0.38.2` was empty and
+`gh release view v0.38.2` answered "release not found". That is the v0.22.1
 family the release checklist exists for, one step earlier — the entry claims a
 version shipped and there is nothing at that point in history to install.
-Closing it is a release-time action, so the gate stays red until the tag exists
-rather than being softened to pass.
+Closing it was a release-time action rather than a code change: `v0.38.2` is
+now an annotated tag on `b5eb47e` carrying a GitHub release built from its own
+entry, so v0.38.1 → v0.38.2 → v0.38.3 is a complete sequence and the gate is
+green on the fact rather than on a waiver.
 
 Two versions are excused, and only because their own entries say so. **0.8.0**
 was rolled into the v0.9.0 commit. **0.25.1** was released inside the v0.26.0
@@ -60,7 +73,7 @@ Both READMEs' "the repo is held to its own rules" section counts **four** CI
 drift gates and lists the demo gate next to the version, doc and i18n ones,
 matching the tests tree, the coverage sentence and `tests/README.md`.
 
-### Also on main since v0.39.0
+### Also in this release
 
 - `0701dc6` — full-repo documentation sweep after the v0.38.x / v0.39.0 chain
   (`CHANGELOG.md`, `docs/ARCHITECTURE.md`, `tests/README.md`).
@@ -69,8 +82,7 @@ matching the tests tree, the coverage sentence and `tests/README.md`.
 - `643acd5` — README, `commands/checklist.md`, `docs/ARCHITECTURE.md` and
   `docs/RULES.md` aligned with the code after the 2026-09-02 audit.
 
-The roadmap stays empty by decision, not by neglect — see v0.32.1 for why its
-last two entries were retired rather than carried.
+### Tests — 742 → 746
 
 ---
 

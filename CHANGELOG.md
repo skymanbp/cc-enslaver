@@ -21,17 +21,18 @@ v0.32.1 for why its last two entries were retired rather than carried.
 ## [0.39.1] — 2026-09-03
 
 **A documentation release with one gate behind it, and the gate's first
-finding closed.** Four commits landed on `main` after v0.39.0. The one that
-matters extends the version gate from the newest CHANGELOG heading to every
-released heading, and the first thing it named was this repository's own
-**0.38.2** — an entry and a `release:` commit with no tag underneath them.
+finding closed.** Five commits landed on `main` after v0.39.0. The one that
+matters (`80fbc0d`) extends the version gate from the newest CHANGELOG
+heading to every released heading, and the first thing it named was this
+repository's own **0.38.2** — an entry and a `release:` commit with no tag
+underneath them.
 
 ### The version gate reads every released heading, not just the newest
 
 Pinning `released[0]` against `plugin.json` answers the bump-vs-entry question
-and only that one: the sixty headings under it are unchecked, so a release that
-gets its CHANGELOG entry and its `release:` commit while the tag is never cut
-sits in the file with every gate green.
+and only that one: every released heading under it is unchecked, so a release
+that gets its CHANGELOG entry and its `release:` commit while the tag is never
+cut sits in the file with every gate green.
 
 `tests/test_version_sync.py` compares the whole released set against `git tag`.
 It named **0.38.2**: a heading, a `release:` commit (`b5eb47e`) and a paragraph
@@ -81,6 +82,11 @@ matching the tests tree, the coverage sentence and `tests/README.md`.
   cc-memory state are machine-local, never content.
 - `643acd5` — README, `commands/checklist.md`, `docs/ARCHITECTURE.md` and
   `docs/RULES.md` aligned with the code after the 2026-09-02 audit.
+- `0d6fce3` — CI's `fetch-depth: 0` pinned by the suite, which reads the line
+  back out of `.github/workflows/*.yml` so a depth-1 checkout cannot leave the
+  tag check skipping itself while the run stays green (`ci-workflow` sync-gate
+  group, `docs/ARCHITECTURE.md` §8); and 0.25.1's entry now states that no
+  separate tag exists, which is what `UNTAGGED_BY_RECORD` rests on.
 
 ### Tests — 742 → 746
 

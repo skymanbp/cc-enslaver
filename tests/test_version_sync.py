@@ -280,12 +280,12 @@ class TestReleaseTagCoverage(unittest.TestCase):
     """A released heading is a claim that the version shipped. Check it.
 
     The version gate above pins the *newest* heading to `plugin.json`, which
-    is the bump-vs-entry question. It says nothing about the sixty headings
-    under it, so a release that got its CHANGELOG entry and its `release:`
-    commit but never got tagged stays green forever. v0.38.2 is that case in
-    this repository, and README's release checklist names the same family
-    (v0.22.1: the tag existed while the GitHub release did not, so the front
-    page kept showing an older version as Latest).
+    is the bump-vs-entry question. It says nothing about the released
+    headings under it, so a release that got its CHANGELOG entry and its
+    `release:` commit but never got tagged stays green forever. v0.38.2 is
+    that case in this repository, and README's release checklist names the
+    same family (v0.22.1: the tag existed while the GitHub release did not,
+    so the front page kept showing an older version as Latest).
 
     Scope is deliberately the git tag, not the GitHub release object: a tag
     is answerable offline from the checkout CI already has, while the

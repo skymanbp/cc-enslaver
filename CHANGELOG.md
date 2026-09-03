@@ -22,24 +22,31 @@ and only that one: the sixty headings under it are unchecked, so a release that
 gets its CHANGELOG entry and its `release:` commit while the tag is never cut
 sits in the file with every gate green.
 
-`tests/test_version_sync.py` compares the whole released set against `git tag`,
-and names two:
-**0.38.2** (heading, `release:` commit `b5eb47e`, a paragraph of the plugin
-description — `git tag -l v0.38.2` empty, `gh release view v0.38.2` answers
-"release not found") and **0.25.1** (heading, no tag, no release commit). Both
-are the v0.22.1 family the release checklist exists for, one step earlier: the
-entry claims a version shipped and there is nothing at that point in history to
-install. Closing them is a release-time action, so the gate stays red until the
-tags exist rather than being softened to pass.
+`tests/test_version_sync.py` compares the whole released set against `git tag`.
+It names **0.38.2**: a heading, a `release:` commit (`b5eb47e`) and a paragraph
+of the plugin description, while `git tag -l v0.38.2` is empty and
+`gh release view v0.38.2` answers "release not found". That is the v0.22.1
+family the release checklist exists for, one step earlier — the entry claims a
+version shipped and there is nothing at that point in history to install.
+Closing it is a release-time action, so the gate stays red until the tag exists
+rather than being softened to pass.
 
-0.8.0 is excused, and only because its own entry says so: it was rolled into
-the v0.9.0 commit and the entry states there is no separate tag or release.
-`UNTAGGED_BY_RECORD` registers it, and a companion test re-derives that
-declaration from the entry and fails the day a `v0.8.0` tag appears — the
-registry cannot excuse a version the CHANGELOG has not admitted in public.
+Two versions are excused, and only because their own entries say so. **0.8.0**
+was rolled into the v0.9.0 commit. **0.25.1** was released inside the v0.26.0
+commit `3486c2c` — the same commit wrote its heading, and `plugin.json` went
+`0.25.0` → `0.26.0` without ever carrying `0.25.1`. Each entry states in public
+that no separate tag or release exists, `UNTAGGED_BY_RECORD` registers them,
+and a companion test re-derives that declaration from the entry and fails the
+day the tag appears — the registry cannot excuse a version the CHANGELOG has
+not admitted where readers see it.
 
 CI checks out with `fetch-depth: 0`, because the default depth-1 checkout
-brings no tags and the gate would have nothing to read. 742 -> 744 tests.
+brings no tags and the gate would have nothing to read. The suite reads that
+line out of `.github/workflows/*.yml`: `_git_tags` answers None on a shallow
+clone and the tag check skips itself, which is right for a downloaded tarball
+and would otherwise let a depth-1 CI run stay green over a gate that inspected
+nothing. The coupling is registered as the `ci-workflow` sync-gate group and in
+`docs/ARCHITECTURE.md` §8. 742 -> 746 tests.
 
 ### Documentation aligned with the code
 
@@ -2342,6 +2349,13 @@ by the existing suite during the work (`rm -rf /usr/local/share`, and this
 release's new test module self-locking twice).
 
 ## [0.25.1] — 2026-08-10
+
+> **Note:** the work below was released inside the v0.26.0 commit
+> (`3486c2c`), which is also the commit that wrote this heading;
+> `.claude-plugin/plugin.json` went `0.25.0` → `0.26.0` and never carried
+> `0.25.1`. There is therefore **no separate `v0.25.1` git tag or GitHub
+> release**; the six root-cause fixes below ship in `v0.26.0`. This entry
+> is preserved for changelog continuity.
 
 **Third-round audit: 94 review findings → 21 first-party reproductions →
 SIX root-cause fixes. Zero new features.**

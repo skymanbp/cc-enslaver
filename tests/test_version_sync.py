@@ -41,6 +41,12 @@ Design notes
    after it. A version that ships inside another one says so in its own
    entry and is registered in UNTAGGED_BY_RECORD, which the entry itself
    has to back up.
+5. The tag half needs a tag list to read, and `actions/checkout` is
+   depth-1 by default. `TestCIGivesTheTagGateItsInput` reads
+   `fetch-depth: 0` out of the workflow: `_git_tags` answers None on a
+   shallow clone and the tag check skips itself, which is right for a
+   downloaded tarball and would otherwise let a depth-1 CI run stay green
+   over a gate that inspected nothing.
 """
 
 from __future__ import annotations
@@ -61,6 +67,7 @@ PLUGIN_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 # stays the single closed registry. (v0.30)
 README = REPO_ROOT / "README.md"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 # The closed set of JSON pointers that carry a version, per manifest.
 # Registering a pointer here is the ONLY way a version field becomes legal.
@@ -79,6 +86,9 @@ _CHANGELOG_HEADING_RE = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
 # tag exists — and it must stop being registered the day a tag appears.
 UNTAGGED_BY_RECORD: dict[str, str] = {
     "0.8.0": "rolled into the v0.9.0 commit before either was tagged",
+    "0.25.1": "released inside the v0.26.0 commit 3486c2c, which is also "
+              "the commit that wrote its heading; plugin.json went 0.25.0 "
+              "-> 0.26.0 and never carried 0.25.1",
 }
 
 # What a registered entry has to say, with `*`, backticks and blockquote
@@ -140,6 +150,32 @@ def _git_tags() -> set[str] | None:
     if listing.returncode != 0:
         return None
     return {line.strip() for line in listing.stdout.splitlines() if line.strip()}
+
+
+_CHECKOUT_RE = re.compile(r"uses:\s*actions/checkout@")
+_SUITE_RE = re.compile(r"unittest\s+discover")
+_BULLET_RE = re.compile(r"^(\s*)-\s")
+
+
+def _yaml_list_items(text: str) -> list[str]:
+    """Split a workflow into its list items — one `- ` bullet each.
+
+    An item runs from its bullet to the next bullet at the same or a
+    shallower indent, so a nested list cannot end its parent early.
+    """
+    lines = text.splitlines()
+    bullets = [(index, len(match.group(1)))
+               for index, line in enumerate(lines)
+               if (match := _BULLET_RE.match(line))]
+    items: list[str] = []
+    for position, (start, indent) in enumerate(bullets):
+        end = len(lines)
+        for later_start, later_indent in bullets[position + 1:]:
+            if later_indent <= indent:
+                end = later_start
+                break
+        items.append(chr(10).join(lines[start:end]))
+    return items
 
 
 def _load(path: Path) -> dict:
@@ -314,6 +350,57 @@ class TestReleaseTagCoverage(unittest.TestCase):
                         f"UNTAGGED_BY_RECORD — unregister it and let the "
                         f"gate cover it like every other release",
                     )
+
+
+class TestCIGivesTheTagGateItsInput(unittest.TestCase):
+    """The workflow line the tag gate reads through.
+
+    `_git_tags` returns None for a shallow checkout and
+    `test_every_released_heading_has_a_git_tag` skips itself. That is the
+    right answer for a downloaded tarball, and the wrong one for CI:
+    `actions/checkout` is depth-1 by default, so dropping `fetch-depth: 0`
+    would leave the gate reporting nothing while the run stayed green — an
+    inert gate, which is what this repository's own sync-gate config warns
+    about ("a glob that matches nothing is silently inert"). Nothing else
+    reads that line, so it is read here.
+    """
+
+    def _suite_workflows(self) -> list[Path]:
+        return sorted([path for pattern in ("*.yml", "*.yaml")
+                       for path in WORKFLOWS.glob(pattern)
+                       if _SUITE_RE.search(path.read_text(encoding="utf-8"))])
+
+    def test_a_workflow_runs_the_suite(self) -> None:
+        """Twin: the check below must not pass on an empty list."""
+        self.assertTrue(
+            self._suite_workflows(),
+            f"no workflow under {WORKFLOWS} runs `unittest discover`, so "
+            f"the checkout check below inspects nothing and passes — the "
+            f"vacuous green it exists to prevent. Point it at the renamed "
+            f"workflow rather than letting it stand.",
+        )
+
+    def test_every_suite_workflow_checks_out_full_history(self) -> None:
+        shallow: list[str] = []
+        for path in self._suite_workflows():
+            steps = [item for item
+                     in _yaml_list_items(path.read_text(encoding="utf-8"))
+                     if _CHECKOUT_RE.search(item)]
+            self.assertTrue(
+                steps,
+                f"{path.name} runs the suite without checking the "
+                f"repository out",
+            )
+            shallow += [f"{path.name} checkout #{number}"
+                        for number, item in enumerate(steps, start=1)
+                        if "fetch-depth: 0" not in item]
+        self.assertEqual(
+            shallow, [],
+            f"checkout steps without `fetch-depth: 0`: {shallow}. "
+            f"actions/checkout is depth-1 by default and brings no tags, so "
+            f"TestReleaseTagCoverage would answer with a skip and CI would "
+            f"stay green over a gate that read nothing.",
+        )
 
 
 if __name__ == "__main__":

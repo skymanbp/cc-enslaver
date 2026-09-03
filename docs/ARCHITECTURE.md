@@ -1092,3 +1092,4 @@ the release checklist is in the README's Contributing section.
 | `agents/verifier.md` | `commands/verify.md` (invocation), this doc |
 | `skills/systematic-debug/SKILL.md` | `rules/02-systematic-not-reactive.md`, `rules/03-root-cause.md`, this doc |
 | `tests/_helpers.py` | every `tests/test_*.py` file (they all import from here) |
+| `.github/workflows/*.yml` | `tests/test_version_sync.py` — the checkout step is a gate input, not just plumbing. `actions/checkout` is depth-1 by default, so `fetch-depth: 0` is the only thing that gives the released-heading-vs-`git tag` check a tag list; without it `_git_tags` answers None and the check skips itself while the run stays green. `TestCIGivesTheTagGateItsInput` reads that line back out of the workflow, and the `ci-workflow` group in `../.claude/cc-enforcer/sync-gate.toml` pairs the two. |

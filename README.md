@@ -398,7 +398,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 744 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 746 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -552,7 +552,9 @@ cc-enforcer. Four CI drift gates make documentation claims un-drift-able:
 
 - a **version gate** — every version pointer, the badges in *both* READMEs, and
   the newest CHANGELOG heading pinned to `plugin.json` by a *closed set*
-  ("a blacklist would have let it through");
+  ("a blacklist would have let it through"), and every *released* CHANGELOG
+  heading checked against `git tag`, so a version whose entry and release
+  commit shipped without a tag is named instead of sitting green;
 - a **doc gate** — every number in this README derived from the code at test
   time, plus inventory checks in both directions (a tree that lists a deleted
   file is drift too);
@@ -668,7 +670,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 744 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 746 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
@@ -680,7 +682,7 @@ cc-enforcer/
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **744 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **746 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the four drift

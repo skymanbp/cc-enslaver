@@ -399,7 +399,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 744 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 746 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -523,7 +523,9 @@ cc-enforcer 管，而且在 Windows 上明显慢于 Linux。插件自己的工�
 漂移门让文档声明无法腐烂：
 
 - **版本门** —— 每一个版本指针、**两个** README 的徽章、CHANGELOG 最新标题，都由
-  一个**封闭集**钉死到 `plugin.json`（"用黑名单就会放它过去"）；
+  一个**封闭集**钉死到 `plugin.json`（"用黑名单就会放它过去"）；**每一个**已发布的
+  CHANGELOG 标题还要与 `git tag` 对账，条目和 release commit 都有、tag 却没打的
+  版本会被点名，而不是一直绿着；
 - **文档门** —— 本 README 里的每个数字都在测试时从代码派生，外加双向的清单检查
   （树里列着一个已删除的文件，同样是漂移）；
 - **i18n 门** —— 每份翻译都与英文骨架做结构比对，包括 DENY 行的 token 奇偶——
@@ -626,7 +628,7 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 744 个测试（python -m unittest discover tests）
+└── tests/                       # 746 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
@@ -638,7 +640,7 @@ cc-enforcer/
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **744 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **746 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与四道漂移门。
 

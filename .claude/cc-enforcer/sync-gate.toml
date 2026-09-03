@@ -44,6 +44,12 @@ mode = "all"
 note = "plugin.json is the version authority; BOTH marketplace.json AND CHANGELOG must move with it (§4.1 — updating only one of them is exactly the v0.22.1 shipping failure)."
 
 [[groups]]
+name = "ci-workflow"
+when = [".github/workflows/*.yml"]
+require = ["tests/*.py"]
+note = "The workflow is the drift gates' own input. `fetch-depth: 0` is what gives tests/test_version_sync.py a tag list to read; a depth-1 checkout turns its released-heading gate into a skip while the run stays green. Editing the workflow re-checks the tests that depend on how CI checks the repository out."
+
+[[groups]]
 name = "guards-readme"
 when = ["hooks/scripts/*_guard.py"]
 require = ["README*.md"]

@@ -399,7 +399,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 742 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 744 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -519,7 +519,7 @@ cc-enforcer 管，而且在 Windows 上明显慢于 Linux。插件自己的工�
 **宁可漏报不误报。** 漏一次违规的代价是一次偷懒的编辑；误报一次的代价是浪费一轮
 并侵蚀对闸门的信任。够不到的地方写进规则文件，而不是悄悄打补丁盖掉。
 
-**本仓库受自己的规则管辖。** cc-enforcer 的开发跑在 cc-enforcer 之下。三道 CI
+**本仓库受自己的规则管辖。** cc-enforcer 的开发跑在 cc-enforcer 之下。四道 CI
 漂移门让文档声明无法腐烂：
 
 - **版本门** —— 每一个版本指针、**两个** README 的徽章、CHANGELOG 最新标题，都由
@@ -527,7 +527,9 @@ cc-enforcer 管，而且在 Windows 上明显慢于 Linux。插件自己的工�
 - **文档门** —— 本 README 里的每个数字都在测试时从代码派生，外加双向的清单检查
   （树里列着一个已删除的文件，同样是漂移）；
 - **i18n 门** —— 每份翻译都与英文骨架做结构比对，包括 DENY 行的 token 奇偶——
-  因为中文注入曾少列三个 Bash 拦截模式，而文件集与标题检查全绿。
+  因为中文注入曾少列三个 Bash 拦截模式，而文件集与标题检查全绿；
+- **demo 门** —— 两个 README 嵌的前后对比图，每次都用真钩子重新渲染后逐字节
+  比对；任何一个钩子的措辞改动都会让 CI 失败，而不是在首页留一张过期的图。
 
 **技术栈**：Python 3.13，纯标准库。零依赖、无构建步骤、无 lock 文件。
 CI：`ubuntu-latest` × `windows-latest`，`fail-fast: false`。Windows 那条腿不是
@@ -624,19 +626,19 @@ cc-enforcer/
 │   ├── run_demo.py              #   驱动真实钩子，捕获两份 transcript
 │   ├── render_svg.py            #   transcript → 终端风格 SVG，零依赖
 │   └── out/*.svg                #   已提交的图片，由 tests/test_demo.py 钉住
-└── tests/                       # 742 个测试（python -m unittest discover tests）
+└── tests/                       # 744 个测试（python -m unittest discover tests）
     │                            # 每个文件以它覆盖的对象命名 —— 见 tests/README.md
     ├── _helpers.py              #   共享 run_hook(...) 子进程夹具
     ├── test_<hook>.py           #   黑盒子进程测试，每个钩子入口一个
     ├── test_<lib|cli>.py        #   共享模块与辅助脚本的单元件
     ├── test_demo.py             #   漂移门：README 的图 vs 现跑一遍 demo
-    ├── test_version_sync.py     #   漂移门：每个版本指针 vs plugin.json
+    ├── test_version_sync.py     #   漂移门：版本指针 + 发布 tag
     ├── test_doc_sync.py         #   漂移门：文档里的数字与清单 vs 代码
     ├── test_i18n_sync.py        #   漂移门：每份翻译 vs 英文骨架
     └── test_audit_*.py          #   历次审计轮的回归套件（v026 ×2、v027）
 ```
 
-全部脚本由 [`tests/`](tests/) 里的 **742 个测试**覆盖 —— 黑盒子进程测试完全按
+全部脚本由 [`tests/`](tests/) 里的 **744 个测试**覆盖 —— 黑盒子进程测试完全按
 Claude Code 的方式拉起每个钩子（脚本被 import 进来跑时，模块级状态、stdin、
 stdout 缓冲与退出码全都不同），外加共享模型的单元件与四道漂移门。
 
@@ -664,6 +666,8 @@ tag 推了却从未创建 Release 对象，仓库首页对所有人还是旧版�
    版本漂移门。`.claude-plugin/plugin.json` 是唯一权威；两份清单里**每一个**
    `"version"` 键（封闭集，不是路径白名单）、两个 README 的徽章、CHANGELOG 最新
    发布标题，都必须与它相等。**先改 `plugin.json` 再跑**，让门红着告诉你谁没跟上。
+   它还会把 **每一个** 已发布的 CHANGELOG 标题与 `git tag` 对账，条目发了而
+   tag 没打的版本会在这里被点名，而不是等到下一次审计。
 2. 写 `CHANGELOG.md` 的 `## [X.Y.Z] — 日期` 条目；门会检查它是最新的已发布标题。
 3. `python hooks/scripts/i18n_check.py` —— 骨架与翻译零漂移，含消息目录。
 4. `python -m unittest discover -s tests -v` —— 全量套件。

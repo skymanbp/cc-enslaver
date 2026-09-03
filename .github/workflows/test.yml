@@ -37,6 +37,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Full history + tags. tests/test_version_sync.py compares every
+          # released CHANGELOG heading against `git tag`, and the default
+          # depth-1 checkout brings no tags at all — the gate would have
+          # nothing to read.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5

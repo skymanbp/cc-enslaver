@@ -13,8 +13,57 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-Nothing planned. The roadmap is empty by decision, not by neglect — see
-v0.32.1 for why its last two entries were retired rather than carried.
+Shipped to `main`, not yet cut as a release.
+
+### The version gate reads every released heading, not just the newest
+
+Pinning `released[0]` against `plugin.json` answers the bump-vs-entry question
+and only that one: the sixty headings under it are unchecked, so a release that
+gets its CHANGELOG entry and its `release:` commit while the tag is never cut
+sits in the file with every gate green.
+
+`tests/test_version_sync.py` compares the whole released set against `git tag`,
+and names two:
+**0.38.2** (heading, `release:` commit `b5eb47e`, a paragraph of the plugin
+description — `git tag -l v0.38.2` empty, `gh release view v0.38.2` answers
+"release not found") and **0.25.1** (heading, no tag, no release commit). Both
+are the v0.22.1 family the release checklist exists for, one step earlier: the
+entry claims a version shipped and there is nothing at that point in history to
+install. Closing them is a release-time action, so the gate stays red until the
+tags exist rather than being softened to pass.
+
+0.8.0 is excused, and only because its own entry says so: it was rolled into
+the v0.9.0 commit and the entry states there is no separate tag or release.
+`UNTAGGED_BY_RECORD` registers it, and a companion test re-derives that
+declaration from the entry and fails the day a `v0.8.0` tag appears — the
+registry cannot excuse a version the CHANGELOG has not admitted in public.
+
+CI checks out with `fetch-depth: 0`, because the default depth-1 checkout
+brings no tags and the gate would have nothing to read. 742 -> 744 tests.
+
+### Documentation aligned with the code
+
+Both plugin descriptions — the one Claude Code shows at install time
+(`.claude-plugin/plugin.json`) and the marketplace listing
+(`.claude-plugin/marketplace.json`) — read "twelve rules, ten backed by a
+hook", which is what the README's Enforcement column has said since rules 02
+and 05 became text-level discipline graded by the Stop gate.
+
+Both READMEs' "the repo is held to its own rules" section counts **four** CI
+drift gates and lists the demo gate next to the version, doc and i18n ones,
+matching the tests tree, the coverage sentence and `tests/README.md`.
+
+### Also on main since v0.39.0
+
+- `0701dc6` — full-repo documentation sweep after the v0.38.x / v0.39.0 chain
+  (`CHANGELOG.md`, `docs/ARCHITECTURE.md`, `tests/README.md`).
+- `5e4cdb2` — `.gitignore` covers `.ce/` and `.ccm/`: the cc-enforcer index and
+  cc-memory state are machine-local, never content.
+- `643acd5` — README, `commands/checklist.md`, `docs/ARCHITECTURE.md` and
+  `docs/RULES.md` aligned with the code after the 2026-09-02 audit.
+
+The roadmap stays empty by decision, not by neglect — see v0.32.1 for why its
+last two entries were retired rather than carried.
 
 ---
 

@@ -398,7 +398,7 @@ cc-enforcer:
   before: {architecture: ..., root cause: ..., solution: ...}
   edits: [{file: "path:line", what: "..."}]
   convergence:
-    re-trigger: "$ python -m unittest → Ran 742 tests, OK"
+    re-trigger: "$ python -m unittest → Ran 744 tests, OK"
     boundary case: ...
     existing tests: ...
     self-quiz: {really solved: ..., better solution: ..., unverified: ..., verification reasonable: ...}
@@ -548,7 +548,7 @@ alarm costs a turn and erodes trust in the gate. Documented gaps live in the
 rule file rather than being quietly patched.
 
 **The repo is held to its own rules.** Development of cc-enforcer runs under
-cc-enforcer. Three CI drift gates make documentation claims un-drift-able:
+cc-enforcer. Four CI drift gates make documentation claims un-drift-able:
 
 - a **version gate** — every version pointer, the badges in *both* READMEs, and
   the newest CHANGELOG heading pinned to `plugin.json` by a *closed set*
@@ -558,7 +558,11 @@ cc-enforcer. Three CI drift gates make documentation claims un-drift-able:
   file is drift too);
 - an **i18n gate** — every translation structurally matched to the English
   skeleton, including DENY-row token parity, because the zh injection once
-  listed three fewer Bash patterns while file-set and heading checks stayed green.
+  listed three fewer Bash patterns while file-set and heading checks stayed
+  green;
+- a **demo gate** — the before/after images both READMEs embed, re-rendered
+  from the live hooks and compared byte for byte, so a change to any hook's
+  wording fails CI instead of leaving a stale picture on the front page.
 
 **Tech stack:** Python 3.13, standard library only. No dependencies, no build
 step, no lock file. CI: `ubuntu-latest` × `windows-latest`, `fail-fast: false`.
@@ -664,19 +668,19 @@ cc-enforcer/
 │   ├── run_demo.py              #   drives the real hooks, captures both transcripts
 │   ├── render_svg.py            #   transcript -> terminal SVG, zero dependencies
 │   └── out/*.svg                #   the committed images, pinned by tests/test_demo.py
-└── tests/                       # 742 black-box + unit tests (python -m unittest discover tests)
+└── tests/                       # 744 black-box + unit tests (python -m unittest discover tests)
     │                            # each file is named after what it covers — see tests/README.md
     ├── _helpers.py              #   shared run_hook(...) subprocess fixture
     ├── test_<hook>.py           #   black-box subprocess tests, one per hook entry point
     ├── test_<lib|cli>.py        #   unit tests for shared modules and auxiliary scripts
     ├── test_demo.py             #   drift gate: the README's images vs a fresh demo run
-    ├── test_version_sync.py     #   drift gate: every version pointer vs plugin.json
+    ├── test_version_sync.py     #   drift gate: version pointers + release tags
     ├── test_doc_sync.py         #   drift gate: documented counts + inventories vs code
     ├── test_i18n_sync.py        #   drift gate: every translation vs the English skeleton
     └── test_audit_*.py          #   per-audit-round regression suites (v026 x2, v027)
 ```
 
-All scripts are covered by **742 tests** in [`tests/`](tests/) — black-box
+All scripts are covered by **744 tests** in [`tests/`](tests/) — black-box
 subprocess tests that launch each hook exactly as Claude Code does (module-level
 state, stdin, stdout buffering and exit codes all differ when a script is
 imported instead), plus unit tests for the shared models and the four drift
@@ -710,7 +714,9 @@ kept showing the old one as Latest. Walk it, do not recall it:
    **every** `"version"` key in both manifests (a closed set, not a path
    allowlist), the badge in both READMEs, and the newest CHANGELOG release
    heading must equal it. Bump `plugin.json` **first** and let the gate tell
-   you red who has not caught up.
+   you red who has not caught up. It also compares **every** released
+   CHANGELOG heading against `git tag`, so a version whose entry shipped
+   without a tag is named here rather than at the next audit.
 2. Write the `## [X.Y.Z] — date` entry in `CHANGELOG.md`; the gate checks it is
    the newest released heading.
 3. `python hooks/scripts/i18n_check.py` — zero skeleton/translation drift,

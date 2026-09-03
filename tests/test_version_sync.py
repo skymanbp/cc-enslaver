@@ -31,12 +31,24 @@ Design notes
    versions. Only the machine-readable manifests, the README's shields badge
    (which asserts a current fact to the reader) and the CHANGELOG's newest
    *released* heading are pinned.
+4. The newest heading is not the whole claim. Every released heading states
+   that a version shipped, and a version ships as a `v<version>` git tag, so
+   the whole released set is compared against `git tag` rather than
+   `released[0]` alone. v0.38.2 carries a heading, a `release:` commit and a
+   paragraph of the plugin description while `git tag -l v0.38.2` is empty
+   and `gh release view v0.38.2` answers "release not found" — pinning only
+   the newest heading leaves that class invisible to CI for every release
+   after it. A version that ships inside another one says so in its own
+   entry and is registered in UNTAGGED_BY_RECORD, which the entry itself
+   has to back up.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -59,6 +71,75 @@ EXPECTED_VERSION_POINTERS = {
 
 _BADGE_RE = re.compile(r"img\.shields\.io/badge/version-([0-9][^-]*)-")
 _CHANGELOG_HEADING_RE = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
+
+# Versions that ship inside another release and therefore have no tag of
+# their own. This is not a waiver list: `test_untagged_registry_is_backed_
+# by_the_changelog` re-derives the declaration from CHANGELOG.md, so an
+# entry only becomes registrable after it says in public that no separate
+# tag exists — and it must stop being registered the day a tag appears.
+UNTAGGED_BY_RECORD: dict[str, str] = {
+    "0.8.0": "rolled into the v0.9.0 commit before either was tagged",
+}
+
+# What a registered entry has to say, with `*`, backticks and blockquote
+# markers stripped and whitespace collapsed first.
+_NO_TAG_DECLARATION = "no separate v{version} git tag"
+
+
+def _changelog_text() -> str:
+    return CHANGELOG.read_text(encoding="utf-8")
+
+
+def _released_headings(text: str | None = None) -> list[str]:
+    """Every `## [x.y.z]` heading, newest first, minus `[Unreleased]`."""
+    headings = _CHANGELOG_HEADING_RE.findall(
+        _changelog_text() if text is None else text)
+    return [h for h in headings if h.lower() != "unreleased"]
+
+
+def _changelog_entry(version: str) -> str:
+    """The body of `## [version]`, up to the next `## [` heading."""
+    parts = _CHANGELOG_HEADING_RE.split(_changelog_text())
+    for index in range(1, len(parts), 2):
+        if parts[index] == version:
+            return parts[index + 1]
+    return ""
+
+
+def _normalise(text: str) -> str:
+    """Drop markdown emphasis / quoting so a wrapped sentence is one string."""
+    return " ".join(re.sub(r"[*`>]", "", text).split())
+
+
+def _git_tags() -> set[str] | None:
+    """The repository's tag names, or None when git cannot answer here.
+
+    None is reserved for an environment that genuinely holds no answer: no
+    git on PATH, not a work tree (a downloaded tarball), or a shallow clone
+    that was never given the tags. An empty tag set in a full checkout is an
+    answer, and a failing one — CI checks out with `fetch-depth: 0` for
+    exactly that reason.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return None
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [git, "-C", str(REPO_ROOT), *args],
+            capture_output=True, text=True, check=False,
+        )
+
+    work_tree = run("rev-parse", "--is-inside-work-tree")
+    if work_tree.returncode != 0 or work_tree.stdout.strip() != "true":
+        return None
+    shallow = run("rev-parse", "--is-shallow-repository")
+    if shallow.returncode == 0 and shallow.stdout.strip() == "true":
+        return None
+    listing = run("tag", "--list")
+    if listing.returncode != 0:
+        return None
+    return {line.strip() for line in listing.stdout.splitlines() if line.strip()}
 
 
 def _load(path: Path) -> dict:
@@ -149,8 +230,7 @@ class TestVersionSync(unittest.TestCase):
         )
 
     def test_changelog_newest_release_matches_plugin_json(self) -> None:
-        headings = _CHANGELOG_HEADING_RE.findall(CHANGELOG.read_text(encoding="utf-8"))
-        released = [h for h in headings if h.lower() != "unreleased"]
+        released = _released_headings()
         self.assertTrue(released, "CHANGELOG.md has no released version heading")
         self.assertEqual(
             released[0], self.authoritative,
@@ -158,6 +238,82 @@ class TestVersionSync(unittest.TestCase):
             f"{self.authoritative} — a bump without a changelog entry (or an "
             f"entry without a bump)",
         )
+
+
+class TestReleaseTagCoverage(unittest.TestCase):
+    """A released heading is a claim that the version shipped. Check it.
+
+    The version gate above pins the *newest* heading to `plugin.json`, which
+    is the bump-vs-entry question. It says nothing about the sixty headings
+    under it, so a release that got its CHANGELOG entry and its `release:`
+    commit but never got tagged stays green forever. v0.38.2 is that case in
+    this repository, and README's release checklist names the same family
+    (v0.22.1: the tag existed while the GitHub release did not, so the front
+    page kept showing an older version as Latest).
+
+    Scope is deliberately the git tag, not the GitHub release object: a tag
+    is answerable offline from the checkout CI already has, while the
+    release object needs the network and a token. The release checklist owns
+    the second half.
+    """
+
+    def test_every_released_heading_has_a_git_tag(self) -> None:
+        tags = _git_tags()
+        if tags is None:
+            self.skipTest(
+                "no git tags available here (no git, not a work tree, or a "
+                "shallow clone) — this gate needs the tag list to answer"
+            )
+        missing = [
+            version for version in _released_headings()
+            if f"v{version}" not in tags and version not in UNTAGGED_BY_RECORD
+        ]
+        self.assertEqual(
+            missing, [],
+            f"released CHANGELOG headings with no git tag: {missing}. The "
+            f"entry says the version shipped; without `v<version>` there is "
+            f"nothing to install at that point in history, `gh release view` "
+            f"answers 'release not found', and the repository front page "
+            f"keeps naming an older version as Latest. Fix it forwards — tag "
+            f"the release commit (`git tag -a v<version> <commit>`, push it, "
+            f"create the release). If the version shipped inside another one, "
+            f"say so in its CHANGELOG entry and register it in "
+            f"UNTAGGED_BY_RECORD. Deleting the heading to go green removes "
+            f"the record instead of the gap.",
+        )
+
+    def test_untagged_registry_is_backed_by_the_changelog(self) -> None:
+        """Registering a version requires the entry to declare it, and no tag.
+
+        Both halves matter. Without the first, the registry is a mute
+        allowlist anyone can grow; without the second, a version stays
+        excused after it is finally tagged, and the gate quietly shrinks by
+        one every time somebody forgets to unregister.
+        """
+        tags = _git_tags()
+        for version in sorted(UNTAGGED_BY_RECORD):
+            with self.subTest(version=version):
+                self.assertIn(
+                    version, _released_headings(),
+                    f"UNTAGGED_BY_RECORD registers {version}, which has no "
+                    f"CHANGELOG heading — a stale registration excuses "
+                    f"nothing and hides that it is stale",
+                )
+                declaration = _NO_TAG_DECLARATION.format(version=version)
+                self.assertIn(
+                    declaration, _normalise(_changelog_entry(version)),
+                    f"the [{version}] entry does not say "
+                    f"'{declaration}'. A version is only excused from the "
+                    f"tag gate by admitting the gap where readers see it, "
+                    f"not by an entry in this file.",
+                )
+                if tags is not None:
+                    self.assertNotIn(
+                        f"v{version}", tags,
+                        f"v{version} is tagged, so it no longer belongs in "
+                        f"UNTAGGED_BY_RECORD — unregister it and let the "
+                        f"gate cover it like every other release",
+                    )
 
 
 if __name__ == "__main__":
